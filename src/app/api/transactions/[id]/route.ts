@@ -6,6 +6,8 @@ import {
   setTransactionRecurringExcluded,
   startPlanKey,
   setTransactionRecurringIncluded,
+  confirmPlan,
+  planTookCharge,
   setTransactionExcluded,
   setTransactionNote,
 } from "@/lib/queries";
@@ -47,6 +49,7 @@ export async function PATCH(
     if (!key) return NextResponse.json({ error: "This charge can't start a plan" }, { status: 400 });
     setTransactionRecurringIncluded(Number(id), key);
     detectRecurrings();
+    confirmPlan(key); // the user started it: it is theirs
     return NextResponse.json({ ok: true, plan: key });
   }
 
@@ -68,6 +71,7 @@ export async function PATCH(
     if (row?.recurringId != null) return NextResponse.json({ ok: true, pinned: false });
     setTransactionRecurringIncluded(Number(id), plan);
     detectRecurrings();
+    planTookCharge(plan, Number(id));
     return NextResponse.json({ ok: true, pinned: true });
   }
 

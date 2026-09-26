@@ -279,6 +279,28 @@ export function unconfirmPlan(key: string) {
   db.prepare("DELETE FROM plan_charges WHERE key = ?").run(key);
 }
 
+// "Not recurring" on a plan un-confirms that plan; on a vendor, every plan of
+// it (a muted vendor's confirmed plans would otherwise keep their charges).
+export function unconfirmPlansFor(merchant: string) {
+  const db = getDb();
+  const keys = isSeriesKey(merchant)
+    ? [merchant]
+    : (db.prepare("SELECT key FROM plans WHERE vendor = ?").all(canonicalMerchant(merchant, getMerchantLinks())) as { key: string }[]).map((r) => r.key);
+  for (const k of keys) unconfirmPlan(k);
+}
+
+// The user put a charge in a plan: that confirms it. When the charge is the
+// plan's newest, the plan follows it to its price (a rise's first charge), so
+// next month's charge at the new price joins on its own.
+export function planTookCharge(key: string, txId: number) {
+  if (!confirmPlan(key)) return;
+  const db = getDb();
+  const t = db
+    .prepare("SELECT COALESCE(effectiveDate, date) AS date, amount FROM transactions WHERE id = ?")
+    .get(txId) as { date: string; amount: number } | undefined;
+  if (t) db.prepare("UPDATE plans SET amount = ? WHERE key = ? AND anchorDate <= ?").run(t.amount, key, t.date);
+}
+
 // Merchant strings to match for a text search: every descriptor of any vendor
 // whose own name, original bank descriptor (rawMerchant), canonical name, or
 // user alias contains the query — then expanded across linked variants so a
@@ -1022,7 +1044,12 @@ export function merchantSummary(merchant: string, series?: string | null) {
            ORDER BY lastDate DESC`
         )
         .all(...variants) as { id: number; merchant: string; cadence: string; avgAmount: number; lastDate: string }[]);
+  const planDay = new Map((db.prepare("SELECT key, day FROM plans").all() as { key: string; day: number | null }[]).map((p) => [p.key, p.day]));
   const dayNum = (merchant: string, lastDate: string) => {
+    // A confirmed plan keeps its key when its bill moves ("· 25th" billing
+    // the 27th): its own day, not the key's, is the one it bills.
+    const firm = planDay.get(merchant);
+    if (firm != null) return firm;
     // The key carries the day when the detector split on it ("· 26th").
     // A plan that kept the vendor's name, or was split on an amount both
     // plans share ("· $11.99"), is told apart by the day it last billed.
@@ -1236,6 +1263,9 @@ export function applyRecategorize(
   ).n;
   if (plans > 1 && recurringId != null) {
     setSeriesCategory(recurringId, categoryId);
+    // A category set on one plan is the user's word on it: confirm it.
+    const key = db.prepare("SELECT merchant FROM recurrings WHERE id = ?").get(recurringId) as { merchant: string } | undefined;
+    if (key) confirmPlan(key.merchant);
     return "plan";
   }
   if (!force && plansDisagree(variants)) return "refused";
@@ -1333,9 +1363,13 @@ export function recurringsForMonth(month: string): RecurringForMonth[] {
   const dedupeLinks = getMerchantLinks();
   // Split series ("Netflix · 23rd" / "Netflix · 26th") are distinct bills by
   // construction and never fold.
+  // Nor does a confirmed plan: the user said it is a bill of its own.
+  const firmKeys = new Set((db.prepare("SELECT key FROM plans").all() as { key: string }[]).map((p) => p.key));
   const sameVendor = (a: string, b: string) =>
     !isSeriesKey(a) &&
     !isSeriesKey(b) &&
+    !firmKeys.has(a) &&
+    !firmKeys.has(b) &&
     (canonicalMerchant(a, dedupeLinks) === canonicalMerchant(b, dedupeLinks) ||
       (merchantKey(a) !== "" && merchantKey(a) === merchantKey(b)));
   // A fold MERGES the clone into the face: the face keeps its key (settings,

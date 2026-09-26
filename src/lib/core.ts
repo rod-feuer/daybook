@@ -850,9 +850,12 @@ function rebuildRecurrings(): Recurring[] {
   // at one amount the nearest day decides, and a plan without a charge yet
   // that month is preferred, so a late posting doesn't land in the plan
   // already paid. Only the charges left over are planned by the rules below.
-  const confirmed = db
-    .prepare("SELECT key, vendor, amount, cadence, anchorDate FROM plans")
-    .all() as { key: string; vendor: string; amount: number; cadence: Recurring["cadence"]; anchorDate: string }[];
+  // A cadence the user set on the plan is its rhythm for the day window too.
+  const confirmed = (
+    db
+      .prepare("SELECT key, vendor, amount, cadence, anchorDate FROM plans")
+      .all() as { key: string; vendor: string; amount: number; cadence: Recurring["cadence"]; anchorDate: string }[]
+  ).map((p) => ({ ...p, cadence: (settings[p.key]?.cadence as Recurring["cadence"] | null | undefined) ?? p.cadence }));
   const members = new Map(
     (db.prepare("SELECT hash, key FROM plan_charges").all() as { hash: string; key: string }[]).map((m) => [m.hash, m.key])
   );

@@ -16,6 +16,8 @@ import {
   applyRecategorize,
   confirmPlan,
   unconfirmPlan,
+  unconfirmPlansFor,
+  planTookCharge,
   categoriesWithTotals,
   setRecurringSetting,
   setTransactionRecurringExcluded,
@@ -2915,4 +2917,73 @@ test("another descriptor's plan keeps its name beside a confirmed plan", () => {
   confirmPlan(before.find((k) => k.startsWith("Tube Tv ·"))!);
   const after = detectRecurrings().map((r) => r.merchant).filter((k) => k.startsWith("Tube Tv")).sort();
   assert.deepEqual(after, before);
+});
+
+// WHY: when a bill's price rises, its first charge at the new price is outside
+// the plan's amount, so the owner puts it in by hand. That pin must move the
+// plan to the new price, or every later charge needs a pin too.
+test("putting a charge in a plan confirms it and moves it to the charge's price", () => {
+  const v = "Ben Raise";
+  for (const m of ["01", "02", "03", "04", "05", "06"]) {
+    tx(v, { amount: -11.99, date: `2026-${m}-08` });
+    tx(v, { amount: -11.99, date: `2026-${m}-25` });
+  }
+  detectRecurrings();
+  const key = `${v} · 25th`;
+  confirmPlan(key); // named months ago, at $11.99
+  tx(v, { amount: -12.99, date: "2026-07-25" });
+  detectRecurrings();
+  setTransactionRecurringIncluded(idOn(v, "2026-07-25"), key);
+  detectRecurrings();
+  planTookCharge(key, idOn(v, "2026-07-25"));
+  assert.equal((getDb().prepare("SELECT amount FROM plans WHERE key = ?").get(key) as { amount: number }).amount, -12.99);
+  tx(v, { amount: -12.99, date: "2026-08-25" });
+  detectRecurrings();
+  assert.equal(planOf(v, "2026-08-25"), key, "August's charge at the new price joins without a pin");
+  assert.equal(planOf(v, "2026-06-25"), key, "and the plan keeps its history");
+});
+
+// WHY: "Not recurring" and "Reset all" hand a plan back to the detector. A
+// muted vendor whose confirmed plans stayed confirmed would keep claiming
+// charges the user said are not a bill.
+test("not recurring un-confirms a plan, or every plan of a vendor", () => {
+  const ins = getDb().prepare("INSERT INTO plans (key, vendor, amount, day, cadence, anchorDate) VALUES (?, ?, -10, 1, 'monthly', '2026-06-01')");
+  for (const k of ["Mute Co · 1st", "Mute Co · 15th", "Other Co · 3rd"]) ins.run(k, k.split(" · ")[0]);
+  const keys = () => (getDb().prepare("SELECT key FROM plans ORDER BY key").all() as { key: string }[]).map((r) => r.key);
+  unconfirmPlansFor("Mute Co · 15th");
+  assert.deepEqual(keys(), ["Mute Co · 1st", "Other Co · 3rd"], "one plan muted: that plan");
+  unconfirmPlansFor("Mute Co");
+  assert.deepEqual(keys(), ["Other Co · 3rd"], "the vendor muted: all of its plans");
+});
+
+// WHY: setting a category on one plan is the owner's word on it, so the plan
+// is confirmed; a confirmed plan whose bill moved day shows the day it bills
+// now, not the one in its key; and the Recurrings page never folds a
+// confirmed plan into a look-alike.
+test("a per-plan category confirms it; its day and its row stay its own", () => {
+  const home = addCat("Home (firm)");
+  const v = "Ben Firm";
+  for (const m of ["01", "02", "03", "04", "05", "06"]) {
+    tx(v, { amount: -11.99, date: `2026-${m}-08` });
+    tx(v, { amount: -11.99, date: `2026-${m}-25` });
+  }
+  detectRecurrings();
+  const id = (getDb().prepare("SELECT id FROM recurrings WHERE merchant = ?").get(`${v} · 25th`) as { id: number }).id;
+  assert.equal(applyRecategorize(v, home, id), "plan");
+  assert.notEqual(getDb().prepare("SELECT 1 FROM plans WHERE key = ?").get(`${v} · 25th`), undefined, "confirmed");
+  tx(v, { amount: -11.99, date: "2026-07-27" });
+  detectRecurrings();
+  const day = merchantSummary(v).planList.find((p) => p.key === `${v} · 25th`)!.day;
+  assert.equal(day, "27th", "the day it bills now");
+
+  // Two bare plans a fold would take for one vendor's clones.
+  for (const m of ["03", "04", "05", "06"]) {
+    tx("Clone Co", { amount: -30, date: `2026-${m}-10`, categoryId: home });
+    tx("Clone Co Pl", { amount: -30, date: `2026-${m}-12`, categoryId: home });
+  }
+  detectRecurrings();
+  const faces = () => recurringsForMonth("2026-06").filter((r) => r.merchant.startsWith("Clone Co")).length;
+  assert.equal(faces(), 1, "fixture: unconfirmed, they fold into one face");
+  getDb().prepare("INSERT INTO plans (key, vendor, amount, day, cadence, anchorDate) VALUES ('Clone Co', 'Clone Co', -30, 10, 'monthly', '2026-06-10')").run();
+  assert.equal(faces(), 2, "a confirmed plan is a bill of its own");
 });

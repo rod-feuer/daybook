@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   setRecurringSetting,
   resetRecurringOverrides,
+  confirmPlan,
+  unconfirmPlan,
   getMerchantLinks,
   canonicalMerchant,
   getRecurringSettings,
@@ -57,6 +59,7 @@ export async function POST(req: NextRequest) {
 
   if (body.clear) {
     resetRecurringOverrides(merchant);
+    unconfirmPlan(merchant); // Reset all: the plan is the detector's again
     return NextResponse.json({ ok: true });
   }
 
@@ -87,5 +90,8 @@ export async function POST(req: NextRequest) {
   }
 
   setRecurringSetting(merchant, patch);
+  // Setting anything on a plan confirms it, so what was set stays on it when
+  // the bill moves day or price.
+  if (Object.values(patch).some((v) => v != null)) confirmPlan(merchant);
   return NextResponse.json({ ok: true });
 }
