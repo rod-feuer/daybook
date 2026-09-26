@@ -1318,6 +1318,36 @@ async function mixedVendorCategory(browser) {
   });
 }
 
+// 8b: ↻ means "in a plan that counts". A plan the detector found and nobody
+// added doesn't count, so its charges show no ↻; its vendor shelf says it's a
+// suggested plan and offers Add, and once added the ↻ appears.
+async function suggestedPlanShelf(browser) {
+  await withPage(browser, async (page) => {
+    const rows = ["Date,Name,Amount,Account", ...[3, 2, 1, 0].map((m) => `${day(-m, 9)},Northwind Studio,-45.00,Credit`)].join("\n");
+    await fetch(BASE + "/api/import", { method: "POST", body: rows });
+    await fetch(BASE + "/api/recompute", { method: "POST" });
+    // The plain list (a search), where a row shows its name line and ↻.
+    const glyphs = async () => {
+      await page.goto(BASE + "/transactions?q=Northwind%20Studio", { waitUntil: "networkidle2" });
+      await page.waitForSelector("[data-drawer-row]");
+      return page.$$eval("[data-drawer-row]", (rs) => rs.filter((r) => r.querySelector("[data-recurring='in']")).length);
+    };
+    const counts = async () => (await (await fetch(`${BASE}/api/recurrings?month=${day(0, 1).slice(0, 7)}`)).json()).some((r) => r.vendor === "Northwind Studio");
+    const glyphBefore = await glyphs();
+    const countedBefore = await counts();
+    await page.click("[data-drawer-row]");
+    await page.waitForSelector(`${shelfSel} [data-open-vendor]`);
+    await page.click(`${shelfSel} [data-open-vendor]`);
+    const suggested = await page.waitForSelector(`${shelfSel} [data-suggested-plan]`, { timeout: 8000 }).then(() => true).catch(() => false);
+    const add = await page.$(`${shelfSel} [data-add-plan]`);
+    if (add) await add.click();
+    await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-suggested-plan]`), { timeout: 8000 }, shelfSel).catch(() => {});
+    const countedAfter = await counts();
+    const glyphAfter = await glyphs();
+    record("suggested plan", "a waiting plan's charges show no ↻; its shelf offers Add, and after Add they do", glyphBefore === 0 && !countedBefore && suggested && !!add && countedAfter && glyphAfter >= 4, `↻ before ${glyphBefore}, counted ${countedBefore}; suggested caption ${suggested}; Add ${!!add}; counted after ${countedAfter}, ↻ after ${glyphAfter}`);
+  });
+}
+
 async function moneyColour(browser) {
   // The colour of the amount in the row that names `who`, on the current page.
   const colourOf = (page, who) => page.evaluate((who) => {
@@ -1778,7 +1808,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

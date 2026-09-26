@@ -2353,7 +2353,7 @@ test("a charge takes its plan's name when the user named the plan", () => {
     tx(v, { amount: -200, date: `2026-${m}-18`, categoryId: CAT, hash: `h200-${m}` });
     tx(v, { amount: -300, date: `2026-${m}-18`, categoryId: CAT, hash: `h300-${m}` });
   }
-  const plans = detectRecurrings().filter((r) => r.merchant.startsWith(v)).map((r) => r.merchant).sort();
+  const plans = detectAndConfirm().filter((r) => r.merchant.startsWith(v)).map((r) => r.merchant).sort();
   assert.deepEqual(plans, [`${v} · $200`, `${v} · $300`], "fixture: two plans under one descriptor");
   setRecurringSetting(`${v} · $200`, { alias: "529 Contribution - Henry" } as never);
 
@@ -2379,7 +2379,7 @@ test("a charge takes its plan's name when the user named the plan", () => {
 
   // a charge the user took out of the plan is no longer that plan's
   setTransactionRecurringExcluded(id("h200-09"), true);
-  detectRecurrings();
+  detectAndConfirm();
   assert.equal(transactionById(id("h200-09"))!.displayName, v);
 
   // The statement lists every charge of the vendor. Naming it from the newest
@@ -3131,4 +3131,27 @@ test("a vendor whose charges sit in two categories reads as mixed until one chan
   assert.equal(merchantSummary("Get Go Mix").chargeCategoriesMixed, true);
   assert.equal(applyRecategorize("Get Go Mix", cars, null), "vendor");
   assert.equal(merchantSummary("Get Go Mix").chargeCategoriesMixed, false, "one pick, every charge");
+});
+
+// WHY: ↻ means "in a plan that counts". A plan the detector found and nobody
+// added doesn't count, so its charges must not wear ↻ or read "In plan":
+// they'd claim a bill the Recurrings page doesn't show. The shelves say it's
+// a suggested plan, and adding it turns them into the plan's charges.
+test("a waiting plan's charges show no plan until it is added", () => {
+  for (const back of [92, 61, 30, 0]) tx("Northwind Gym", { amount: -45, date: daysAgo(back) });
+  detectRecurrings();
+  const row = () => listTransactions({ vendor: "Northwind Gym" })[0];
+  const charge = () => transactionById(row().id)!;
+  assert.equal(row().recurringId, null, "the Transactions row: no ↻");
+  assert.equal(charge().recurringId, null, "the charge shelf: Not in plan");
+  assert.equal(charge().planKey, "Northwind Gym", "but it knows the plan it would join");
+  assert.equal(charge().planConfirmed, false);
+  assert.equal(merchantSummary("Northwind Gym").planConfirmed, false, "the vendor shelf offers Add");
+  assert.equal(merchantSummary("Northwind Gym").recent.every((r) => r.recurringId == null), true);
+
+  confirmPlan("Northwind Gym"); // Add
+  assert.notEqual(row().recurringId, null, "added: ↻");
+  assert.equal(charge().planConfirmed, true);
+  assert.notEqual(charge().recurringId, null, "In plan");
+  assert.equal(merchantSummary("Northwind Gym").planConfirmed, true);
 });

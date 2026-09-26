@@ -126,6 +126,9 @@ export function ChargeBody({
               onToggle={() => onSetMembership(data.recurringId != null ? "out" : "in")}
             />
             <span className="truncate">{data.planName}</span>
+            {/* The detector found this plan; it counts once the user adds it
+                (In plan here, or Add on the vendor's shelf or the queue). */}
+            {!data.planConfirmed && <span className="whitespace-nowrap">· suggested, not counted yet</span>}
           </span>
         )}
         {/* No plan to be in: the vendor's own pill, "Not recurring", makes
@@ -137,7 +140,7 @@ export function ChargeBody({
         {/* A subscription the detector can't see (two amounts on one day, too
             few charges yet): the user's word makes the plan, from this charge's
             amount; the vendor's other charges at that amount join it. */}
-        {!excluded && !isParent && data.recurringId == null && (
+        {!excluded && !isParent && data.recurringId == null && (!data.planKey || data.planConfirmed) && (
           <button onClick={onStartPlan} className="btn-link" data-start-plan>
             Start a plan →
           </button>

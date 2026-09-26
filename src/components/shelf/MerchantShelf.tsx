@@ -495,6 +495,7 @@ export function MerchantBody({
   onRecategorize,
   onTxSetMembership,
   onToggleRecurring,
+  onAddPlan,
   onSaveSettings,
   amountHint,
   vendors,
@@ -507,6 +508,7 @@ export function MerchantBody({
   onRecategorize: (categoryId: number | null) => void;
   onTxSetMembership: (txId: number, put: "in" | "out", plan: string | null) => void;
   onToggleRecurring: () => void;
+  onAddPlan: () => void; // a plan the detector found, not yet counted
   onSaveSettings: (patch: SettingsPatch, success?: string) => void; // a success line only where the result spans every field ("Overrides reset")
   amountHint?: number | null;
   vendors: Vendor[];
@@ -873,13 +875,25 @@ export function MerchantBody({
           </Tooltip>
         )}
         {data.splitRules.length > 0 && <SplitRules rules={data.splitRules} onRemove={onRemoveSplit} />}
+        {/* A plan the detector found and nobody added doesn't count yet: its
+            charges show no ↻, and Add is the one verb that changes that. */}
+        {data.recurring && !multi && !data.planConfirmed && (
+          <p data-suggested-plan className="text-xs text-[var(--muted)]">
+            Suggested plan, not counted yet. Add it to count it as a bill; Not recurring dismisses it.
+          </p>
+        )}
         {/* One actions row, one style: the §2 verbs. Combine is a disclosure —
             its panel drops below the row only while in use. */}
         <div className="flex gap-2">
           <button onClick={onToggleRecurring} className="btn-ghost flex-1 text-xs">
             {data.recurring ? "Not recurring" : "Make recurring"}
           </button>
-          {data.recurring && !multi &&
+          {data.recurring && !multi && !data.planConfirmed && (
+            <button onClick={onAddPlan} className="btn-ghost flex-1 text-xs" data-add-plan>
+              Add
+            </button>
+          )}
+          {data.recurring && !multi && data.planConfirmed &&
             (data.ended ? (
               <button
                 onClick={() => onSaveSettings({ endedDate: null })}
