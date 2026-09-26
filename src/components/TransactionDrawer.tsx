@@ -330,6 +330,12 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     if (target?.kind !== "merchant" || !mData) return;
     return setRecurring(mData.settingsKey ?? target.merchant, !mData.recurring);
   }
+  // Add a plan the detector found: it counts from now on. The shelf shows it.
+  function addPlan() {
+    if (!mData?.planKey) return;
+    const key = mData.planKey;
+    return write(() => postJson("/api/recurrings/confirm", { key }), { error: UPDATE_ERROR });
+  }
 
   // The charge's own overlays. Each is one PATCH on the charge. No success
   // toast: the card, caption or button you touched shows the result.
@@ -486,6 +492,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 onRecategorize={recategorize}
                 onTxSetMembership={txSetMembership}
                 onToggleRecurring={toggleRecurring}
+                onAddPlan={addPlan}
                 onSaveSettings={saveMerchantSettings}
                 amountHint={amountHint}
                 vendors={vendors}

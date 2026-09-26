@@ -64,10 +64,14 @@ export async function PATCH(
     }
     setTransactionRecurringExcluded(Number(id), false);
     detectRecurrings();
-    const row = getDb().prepare("SELECT recurringId FROM transactions WHERE id = ?").get(Number(id)) as
-      | { recurringId: number | null }
-      | undefined;
-    if (row?.recurringId != null) return NextResponse.json({ ok: true, pinned: false });
+    const row = getDb()
+      .prepare("SELECT r.merchant AS key FROM transactions t JOIN recurrings r ON r.id = t.recurringId WHERE t.id = ?")
+      .get(Number(id)) as { key: string } | undefined;
+    if (row) {
+      // Already in a plan the detector found: "In plan" is the user adding it.
+      confirmPlan(row.key);
+      return NextResponse.json({ ok: true, pinned: false });
+    }
     setTransactionRecurringIncluded(Number(id), plan);
     detectRecurrings();
     confirmPlan(plan); // the user put a charge in it: it is theirs

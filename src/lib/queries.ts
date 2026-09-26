@@ -454,7 +454,7 @@ export function listTransactions(
     params.__off = opts.offset ?? 0;
   }
   const sql = `
-    SELECT t.*, c.name AS categoryName, c.color AS categoryColor, c.icon AS categoryIcon,
+    SELECT t.*, ${countedPlanId("t")} AS recurringId, c.name AS categoryName, c.color AS categoryColor, c.icon AS categoryIcon,
            COALESCE(c.excludeFromTotals, 0) AS categoryExcluded,
            (t.hash IN (SELECT hash FROM recurring_tx_exclusions)) AS recurringExcluded,
            (SELECT COUNT(*) FROM transactions s WHERE s.hash LIKE t.hash || ':s%') AS splitParts
@@ -498,6 +498,7 @@ function spendByYear(scope: string, args: (string | number)[]): { year: string; 
 export type ChargeDetail = TransactionRow & {
   recurringIncluded: 0 | 1;
   planKey: string | null;
+  planConfirmed: boolean;
   planName: string | null;
   // The last few charges that answer "is this amount the usual one?". One
   // plan under the vendor: every descriptor. Several plans: only this plan,
@@ -542,6 +543,7 @@ export function transactionById(id: number): ChargeDetail | null {
          ORDER BY lastDate DESC LIMIT 1`
       )
       .get(...variants) as { merchant: string } | undefined);
+  const planConfirmed = !!plan && !!db.prepare("SELECT 1 FROM plans WHERE key = ?").get(plan.merchant);
   const notParent = "NOT EXISTS (SELECT 1 FROM transactions s WHERE s.hash LIKE t.hash || ':s%')";
   // A vendor with several plans: this charge's list is its plan. The other
   // plan, and charges in no plan, stay on the vendor shelf.
@@ -558,7 +560,7 @@ export function transactionById(id: number): ChargeDetail | null {
   const scopeArgs: (string | number)[] = scopedToPlan ? [...variants, row.recurringId as number] : [...variants];
   const recent = db
     .prepare(
-      `SELECT t.id, COALESCE(t.effectiveDate, t.date) AS date, t.amount, t.excluded, t.recurringId
+      `SELECT t.id, COALESCE(t.effectiveDate, t.date) AS date, t.amount, t.excluded, ${countedPlanId("t")} AS recurringId
        FROM transactions t WHERE ${scopeSql} AND ${notParent}
        ORDER BY COALESCE(t.effectiveDate, t.date) DESC, t.id DESC LIMIT 5`
     )
@@ -571,6 +573,10 @@ export function transactionById(id: number): ChargeDetail | null {
     displayName: chargeDisplayName(row, settings, links, planNames(settings)),
     planKey: plan?.merchant ?? null,
     planName: plan ? (settings[plan.merchant]?.alias ?? displayMerchant(plan.merchant)) : null,
+    // A plan the detector found and nobody added doesn't count: its charge
+    // shows no ↻ and reads "Not in plan" until the plan is added.
+    planConfirmed: planConfirmed,
+    recurringId: planConfirmed ? row.recurringId : null,
     recent,
     scopedToPlan,
     vendorCount,
@@ -888,7 +894,7 @@ export function merchantSummary(merchant: string, series?: string | null) {
     .prepare(
       `SELECT t.id, COALESCE(t.effectiveDate, t.date) AS date, t.merchant, t.amount, t.account, t.excluded,
          COALESCE(c.excludeFromTotals, 0) AS categoryExcluded, c.name AS categoryName,
-         t.categoryId, t.recurringId,
+         t.categoryId, ${countedPlanId("t")} AS recurringId,
          (t.hash IN (SELECT hash FROM recurring_tx_exclusions)) AS recurringExcluded,
          (t.hash IN (SELECT hash FROM recurring_tx_inclusions)) AS recurringIncluded
        FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
@@ -1101,7 +1107,7 @@ export function merchantSummary(merchant: string, series?: string | null) {
           .prepare(
             `SELECT t.id, COALESCE(t.effectiveDate, t.date) AS date, t.merchant, t.amount, t.account, t.excluded,
                COALESCE(c.excludeFromTotals, 0) AS categoryExcluded, c.name AS categoryName,
-               t.categoryId, t.recurringId,
+               t.categoryId, ${countedPlanId("t")} AS recurringId,
                (t.hash IN (SELECT hash FROM recurring_tx_exclusions)) AS recurringExcluded,
                (t.hash IN (SELECT hash FROM recurring_tx_inclusions)) AS recurringIncluded
              FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
@@ -1119,6 +1125,8 @@ export function merchantSummary(merchant: string, series?: string | null) {
     series: seriesRow ? (series as string) : null, // the plan this summary is scoped to, if any
     seriesId,
     planKey: rec?.merchant ?? null, // the plan a charge on this shelf is put into
+    // Found by the detector, not added: it doesn't count yet (the shelf offers Add).
+    planConfirmed: rec != null && !!db.prepare("SELECT 1 FROM plans WHERE key = ?").get(rec.merchant),
 
     settingsKey, // where alias / expected / cadence / ended / match live for this shelf
     plans,
@@ -2173,7 +2181,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   const links = getMerchantLinks();
   const txns = db
     .prepare(
-      `SELECT id, COALESCE(effectiveDate, date) AS date, merchant, amount, account, recurringId, excluded,
+      `SELECT id, COALESCE(effectiveDate, date) AS date, merchant, amount, account, ${countedPlanId("transactions")} AS recurringId, excluded,
               (hash IN (SELECT hash FROM recurring_tx_exclusions)) AS recurringExcluded
        FROM transactions
        WHERE categoryId = ? AND substr(COALESCE(effectiveDate, date),1,7) = ?

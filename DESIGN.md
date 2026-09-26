@@ -97,12 +97,14 @@ and §3 carry over unchanged.
   deposit; a vendor may carry several). Plain verbs the user owns, and no
   others: **In plan / Not in plan** (one toggle on a charge; an "edited" tag
   says the user decided, no tag means the detector did; in a list row the ↻
-  glyph means "in a plan" and nothing else, so a charge taken out shows no
+  glyph means "in a plan that counts" and nothing else, so a charge taken out shows no
   glyph rather than a struck one), **Mark ended /
   Reactivate** (a plan stopped, or is back), **Not recurring** (never was a
   pattern: drop the plan), **Start a plan** (on a charge in no plan: this is
   a subscription the detector can't see; a plan from its amount, which the
-  vendor's other charges at that amount join), **Combine / Separate** (bank
+  vendor's other charges at that amount join), **Add** (a plan the detector
+  found: it counts, and its charges carry ↻, only once added, from the
+  suggestions queue or its shelf), **Combine / Separate** (bank
   names that are one vendor). **Exclude from totals** and **split** are money verbs and live on
   the Transactions tab; the shelf only shows "not counted". Never "series",
   "excluded", "not detected" or "configure" in the UI. *(Teach, One-pattern)*
