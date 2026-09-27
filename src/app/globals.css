@@ -148,3 +148,16 @@ body {
   border-radius: 6px;
   border: 2px solid var(--background);
 }
+
+/* Less motion when the system asks for it (DESIGN.md §1, Reach): transitions
+   and animations settle at once. The dashboard's chart reads the same query. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
