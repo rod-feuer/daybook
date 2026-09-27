@@ -67,10 +67,12 @@ body {
   .nav-link {
     @apply flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--foreground)];
   }
-  /* Current page: foreground on the hover wash. The accent stays on the
-     budget bar and the one filled button, not on the nav. */
+  /* Current page: foreground on the hover wash, in 600 with a rule down its
+     left edge. The wash alone was also what hover showed, so hovering another
+     page lit two rows. The accent stays on the budget bar and the one filled
+     button, not on the nav. */
   .nav-link-active {
-    @apply bg-[var(--hover)] text-[var(--foreground)] hover:bg-[var(--hover)] hover:text-[var(--foreground)];
+    @apply bg-[var(--hover)] font-semibold text-[var(--foreground)] shadow-[inset_2px_0_0_var(--foreground)] hover:bg-[var(--hover)] hover:text-[var(--foreground)];
   }
   /* Three button tiers (DESIGN.md §2): primary — accent fill, at most one per
      page; secondary (btn-ghost) — bordered; link (btn-link) — text with an

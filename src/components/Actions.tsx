@@ -15,23 +15,40 @@ export function MonthPicker({
   allowAll?: boolean;
 }) {
   if (months.length === 0) return null;
+  // The month is the page's frame (the summary card no longer repeats it), so
+  // it reads in full and steps with ‹ ›: the norm for a month you move through
+  // one at a time. The select stays for jumping far. `months` is newest first;
+  // "All months" (Transactions) has no neighbours, so the arrows rest.
+  const i = months.indexOf(value);
+  const older = i >= 0 ? months[i + 1] : undefined;
+  const newer = i > 0 ? months[i - 1] : undefined;
+  const step = "btn-ghost tap px-2 disabled:opacity-40";
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="btn-ghost select-caret cursor-pointer appearance-none py-2 pr-6"
-    >
-      {allowAll && <option value="">All months</option>}
-      {months.map((m) => (
-        <option key={m} value={m}>
-          {new Date(m + "-01T00:00:00Z").toLocaleDateString("en-US", {
-            month: "short",
-            year: "numeric",
-            timeZone: "UTC",
-          })}
-        </option>
-      ))}
-    </select>
+    <div className="inline-flex items-center gap-1" data-month-picker>
+      <button type="button" className={step} aria-label="Previous month" disabled={!older} onClick={() => older && onChange(older)}>
+        ‹
+      </button>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label="Month"
+        className="btn-ghost select-caret tap-native cursor-pointer appearance-none py-2 pr-6"
+      >
+        {allowAll && <option value="">All months</option>}
+        {months.map((m) => (
+          <option key={m} value={m}>
+            {new Date(m + "-01T00:00:00Z").toLocaleDateString("en-US", {
+              month: "long",
+              year: "numeric",
+              timeZone: "UTC",
+            })}
+          </option>
+        ))}
+      </select>
+      <button type="button" className={step} aria-label="Next month" disabled={!newer} onClick={() => newer && onChange(newer)}>
+        ›
+      </button>
+    </div>
   );
 }
 

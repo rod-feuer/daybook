@@ -14,16 +14,17 @@ export default function SignOut({ variant }: { variant: "sidebar" | "tab" }) {
   if (variant === "tab")
     return (
       // iOS Chrome tags forms, not only fields, for autofill (__gcruniqueid)
-      // before React starts; see SearchBox. Icon only: a "Sign out" label
-      // read as a fifth tab beside the four pages.
+      // before React starts; see SearchBox. A narrow cell past the hairline:
+      // labelled, so it says what it does, but not a fifth page tab.
       <form suppressHydrationWarning method="post" action="/api/logout" className="flex">
         <button
           suppressHydrationWarning
           type="submit"
           aria-label="Sign out"
-          className="btn-ghost tap"
+          className="tap flex w-12 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
         >
           {icon}
+          <span aria-hidden>Sign out</span>
         </button>
       </form>
     );
