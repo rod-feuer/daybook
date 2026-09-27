@@ -2130,6 +2130,7 @@ export type CategorySummary = {
   // The budget as entered, and the suggestion for an empty one: the shelf edits
   // it with the Categories page's field, so both offer the same "Use $X".
   budgetEntry: { amount: number | null; period: BudgetPeriod; suggested: number; suggestedAnnual: number };
+  recurringMonthly: number; // the plans' monthly cost, the same figure the Categories row shows
   upcoming: { merchant: string; displayName: string; dueDate: string; amount: number }[];
   transactions: {
     id: number;
@@ -2244,6 +2245,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
       const c = categoriesWithTotals(month).find((x) => x.id === cat.id);
       return { amount: c?.budget ?? null, period: c?.budgetPeriod ?? "monthly", suggested: c?.suggestedBudget ?? 0, suggestedAnnual: c?.suggestedAnnualBudget ?? 0 };
     })(),
+    recurringMonthly: Number((recurringMonthlyByCategory()[cat.id] ?? 0).toFixed(2)),
     upcoming,
     transactions: txns.map((t) => ({
       ...t,

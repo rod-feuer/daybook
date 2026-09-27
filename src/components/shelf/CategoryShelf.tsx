@@ -88,6 +88,16 @@ export function CategoryBody({
             {remaining >= 0 ? `${usd(remaining, { cents: false })} left` : `${usd(-remaining, { cents: false })} over`}
           </span>
         )}
+        {/* The plans' monthly cost, as on the Categories row: what of the
+            budget is already spoken for. Warn when it alone exceeds it. */}
+        {!isExcluded && data.recurringMonthly > 0 && (
+          <span
+            data-shelf-recurring
+            className={`whitespace-nowrap ${budgeted && data.budget != null && data.recurringMonthly > data.budget ? "text-[var(--warn)]" : ""}`}
+          >
+            {usd(data.recurringMonthly, { cents: false })} recurring a month
+          </span>
+        )}
       </div>
       {budgeted && data.budget != null && (
         <div
