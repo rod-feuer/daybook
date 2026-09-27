@@ -384,10 +384,43 @@ async function pageHeader(browser) {
         // Import's hidden file input lives in the header; only a visible text input counts as search.
         const inputsInHeader = header.querySelectorAll("input:not([type=file]):not([type=hidden])").length;
         const primaries = document.querySelectorAll("main .btn-primary, header .btn-primary").length;
-        return { monthFirst, inputsInHeader, primaries };
+        const headerText = header.innerText;
+        const rareVisible = /Sync from bank|Import CSV|Re-scan/.test(headerText);
+        const newCat = [...header.querySelectorAll("button")].find((b) => /New category/.test(b.textContent || ""));
+        const fig = header.querySelector("[data-header-figure] .text-2xl");
+        const caption = header.querySelector("[data-header-caption]")?.textContent ?? "";
+        return { monthFirst, inputsInHeader, primaries, rareVisible, newCatGhost: newCat ? newCat.classList.contains("btn-ghost") && !newCat.classList.contains("btn-primary") : null, figPx: fig ? getComputedStyle(fig).fontSize : null, figText: fig ? fig.textContent : null, caption };
       });
       record("page header", `${route} month picker leads the header's right cluster; no search in the header; ≤1 primary button`, r.monthFirst && r.inputsInHeader === 0 && r.primaries <= 1, `monthFirst=${r.monthFirst}, inputs=${r.inputsInHeader}, primaries=${r.primaries}`);
+      // Sync, Import, and Re-scan are rare. Inline, they shared the month
+      // picker's weight and, on Categories, a filled button outranked the
+      // spent figure. They live in ⋯; New category stays, bordered.
+      record("page header", `${route} rare actions stay in ⋯, and New category is not a filled button`, !r.rareVisible && (route === "/categories" ? r.newCatGhost === true : r.newCatGhost === null), `rare visible=${r.rareVisible}, new category ghost=${r.newCatGhost}`);
+      if (route === "/transactions") {
+        // The statement has no summary card, so the net has to win from the
+        // header. It used to be 12px gray, with cents, inside the count.
+        record("page header", "the transactions net is the summary figure, without cents, and the count is its caption", r.figPx === "24px" && r.figText && !/\.\d\d/.test(r.figText) && /^\d+ shown/.test(r.caption), `${r.figPx} "${r.figText}" / "${r.caption}"`);
+      }
     }
+    const nav = await page.evaluate(() => {
+      const swatch = document.createElement("span");
+      document.body.append(swatch);
+      swatch.style.color = "var(--accent)";
+      const accent = getComputedStyle(swatch).color;
+      swatch.style.color = "var(--foreground)";
+      const fg = getComputedStyle(swatch).color;
+      swatch.remove();
+      const side = document.querySelector(".nav-link-active");
+      const bottom = document.querySelector("nav[aria-label='Primary'] a[aria-current='page']");
+      const utils = document.querySelector("[data-nav-utilities]");
+      return {
+        side: !!side && getComputedStyle(side).color === fg && getComputedStyle(side).color !== accent,
+        bottom: !!bottom && getComputedStyle(bottom).color === fg,
+        tabs: document.querySelectorAll("nav[aria-label='Primary'] > a").length,
+        utils: !!utils && utils.compareDocumentPosition(document.querySelector("nav[aria-label='Primary'] > a")) & Node.DOCUMENT_POSITION_PRECEDING,
+      };
+    });
+    record("page header", "the current page is foreground, not the accent, and Sign out's cluster sits after the four tabs", nav.side && nav.bottom && nav.tabs === 4 && nav.utils, `side=${nav.side}, bottom=${nav.bottom}, tabs=${nav.tabs}, utilities after tabs=${!!nav.utils}`);
   });
 }
 
@@ -400,7 +433,7 @@ async function dashboardAnatomy(browser) {
     await page.waitForSelector("[data-summary]");
     const r = await page.evaluate(() => {
       const summary = document.querySelector("[data-summary]");
-      const figures = summary ? summary.querySelectorAll(".stat-label").length : 0;
+      const figures = summary ? summary.querySelectorAll("[data-figure]").length : 0;
       const bar = !!summary?.querySelector("[role='progressbar']");
       const q = document.querySelector("[data-uncategorized]");
       const nested = document.querySelectorAll(".card .card").length;
@@ -425,28 +458,30 @@ async function dashboardAnatomy(browser) {
     // top line, and the bar says what it measures.
     const f = await page.evaluate(() => {
       const card = document.querySelector("[data-summary]");
-      const figs = [...card.querySelectorAll(".text-2xl")].map((el) => ({ value: Number(el.textContent.replace(/[^0-9.]/g, "")) * (/[−-]/.test(el.textContent) ? -1 : 1), label: el.nextElementSibling?.textContent.toLowerCase() ?? "", sub: el.nextElementSibling?.nextElementSibling?.textContent.toLowerCase() ?? "", top: Math.round(el.getBoundingClientRect().top) }));
-      return { figs, caption: card.querySelector("[data-bar-caption]")?.textContent ?? "", eyebrow: card.querySelector("[data-eyebrow]")?.textContent.toLowerCase() ?? "", frameWords: (card.innerText.match(/projected|expected/gi) ?? []).length };
+      const figs = [...card.querySelectorAll("[data-figure]")].map((el) => ({ value: Number(el.textContent.replace(/[^0-9.]/g, "")) * (/[−-]/.test(el.textContent) ? -1 : 1), label: el.nextElementSibling?.textContent.toLowerCase() ?? "", sub: el.nextElementSibling?.nextElementSibling?.textContent.toLowerCase() ?? "", top: Math.round(el.getBoundingClientRect().top), px: getComputedStyle(el).fontSize }));
+      return { figs, caption: card.querySelector("[data-bar-caption]")?.textContent ?? "", repeatedMonth: !!card.querySelector("[data-eyebrow]"), frameWords: (card.innerText.match(/projected|expected/gi) ?? []).length };
     });
     const [net, income, expenses] = f.figs;
-    // The eyebrow is the month's name on every card; the labels are one word each (plus
-    // "so far" while a month is in progress but too early to project); a
-    // projected figure's frame is the "$X so far" beneath it (the projection is
-    // the whole month, the actual is what has posted). Three labels each carried
-    // "projected" before, and the card read as a paragraph.
+    // The month is the header picker, said once — the card used to repeat it
+    // as an eyebrow, and three labels each carried "projected", so the card
+    // read as a paragraph. A projected figure's frame is the "$X so far"
+    // beneath it (the projection is the whole month, the actual is what has
+    // posted). Net stays the summary size; income and expenses drop to the
+    // card-title size so the result outranks its parts.
     const forward = f.figs.every((x) => x.sub.includes("so far"));
-    record("dashboard", "the three big figures are in one frame and reconcile: income − expenses = net", f.figs.length === 3 && /^net( so far)?\|income( so far)?\|expenses( so far)?$/.test(f.figs.map((x) => x.label).join("|")) && Math.abs(income.value - expenses.value - net.value) <= 1, `${f.eyebrow || "(no eyebrow)"}: ` + f.figs.map((x) => `${x.label} ${x.value}`).join(" | "));
-    record("dashboard", "the eyebrow is the month's name, with no frame word; a projected figure carries its actual so far beneath it", /^(january|february|march|april|may|june|july|august|september|october|november|december)$/.test(f.eyebrow) && f.frameWords === 0, `"${f.eyebrow}" · ${f.frameWords} frame word(s) · ` + (forward ? f.figs.map((x) => x.sub).join(" | ") : "not projecting in this fixture month"));
+    record("dashboard", "the three figures are in one frame and reconcile: income − expenses = net", f.figs.length === 3 && /^net( so far)?\|income( so far)?\|expenses( so far)?$/.test(f.figs.map((x) => x.label).join("|")) && Math.abs(income.value - expenses.value - net.value) <= 1, f.figs.map((x) => `${x.label} ${x.value}`).join(" | "));
+    record("dashboard", "the card does not repeat the month, and a projected figure carries its actual so far beneath it", !f.repeatedMonth && f.frameWords === 0, `eyebrow=${f.repeatedMonth} · ${f.frameWords} frame word(s) · ` + (forward ? f.figs.map((x) => x.sub).join(" | ") : "not projecting in this fixture month"));
+    record("dashboard", "net is the summary figure; income and expenses are the card-title size", f.figs.length === 3 && net.px === "24px" && income.px === "15px" && expenses.px === "15px", f.figs.map((x) => x.px).join("/"));
     // The verdict is the card's sentence and reads first. Two panels: the
     // three figures as equal columns from the left, and the budget (its label,
     // its share, the bar, the note) to their right, level with them — one
     // column in a full-width card left the right two thirds empty.
-    const order = await page.evaluate(() => { const card = document.querySelector("[data-summary]"); const y = (sel) => Math.round(card.querySelector(sel)?.getBoundingClientRect().top ?? -1); const figs = [...card.querySelectorAll(".text-2xl")].map((e) => e.getBoundingClientRect()); const panel = card.querySelector("[data-budget-panel]").getBoundingClientRect(); const bar = card.querySelector("[role=progressbar]").getBoundingClientRect(); const cap = card.querySelector("[data-bar-caption]")?.getBoundingClientRect(); const pitch = figs.length === 3 ? [Math.round(figs[1].left - figs[0].left), Math.round(figs[2].left - figs[1].left)] : []; const barBottom = Math.round(bar.bottom); const inPanel = !!card.querySelector("[data-budget-panel] [data-status]"); return { statusUnderBar: inPanel && y("[data-status]") >= barBottom, pitch, panelRight: figs.length ? panel.left > figs[figs.length - 1].right : false, panelLevel: figs.length ? Math.abs((panel.top + panel.bottom) / 2 - (figs[0].top + figs[0].bottom) / 2) <= 24 : false, capAboveBar: cap ? cap.bottom <= bar.top + 1 && cap.right >= bar.right - 32 : null }; });
+    const order = await page.evaluate(() => { const card = document.querySelector("[data-summary]"); const y = (sel) => Math.round(card.querySelector(sel)?.getBoundingClientRect().top ?? -1); const figs = [...card.querySelectorAll("[data-figure]")].map((e) => e.getBoundingClientRect()); const panel = card.querySelector("[data-budget-panel]").getBoundingClientRect(); const bar = card.querySelector("[role=progressbar]").getBoundingClientRect(); const cap = card.querySelector("[data-bar-caption]")?.getBoundingClientRect(); const pitch = figs.length === 3 ? [Math.round(figs[1].left - figs[0].left), Math.round(figs[2].left - figs[1].left)] : []; const barBottom = Math.round(bar.bottom); const inPanel = !!card.querySelector("[data-budget-panel] [data-status]"); return { statusUnderBar: inPanel && y("[data-status]") >= barBottom, pitch, panelRight: figs.length ? panel.left > figs[figs.length - 1].right : false, panelLevel: figs.length ? Math.abs((panel.top + panel.bottom) / 2 - (figs[0].top + figs[0].bottom) / 2) <= 24 : false, capAboveBar: cap ? cap.bottom <= bar.top + 1 && cap.right >= bar.right - 32 : null }; });
     // The card's inner grid is the page grid (3:2, 24px gap) run to the
     // card's edges: the three figures span the chart card's width below and
     // start on its text; the hairline stands in the middle of the gutter; the
     // budget panel's text starts on the category card's text.
-    const aligned = await page.evaluate(() => { const cards = [...document.querySelectorAll(".card")]; const chart = cards.find((c) => /Spending this month/.test(c.textContent))?.getBoundingClientRect(); const cat = cards.find((c) => /Spending by category/.test(c.textContent))?.getBoundingClientRect(); const title = [...document.querySelectorAll("h3")].find((h) => /Spending by category/.test(h.textContent))?.getBoundingClientRect(); const label = document.querySelector("[data-budget-panel] .stat-label")?.getBoundingClientRect(); const cell = document.querySelector("[data-summary] [data-figure-pair]")?.parentElement?.getBoundingClientRect(); const figs = [...document.querySelectorAll("[data-summary] .text-2xl")].map((e) => e.getBoundingClientRect()); if (!chart || !cat || !title || !label || !cell || figs.length !== 3) return null; return { line: Math.round(cell.right + 12 - (chart.right + cat.left) / 2), firstFig: Math.round(figs[0].left - (chart.left + 24)), lastFigInside: figs[2].right <= chart.right, text: Math.round(label.left - title.left) }; });
+    const aligned = await page.evaluate(() => { const cards = [...document.querySelectorAll(".card")]; const chart = cards.find((c) => /Spending this month/.test(c.textContent))?.getBoundingClientRect(); const cat = cards.find((c) => /Spending by category/.test(c.textContent))?.getBoundingClientRect(); const title = [...document.querySelectorAll("h3")].find((h) => /Spending by category/.test(h.textContent))?.getBoundingClientRect(); const label = document.querySelector("[data-budget-panel] .stat-label")?.getBoundingClientRect(); const cell = document.querySelector("[data-summary] [data-figure-pair]")?.parentElement?.getBoundingClientRect(); const figs = [...document.querySelectorAll("[data-summary] [data-figure]")].map((e) => e.getBoundingClientRect()); if (!chart || !cat || !title || !label || !cell || figs.length !== 3) return null; return { line: Math.round(cell.right + 12 - (chart.right + cat.left) / 2), firstFig: Math.round(figs[0].left - (chart.left + 24)), lastFigInside: figs[2].right <= chart.right, text: Math.round(label.left - title.left) }; });
     record("dashboard", "the hairline is centred in the gutter below; the figures span the chart card and the budget panel's text starts on the category card's", !!aligned && Math.abs(aligned.line) <= 1 && Math.abs(aligned.firstFig) <= 1 && aligned.lastFigInside && Math.abs(aligned.text) <= 1, aligned ? `line Δ${aligned.line}px from gutter centre; first figure Δ${aligned.firstFig}px from the chart's text; last inside=${aligned.lastFigInside}; panel text Δ${aligned.text}px` : "cards not found");
     // The projected month end is a tick on the budget bar, so the verdict can
     // be checked against the gauge: under budget, the tick is short of the end
@@ -461,7 +496,7 @@ async function dashboardAnatomy(browser) {
     // repeated the same figures up to four times. What only the block said
     // survives as one line on the card: spending outside budgeted categories,
     // bridging the bar's figure to the Expenses figure.
-    const once = await page.evaluate(() => { const main = document.querySelector("main").innerText; const cap = document.querySelector("[data-bar-caption]")?.textContent ?? ""; const total = cap.match(/of (\$[\d,]+)$/)?.[1] ?? null; const n = (t) => Number(t.replace(/[^0-9.]/g, "")); const note = document.querySelector("[data-summary] [data-hint]")?.getAttribute("data-hint") ?? ""; const extra = n(note.match(/\$[\d,]+/)?.[0] ?? "0"); const figs = [...document.querySelectorAll("[data-summary] .text-2xl")]; const sub = figs[2]?.nextElementSibling?.nextElementSibling?.textContent ?? ""; const all = n(/so far/.test(sub) ? sub : (figs[2]?.textContent ?? "0")); const pct = n(cap.match(/^\d+%/)?.[0] ?? "0"); const spent = Math.round((pct / 100) * n(total ?? "0")); return { total, totalCount: total ? main.split(`of ${total}`).length - 1 : 0, bars: document.querySelectorAll("[data-summary] [role=progressbar]").length, block: /Budgeted spend/i.test(main), strip: /avg \/ day/i.test(main), note, bridges: note ? Math.abs(spent + extra - all) <= 3 : null }; }); // ±$3: the bar's share is a whole percent of a $500 budget
+    const once = await page.evaluate(() => { const main = document.querySelector("main").innerText; const cap = document.querySelector("[data-bar-caption]")?.textContent ?? ""; const total = cap.match(/of (\$[\d,]+)$/)?.[1] ?? null; const n = (t) => Number(t.replace(/[^0-9.]/g, "")); const note = document.querySelector("[data-summary] [data-hint]")?.getAttribute("data-hint") ?? ""; const extra = n(note.match(/\$[\d,]+/)?.[0] ?? "0"); const figs = [...document.querySelectorAll("[data-summary] [data-figure]")]; const sub = figs[2]?.nextElementSibling?.nextElementSibling?.textContent ?? ""; const all = n(/so far/.test(sub) ? sub : (figs[2]?.textContent ?? "0")); const pct = n(cap.match(/^\d+%/)?.[0] ?? "0"); const spent = Math.round((pct / 100) * n(total ?? "0")); return { total, totalCount: total ? main.split(`of ${total}`).length - 1 : 0, bars: document.querySelectorAll("[data-summary] [role=progressbar]").length, block: /Budgeted spend/i.test(main), strip: /avg \/ day/i.test(main), note, bridges: note ? Math.abs(spent + extra - all) <= 3 : null }; }); // ±$3: the bar's share is a whole percent of a $500 budget
     record("dashboard", "the budget is stated once: no second budget block, no figure strip under the chart", once.total !== null && once.totalCount === 1 && !once.block && !once.strip, `"of ${once.total}" appears ${once.totalCount}×, block=${once.block}, strip=${once.strip}`);
     record("dashboard", "spending outside budgeted categories is a hint beside the bar's caption (no line of its own), and the bar's share plus it is the Expenses figure", once.bridges === true && /^The bar leaves out \$[\d,]+ spent in categories without a budget\.$/.test(once.note), once.note || "no hint");
     record("dashboard", "uncategorized queue is standard rows below the summary (when present)", !r.hasQueue || (r.rows > 0 && r.summaryFirst), r.hasQueue ? `${r.rows} rows, summary first=${r.summaryFirst}` : "no queue in the fixture");
@@ -534,7 +569,7 @@ async function partialMonthQualifiers(browser) {
     await check("/", CUR, ["so far"], true); // "$X so far" under each figure
     await check("/categories", CUR, ["spent so far"], true); // the label
     await check("/recurrings", CUR, ["paid so far"], true); // the label
-    await check("/transactions", CUR, ["· net", "so far"], true);
+    await check("/transactions", CUR, ["so far"], true); // the header caption; the net is the figure above it
     await check("/", PAST, ["so far", ", projected"], false);
     // A finished month's summary is plain actuals: no forward-looking word in the
     // card. (Scoped to the card: the chart's legend says "Projected" on any month.)
@@ -564,8 +599,10 @@ async function vendorHeaderCounts(browser) {
     const read = () => page.evaluate(() => {
       const money = (s) => Number(s.replace(/[^0-9.]/g, ""));
       const head = document.querySelector("[data-vendor-total]").closest("div.flex").innerText;
-      const sub = [...document.querySelectorAll("p, div, span")].map((e) => e.textContent).find((x) => /^\d+ shown · net/.test(x || "")) || "";
-      return { total: money(document.querySelector("[data-vendor-total]").textContent), net: money(sub.split("net")[1] || ""), count: Number((head.match(/(\d+) transactions?/) || [])[1]), notCounted: Number((head.match(/(\d+) not counted/) || [0, 0])[1]), rows: document.querySelectorAll("[data-drawer-row]").length };
+      // The page net is a summary figure (no cents). The vendor strip is the
+      // exact total of the same charges. They agree at the dollar.
+      const fig = document.querySelector("[data-header-figure] .text-2xl")?.textContent ?? "";
+      return { total: money(document.querySelector("[data-vendor-total]").textContent), net: money(fig), count: Number((head.match(/(\d+) transactions?/) || [])[1]), notCounted: Number((head.match(/(\d+) not counted/) || [0, 0])[1]), rows: document.querySelectorAll("[data-drawer-row]").length };
     });
     const before = await read();
     const id = await page.evaluate(async () => { const d = await (await fetch("/api/transactions?vendor=Chipotle&limit=50")).json(); return (d.rows ?? d.transactions ?? d)[0].id; });
@@ -574,8 +611,9 @@ async function vendorHeaderCounts(browser) {
     const after = await read();
     await page.evaluate(async (id) => { await fetch(`/api/transactions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded: false }) }); }, id);
     const cents = (n) => Math.round(n * 100);
-    record("vendor header", "an excluded charge leaves the header's total and count, and is named as not counted",
-      before.notCounted === 0 && cents(before.total) === cents(before.net) && after.rows === before.rows && after.count === before.count - 1 && after.notCounted === 1 && cents(after.total) === cents(before.total - amount) && cents(after.total) === cents(after.net),
+    const dollars = (n) => Math.round(n);
+    record("vendor header", "an excluded charge leaves the exact total and the count, and the summary net is that total in dollars",
+      before.notCounted === 0 && dollars(before.total) === before.net && after.rows === before.rows && after.count === before.count - 1 && after.notCounted === 1 && cents(after.total) === cents(before.total - amount) && dollars(after.total) === after.net,
       `before ${before.count} tx $${before.total} (net $${before.net}); after ${after.count} tx + ${after.notCounted} not counted $${after.total} (net $${after.net}), ${after.rows} rows still listed`);
   });
 }
@@ -961,7 +999,7 @@ async function phoneLayout(browser) {
     await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-summary]");
     const c = await page.evaluate(() => { const hs = [...document.querySelectorAll("header select, header button")].map((e) => e.getBoundingClientRect().height).filter((h) => h > 0); const figs = document.querySelector("[data-summary]").querySelectorAll(".text-2xl"); const [a, b] = [figs[0].getBoundingClientRect(), figs[1].getBoundingClientRect()]; const sort = document.querySelector('select[aria-label="Sort categories"]').getBoundingClientRect(); const title = [...document.querySelectorAll("h3")].find((h) => /expenses/i.test(h.textContent)).getBoundingClientRect(); const mid = (r) => (r.top + r.bottom) / 2; return { heights: [...new Set(hs.map((h) => Math.round(h * 2) / 2))], figTops: Math.abs(Math.round(a.top - b.top)), sortLine: Math.abs(Math.round(mid(sort) - mid(title))), overflow: document.documentElement.scrollWidth - innerWidth }; });
-    record("phone layout", "the Categories header's controls are one height (the primary button was 2px shorter than the picker)", c.heights.length === 1, `heights ${c.heights.join(", ")}px`);
+    record("phone layout", "the Categories header's controls are one height (a filled New category button used to be shorter than the picker, and louder than the spent figure)", c.heights.length === 1, `heights ${c.heights.join(", ")}px`);
     record("phone layout", "Categories: spent and left share a line, and the sort sits on the section title's line", c.figTops <= 1 && c.sortLine <= 2 && c.overflow <= 0, `figure tops Δ${c.figTops}px, sort vs title Δ${c.sortLine}px, page overflow ${c.overflow}px`);
     await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-drawer-row]");
@@ -1534,7 +1572,7 @@ async function recurringsRow(browser) {
         // it, nothing upcoming above it.
         order: (() => { const list = document.querySelector("[data-bill-list]"); if (!list) return null; const items = [...list.querySelectorAll("[data-drawer-row], [data-bill-anchor='up']")]; const dues = items.filter((e) => e.hasAttribute("data-due")).map((e) => e.getAttribute("data-due")); const div = items.findIndex((e) => e.hasAttribute("data-bill-anchor")); const st = (e) => e.getAttribute("data-bill-status"); return { sorted: dues.every((d, i) => i === 0 || dues[i - 1] <= d), divider: div >= 0, odBelow: div >= 0 && items.slice(div + 1).some((e) => st(e) === "od"), upAbove: div >= 0 && items.slice(0, div).some((e) => st(e) === "up"), lists: document.querySelectorAll("[data-bill-list]").length, sections: document.querySelectorAll("[data-bill-section]").length }; })(),
         bar: (() => { const b = document.querySelector("[data-summary] [role='progressbar']"); return !!b && /%/.test(b.getAttribute("aria-label") || "") && b.getAttribute("aria-valuenow") !== null; })(),
-        summary: !!document.querySelector("[data-summary] .stat-label") && [...document.querySelectorAll("[data-summary] .stat-label")].some((l) => /paid/i.test(l.textContent)) && /overdue/i.test(document.querySelector("[data-summary]").textContent),
+        summary: [...document.querySelectorAll("[data-summary] [data-figure]")].some((el) => /paid/i.test(el.nextElementSibling?.textContent ?? "")) && /overdue/i.test(document.querySelector("[data-summary]").textContent),
       };
     });
     record("recurrings row", `${r.rows} rows · no row menu (the verbs live in the shelf)`, r.rows >= 2 && r.rowMenus === 0, `row menus: ${r.rowMenus}`);

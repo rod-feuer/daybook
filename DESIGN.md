@@ -118,9 +118,9 @@ and §3 carry over unchanged.
 - **Forward-looking figures are qualified — by a word, not a symbol.** Mid-month
   net is shown projected with a "so far" actual; bills read "paid so far of $X
   expected"; projections are withheld until enough of the month has elapsed. The
-  qualifier is said once where figures share a frame: the dashboard card's
-  eyebrow reads "September, projected" over one-word labels, and each projected
-  figure carries its "$X so far". No ≈ or ~ in front of a figure. *(Honest)*
+  qualifier is said once where figures share a frame: the month is the header
+  picker, figure labels are sentence case ("Net", "Spent so far"), and each
+  projected figure carries its "$X so far". No ≈ or ~ in front of a figure. *(Honest)*
 - **A toast is for what you can't see.** A success message appears only when
   the outcome is off-screen (a vendor combined, a category deleted, a split
   applied), spans many things (Apply all, Overrides reset, dismissed vendors
@@ -136,8 +136,9 @@ and §3 carry over unchanged.
   variables. New surfaces use the tokens and the scales below — never a
   hard-coded color, never a size off the scale. *(One-pattern)*
 - **Touch is in scope; hover only enhances.** The app ships a mobile bottom nav
-  and a bottom-sheet shelf, so every action has a resting state — secondary
-  controls sit at `opacity-60` and strengthen on hover/focus (the dashboard's
+  and a bottom-sheet shelf, so every action has a resting state. The four pages
+  are the tabs; Sign out and the theme control sit past a hairline, not as
+  another tab. Secondary controls sit at `opacity-60` and strengthen on hover/focus (the dashboard's
   drill chevron is the reference). `opacity-0 group-hover` gating is a defect,
   not a scope decision. List rows that open the shelf are keyboard rows
   (`rowButtonProps` — role, tabIndex, Enter/Space) since they hold nested
@@ -195,16 +196,18 @@ horizontal (12 vertical for a one-line row on a phone: a 44px touch target,
 and room for a difference under the amount). One radius for cards and controls (8px, `rounded-lg`); `full` for
 pills and tags; nothing else.
 
-**Summary card anatomy** — the month's name as the eyebrow on every page, with
-no modifier ("September"), over one- or two-word labels that carry the qualifier where one
-is due ("spent so far"; a projected figure's "$X so far" beneath it), with the
-whole the bar measures in the panel's caption ("78% of $42,530"); one height
-on every page (no floor: a caveat on what the bar measures is a "?" hint
-beside the caption, never a line of its own, and a verdict is written to fit
-one line);
-then two panels centred on one line on the page's own 3:2 grid, run to the card's edges: the figures as three equal
-columns across the chart card's width below, and the budget across the
-category card's (its text starting on that card's text), with the hairline
+**Summary card anatomy** — the month is said once, in the header picker, so the
+card does not repeat it. Figure labels are sentence case, one or two words, and
+carry the qualifier where one is due ("Spent so far"; a projected figure's
+"$X so far" beneath it), with the whole the bar measures in the panel's caption
+("78% of $42,530"); one height on every page (no floor: a caveat on what the bar
+measures is a "?" hint beside the caption, never a line of its own, and a
+verdict is written to fit one line);
+then two panels centred on one line on the page's own 3:2 grid, run to the card's edges: the figures as columns
+across the chart card's width below — three of them, the first at the summary
+size and the other two at the card-title size, because the first is the result;
+two of them, both at the summary size, because they are a pair — and the budget
+across the category card's (its text starting on that card's text), with the hairline
 in the middle of the gutter. The budget panel reads label, share, bar, then
 the verdict sentence at the card-title size — "on pace to finish under
 budget", "2 overdue · 20 upcoming · 60 paid" — since every verdict describes
@@ -213,9 +216,10 @@ month's net takes its colour.
 
 **Page anatomy** — header: title, optional one-line subtitle, the month picker
 in one slot on every page, page actions to its right (on a phone the title
-and the picker hold one row and the subtitle sits beneath both). Then the summary card
-(the month). Transactions is the statement, and the exception: its count and net
-live in the header subtitle, because a second card above a day-by-day list would
+and the picker hold one row and the subtitle, or the transactions figure, sits beneath both). Then the summary card
+(the month). Transactions is the statement, and the exception: its net is the
+header's summary figure and its count is the caption under that figure
+("217 shown · so far"), because a second card above a day-by-day list would
 bury the statement. Then the toolbar — search, filters, sort — sitting directly
 above the list it acts on, never in the header and never above the summary.
 Then the list, in one of two patterns: **sections** for a handful of groups

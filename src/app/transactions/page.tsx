@@ -350,7 +350,13 @@ function TransactionsView() {
   }, [hasMore, loadMore]);
 
   // Debounced reload whenever any filter (or a forced refresh) changes.
+  // Wait until the deep-link has been read. Fetching before that used the
+  // empty month (every charge) and, once the month was set, painted that
+  // all-time net under "September" until the real request returned. The
+  // header figure is that net, so the mismatch would be the loudest thing
+  // on the page.
   useEffect(() => {
+    if (!ready) return;
     const t = setTimeout(
       () =>
         load({
@@ -369,7 +375,7 @@ function TransactionsView() {
       200
     );
     return () => clearTimeout(t);
-  }, [month, catFilter, q, vendor, type, account, minAmount, maxAmount, recurring, sort, dir, refreshKey, load]);
+  }, [ready, month, catFilter, q, vendor, type, account, minAmount, maxAmount, recurring, sort, dir, refreshKey, load]);
 
   // Keep the browser URL in sync with the live filters, so clearing a filter
   // (e.g. the Uncategorized deep-link) actually sticks across reloads and a
@@ -528,21 +534,22 @@ function TransactionsView() {
   return (
     <Shell
       title="Transactions"
-      subtitle={`${totalCount} shown · net ${usd(netTotal, { sign: true })}${isCurrentMonth(month) ? " so far" : ""}`}
+      figure={
+        // Hide the net until a result has landed. The first fetch used to be
+        // every charge, and that number would sit in the header — now at the
+        // summary size — until the month's own total replaced it.
+        status === "ready" || totalCount > 0
+          ? {
+              value: usd(netTotal, { sign: true, cents: false }),
+              caption: `${totalCount} shown${isCurrentMonth(month) ? " · so far" : ""}`,
+            }
+          : undefined
+      }
       month={<MonthPicker months={months} value={month} onChange={setMonth} allowAll />}
       actions={
-        <>
-          {/* Import is rare — inline on desktop, behind a ⋯ on mobile so it
-              doesn't wear a primary-button costume at the top of a phone. */}
-          <span className="hidden sm:inline-flex">
-            <ImportButton onDone={() => loadStatic().then(() => setRefreshKey((k) => k + 1))} />
-          </span>
-          <span className="sm:hidden">
-            <HeaderMenu>
-              <ImportButton onDone={() => loadStatic().then(() => setRefreshKey((k) => k + 1))} />
-            </HeaderMenu>
-          </span>
-        </>
+        <HeaderMenu>
+          <ImportButton onDone={() => loadStatic().then(() => setRefreshKey((k) => k + 1))} />
+        </HeaderMenu>
       }
     >
       {showQueues && (

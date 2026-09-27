@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 
-// A "⋯" overflow for header actions that are too rare to earn a permanent slot
-// on a phone screen (Sync, Import). Inline on desktop; behind this menu on
-// mobile. One pattern, shared by every tab's header.
+// A "⋯" overflow for header actions too rare to sit beside the month picker
+// (Sync, Import, Re-scan). One pattern, every width: on a phone they crowded
+// the title, and on a desktop they outweighed the month.
 export function HeaderMenu({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
