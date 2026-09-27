@@ -249,9 +249,11 @@ then match, the vendor's split rules (each removable, which restores what it
 split), and the action row. The footer link follows the content, not the panel edge. Three shelves,
 one anatomy: a **vendor** (or one of its plans; a vendor with several plans
 lists them with their monthly total in place of the cards, each opening its
-own shelf), a **category** (under its bar, the budget: a bordered amount and a
-Monthly / Annual select, with "Use $X" of the typical month when there is
-none; the Categories row only shows the budget), and a **charge** — the charge's cards are its date (the editor for an effective
+own shelf), a **category** (two blocks: this month, its cards and one caption for the
+trend, mid-month against the same days of last month; then the budget, a
+bordered amount and a Monthly / Annual select, "Use $X" of the typical month
+when there is none, the shared `BudgetBar`, and one caption, "$416 left ·
+$6,699 recurring"; the Categories row only shows the budget), and a **charge** — the charge's cards are its date (the editor for an effective
 date) and its amount (bank data); its caption carries the category and its
 plan membership; then the note and its verbs (exclude from totals, split),
 the vendor's recent charges and its spend by year (evidence only: the

@@ -2124,12 +2124,13 @@ export type CategorySummary = {
   month: string;
   spent: number; // magnitude this month (outflow for expense, inflow for income)
   txCount: number;
-  prevSpent: number; // same, prior month (for the MoM card)
+  prevSpent: number; // same, prior month (for the MoM card), through prevThrough
+  prevThrough: number | null; // mid-month: the day last month is summed through
   monthlyAvg: number; // trailing-12 average magnitude (the "typical month" benchmark)
   budget: number | null; // monthly equivalent (an annual budget counts at 1/12)
   // The budget as entered, and the suggestion for an empty one: the shelf edits
   // it with the Categories page's field, so both offer the same "Use $X".
-  budgetEntry: { amount: number | null; period: BudgetPeriod; suggested: number; suggestedAnnual: number };
+  budgetEntry: { amount: number | null; period: BudgetPeriod; suggested: number; suggestedAnnual: number; ytdSpent: number };
   recurringMonthly: number; // the plans' monthly cost, the same figure the Categories row shows
   upcoming: { merchant: string; displayName: string; dueDate: string; amount: number }[];
   transactions: {
@@ -2164,18 +2165,37 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
       ? "CASE WHEN amount > 0 THEN amount ELSE 0 END"
       : "CASE WHEN amount < 0 THEN -amount ELSE 0 END";
 
-  const monthAgg = (m: string) =>
+  const monthAgg = (m: string, throughDay = 31) =>
     db
       .prepare(
         `SELECT COALESCE(SUM(${magExpr}), 0) AS s, COUNT(*) AS n
          FROM transactions
          WHERE categoryId = ? AND excluded = 0
-           AND substr(COALESCE(effectiveDate, date),1,7) = ?`
+           AND substr(COALESCE(effectiveDate, date),1,7) = ?
+           AND CAST(substr(COALESCE(effectiveDate, date),9,2) AS INTEGER) <= ?`
       )
-      .get(categoryId, m) as { s: number; n: number };
+      .get(categoryId, m, throughDay) as { s: number; n: number };
 
+  // Mid-month, last month is summed over the same days (Aug 1–27 against
+  // Sep 1–27): a partial month against a whole one showed a fall early in
+  // every month and understated a rise late in it. "The same days" is the
+  // dashboard's rule (compareThroughDay in core.ts): through the latest day with any
+  // counted charge, since bank data trails the calendar.
+  let prevThrough: number | null = null;
+  if (month === new Date().toISOString().slice(0, 7)) {
+    const [yy, mm] = month.split("-").map(Number);
+    const last = (
+      db
+        .prepare(
+          `SELECT COALESCE(MAX(CAST(substr(COALESCE(effectiveDate, date),9,2) AS INTEGER)), 0) AS d
+           FROM transactions WHERE excluded = 0 AND substr(COALESCE(effectiveDate, date),1,7) = ?`
+        )
+        .get(month) as { d: number }
+    ).d;
+    if (last > 0 && last < new Date(Date.UTC(yy, mm, 0)).getUTCDate()) prevThrough = last;
+  }
   const cur = monthAgg(month);
-  const prev = monthAgg(shiftMonth(month, -1));
+  const prev = monthAgg(shiftMonth(month, -1), prevThrough ?? 31);
   const t12 = (
     db
       .prepare(
@@ -2239,11 +2259,12 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     spent: Number(cur.s.toFixed(2)),
     txCount: cur.n,
     prevSpent: Number(prev.s.toFixed(2)),
+    prevThrough,
     monthlyAvg: Number((t12 / 12).toFixed(2)),
     budget: getBudgets()[cat.id] ?? null,
     budgetEntry: (() => {
       const c = categoriesWithTotals(month).find((x) => x.id === cat.id);
-      return { amount: c?.budget ?? null, period: c?.budgetPeriod ?? "monthly", suggested: c?.suggestedBudget ?? 0, suggestedAnnual: c?.suggestedAnnualBudget ?? 0 };
+      return { amount: c?.budget ?? null, period: c?.budgetPeriod ?? "monthly", suggested: c?.suggestedBudget ?? 0, suggestedAnnual: c?.suggestedAnnualBudget ?? 0, ytdSpent: c?.ytdSpent ?? 0 };
     })(),
     recurringMonthly: Number((recurringMonthlyByCategory()[cat.id] ?? 0).toFixed(2)),
     upcoming,

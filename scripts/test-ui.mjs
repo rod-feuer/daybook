@@ -585,9 +585,10 @@ async function partialMonthQualifiers(browser) {
     await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
     await page.click("[data-drawer-row]"); await shelfIs(page, true); await shelfSettled(page);
     const shelf = (await page.evaluate((sel) => document.querySelector(sel).innerText, shelfSel)).toLowerCase();
-    // "spent so far" always; the trend line reads "… vs last month so far" when
-    // there is a last month to compare with, and "new this month" when not.
-    record("qualifiers", "shelf (category, current month)", shelf.includes("spent so far") && (!shelf.includes("vs last month") || shelf.includes("vs last month so far")), shelf.includes("vs last month") ? "trend qualified" : "no prior month in the fixture");
+    // "spent so far" always; mid-month the trend names the days it compares
+    // ("vs aug 1–27"), never a partial month against a whole "last month".
+    const trend = shelf.match(/vs ([a-z]{3} 1–\d+|last month)/)?.[0] ?? null;
+    record("qualifiers", "shelf (category, current month)", shelf.includes("spent so far") && trend !== "vs last month", trend ?? "no prior month in the fixture");
   });
 }
 
@@ -1414,6 +1415,8 @@ async function categoryShelfBudget(browser) {
       if (await page.$(`${shelfSel} [data-shelf-budget] input`)) { name = label; break; }
       await page.keyboard.press("Escape"); await shelfIs(page, false);
     }
+    const block = await page.evaluate((sel) => { const b = document.querySelector(`${sel} [data-shelf-budget]`); const bars = document.querySelectorAll(`${sel} [data-budget-bar], ${sel} [role=progressbar]`); return { bars: bars.length, inBlock: !!b?.querySelector("[data-budget-bar]"), hint: !!b?.querySelector("[data-budget-hint]") }; }, shelfSel);
+    record("category shelf budget", "the budget block holds the one bar (the shared BudgetBar), and the removal hint waits for focus", name != null && block.bars === 1 && block.inBlock && !block.hint, JSON.stringify(block));
     record("category shelf budget", "a budgeted category's shelf carries a bordered budget field and a period select", name != null && !!(await page.$(`${shelfSel} [data-shelf-budget] select[aria-label='Budget period']`)), name ?? "no shelf had one");
     if (!name) return;
     const field = () => page.$(`${shelfSel} [data-shelf-budget] input`);
@@ -1422,7 +1425,9 @@ async function categoryShelfBudget(browser) {
     const rowSays = (want) => page.waitForFunction((sel, w) => [...document.querySelectorAll("[data-row-budget]")].some((e) => !e.closest(sel) && e.textContent.replace(/\s+/g, "") === w), { timeout: 8000 }, shelfSel, want).then(() => true, () => false);
 
     let f = await field();
-    await f.focus(); await f.evaluate((el) => el.select()); await f.type("999999"); await page.keyboard.press("Escape");
+    await f.focus(); await f.evaluate((el) => el.select());
+    record("category shelf budget", "editing the budget says how to remove it", !!(await page.$(`${shelfSel} [data-budget-hint]`)));
+    await f.type("999999"); await page.keyboard.press("Escape");
     await sleep(600);
     record("category shelf budget", "Escape reverts the budget field", (await (await field()).evaluate((el) => el.value)) === before);
 
@@ -1463,7 +1468,7 @@ async function categoryShelfRecurring(browser) {
       pair = { row: m[1], shelf };
       break;
     }
-    record("category shelf recurring", "the shelf shows the same monthly recurring cost as the category's row", pair != null && pair.shelf.includes(`$${pair.row} recurring a month`), pair ? `row $${pair.row}, shelf "${pair.shelf}"` : "no row with recurring");
+    record("category shelf recurring", "the shelf shows the same monthly recurring cost as the category's row", pair != null && pair.shelf.includes(`$${pair.row} recurring`), pair ? `row $${pair.row}, shelf "${pair.shelf}"` : "no row with recurring");
     if (errs.length) record("category shelf recurring", "page errors", false, errs[0]);
   });
 }

@@ -14,6 +14,7 @@ import {
   merchantSummary,
   deleteCategory,
   categoriesWithTotals,
+  categorySummary,
 } from "../src/lib/queries";
 import { applyNameCleanup, undoRenormalizeMerchants } from "../src/lib/db";
 import { nameCleanupSuggestions } from "../src/lib/nameCleanup";
@@ -64,6 +65,32 @@ test("budget suggestion is per-active-month, not /12 (a $259 bill seen once sugg
   ).run(`${month}-15`, "Acme Life", -259, "Checking", "prem1", "prem1", catId);
   const c = categoriesWithTotals(month).find((x) => x.id === catId)!;
   assert.equal(c.suggestedBudget, 259, "one $259 active month suggests $259, not $259/12");
+});
+
+test("mid-month, the category shelf compares last month over the same days, not the whole month", () => {
+  // Sep 1–27 against all of August showed a fall early in every month and
+  // understated a rise late in one. A finished month still compares whole months.
+  const db = getDb();
+  const catId = Number(db.prepare("INSERT INTO categories (name,color,icon,kind) VALUES ('Home','#888','🏠','expense')").run().lastInsertRowid);
+  const now = new Date().toISOString();
+  const month = now.slice(0, 7);
+  const day = Number(now.slice(8, 10));
+  const [y, m] = month.split("-").map(Number);
+  const ago = (n: number) => new Date(Date.UTC(y, m - 1 - n, 1)).toISOString().slice(0, 7);
+  const ins = db.prepare("INSERT INTO transactions (date,merchant,amount,account,source,hash,categoryId) VALUES (?,?,?,?,?,?,?)");
+  for (const [mo, tag] of [[ago(1), "a"], [ago(2), "b"]]) {
+    ins.run(`${mo}-01`, "Early", -100, "Checking", "t", `${tag}1`, catId);
+    ins.run(`${mo}-28`, "Late", -500, "Checking", "t", `${tag}2`, catId);
+  }
+  // This month's data runs through today (the dashboard's "same days" basis).
+  ins.run(`${month}-${String(day).padStart(2, "0")}`, "Today", -1, "Checking", "t", "c1", catId);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cur = categorySummary(catId, month)!;
+  assert.equal(cur.prevThrough, day < lastDay ? day : null);
+  assert.equal(cur.prevSpent, day < 28 ? 100 : 600, `through day ${day}, the 28th counts only once it has passed`);
+  const past = categorySummary(catId, ago(1))!;
+  assert.equal(past.prevThrough, null);
+  assert.equal(past.prevSpent, 600, "a finished month compares with the whole month before");
 });
 
 test("deleting a category clears a recurring that referenced it (FK no longer blocks the delete)", () => {

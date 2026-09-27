@@ -5,6 +5,7 @@ import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
 import { BudgetField } from "@/components/BudgetField";
+import { BudgetBar, paceOf } from "@/components/BudgetBar";
 
 export function CategoryHeader({ data, month }: { data: CatSummary | null; month: string }) {
   const label = new Date(month + "-01T00:00:00Z").toLocaleDateString("en-US", {
@@ -46,27 +47,34 @@ export function CategoryBody({
 }) {
   const isIncome = data.kind === "income";
   const isExcluded = data.excludeFromTotals === 1;
-  const budgeted = data.budget != null && !isIncome && !isExcluded;
   // Income, money movement and the catch-all carry no budget.
   const budgetable = !isIncome && !isExcluded && data.name !== "Uncategorized";
 
-  // The category's properties in the vendor shelf's anatomy: two cards (how
-  // much this month; a typical month), then one caption line for the trend
-  // and the budget, then a slim bar. Mid-month, "spent" and the trend compare
-  // a partial month with full ones, so the labels say "so far".
+  // Two blocks. This month: what it spent against a typical month, and one
+  // caption for the trend. The budget: its field, the bar that measures
+  // against it (the Categories row's BudgetBar, with its pace line), and one
+  // caption for what's left and what's recurring. The budget used to be
+  // split across both, with its figure said twice. Mid-month, "spent" is
+  // labelled "so far" and last month is compared over the same days.
   const partial = isCurrentMonth(data.month);
-  const remaining = (data.budget ?? 0) - data.spent;
   const delta = data.spent - data.prevSpent;
   const pct = data.prevSpent ? Math.round((delta / data.prevSpent) * 100) : 0;
-  const better = isIncome ? delta > 0 : delta < 0;
-  const hasTrend = data.prevSpent > 0 && pct !== 0;
+  const [py, pm] = data.month.split("-").map(Number);
+  const prevName = new Date(Date.UTC(py, pm - 2, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
   const trend =
     data.prevSpent === 0
       ? data.spent === 0
         ? null
         : "new this month"
-      : `${pct > 0 ? "↑" : pct < 0 ? "↓" : "="} ${Math.abs(pct)}% vs last month${partial ? " so far" : ""}`;
-  const pctOfBudget = budgeted && data.budget ? Math.min(100, (data.spent / data.budget) * 100) : 0;
+      : `${pct > 0 ? "↑" : pct < 0 ? "↓" : "="} ${Math.abs(pct)}% vs ${data.prevThrough ? `${prevName} 1–${data.prevThrough}` : "last month"}`;
+  const recurring = !isExcluded && data.recurringMonthly > 0 ? data.recurringMonthly : 0;
+
+  // The budget as saved: an annual one measures the year to date.
+  const b = data.budgetEntry;
+  const annual = b.period === "annual";
+  const spentNow = annual ? b.ytdSpent : data.spent;
+  const recurNow = annual ? recurring * 12 : recurring;
+  const remaining = (b.amount ?? 0) - spentNow;
 
   return (
     <div className="flex flex-col gap-4">
@@ -78,52 +86,52 @@ export function CategoryBody({
           <div className="text-[15px] font-semibold tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
         </PropertyCard>
       </div>
-      <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]">
-        {trend && (
-          <span className={hasTrend ? (better ? "text-[var(--good)]" : "text-[var(--warn)]") : ""}>{trend}</span>
-        )}
-        {budgeted && data.budget != null && (
-          <span className={`whitespace-nowrap ${remaining < 0 ? "text-[var(--warn)]" : ""}`}>
-            {usd(data.spent, { cents: false })} of {usd(data.budget, { cents: false })} budget ·{" "}
-            {remaining >= 0 ? `${usd(remaining, { cents: false })} left` : `${usd(-remaining, { cents: false })} over`}
-          </span>
-        )}
-        {/* The plans' monthly cost, as on the Categories row: what of the
-            budget is already spoken for. Warn when it alone exceeds it. */}
-        {!isExcluded && data.recurringMonthly > 0 && (
-          <span
-            data-shelf-recurring
-            className={`whitespace-nowrap ${budgeted && data.budget != null && data.recurringMonthly > data.budget ? "text-[var(--warn)]" : ""}`}
-          >
-            {usd(data.recurringMonthly, { cents: false })} recurring a month
-          </span>
-        )}
-      </div>
-      {budgeted && data.budget != null && (
-        <div
-          className="-mt-2 h-2 overflow-hidden rounded-full bg-[var(--muted)]/15"
-          role="progressbar"
-          aria-label={`${Math.round(pctOfBudget)}% of budget used`}
-          aria-valuenow={Math.round(pctOfBudget)}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div
-            className={`h-full rounded-full ${remaining < 0 ? "bg-[var(--bad)]" : "bg-[var(--accent)]"}`}
-            style={{ width: `${pctOfBudget}%` }}
-          />
+      {(trend || (!budgetable && recurring > 0)) && (
+        <div className="-mt-2 text-xs text-[var(--muted)]" data-shelf-trend>
+          {trend}
+          {/* No budget block here (income, the catch-all): the recurring cost
+              joins this caption instead. */}
+          {!budgetable && recurring > 0 && (
+            <span data-shelf-recurring>{trend ? " · " : ""}{usd(recurring, { cents: false })} recurring</span>
+          )}
         </div>
       )}
 
       {budgetable && (
         <BudgetField
-          key={`${data.id}-${data.budgetEntry.amount ?? "none"}-${data.budgetEntry.period}`}
-          budget={data.budgetEntry.amount}
-          period={data.budgetEntry.period}
-          suggested={data.budgetEntry.suggested}
-          suggestedAnnual={data.budgetEntry.suggestedAnnual}
+          key={`${data.id}-${b.amount ?? "none"}-${b.period}`}
+          budget={b.amount}
+          period={b.period}
+          suggested={b.suggested}
+          suggestedAnnual={b.suggestedAnnual}
           onSave={onSetBudget}
-        />
+        >
+          {(period) =>
+            b.amount != null ? (
+              <div className="mt-3">
+                <BudgetBar spent={spentNow} budget={b.amount} pace={paceOf(data.month, b.period)} period={b.period} />
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  <span className={remaining < 0 ? "text-[var(--bad)]" : ""}>
+                    {remaining >= 0 ? `${usd(remaining, { cents: false })} left` : `${usd(-remaining, { cents: false })} over`}
+                    {annual ? " this year" : partial ? " so far" : ""}
+                  </span>
+                  {/* The plans' cost, as on the Categories row: what of the
+                      budget is already spoken for. Warn when it alone exceeds it. */}
+                  {recurring > 0 && (
+                    <span data-shelf-recurring className={recurNow > b.amount ? "text-[var(--warn)]" : ""}>
+                      {" · "}
+                      {usd(recurNow, { cents: false })} recurring
+                    </span>
+                  )}
+                </p>
+              </div>
+            ) : recurring > 0 ? (
+              <p className="mt-2 text-xs text-[var(--muted)]" data-shelf-recurring>
+                {usd(period === "annual" ? recurring * 12 : recurring, { cents: false })} recurring
+              </p>
+            ) : null
+          }
+        </BudgetField>
       )}
 
       {data.upcoming.length > 0 && (
