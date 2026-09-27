@@ -1444,6 +1444,7 @@ export function recurringsForMonth(month: string): RecurringForMonth[] {
     .all(month) as { merchant: string; categoryId: number | null; amount: number; recurringId: number | null }[];
 
   const consumed = new Set<number>();
+  const recIds = new Set(recs.map((r) => r.id));
   const actual = new Array(recs.length).fill(0);
   const matched = new Array(recs.length).fill(false);
   // Every charge a plan claimed this month. A plan that charges once a month or
@@ -1506,9 +1507,14 @@ export function recurringsForMonth(month: string): RecurringForMonth[] {
       // series claims every charge on its key (or a folded clone's) plus the
       // charges the detector linked to it under a renamed descriptor.
       const key = canon(t.merchant);
+      // A charge the detector linked to another plan on this page is that
+      // plan's: the 8th's plan keyed by the vendor's name took Carmel's
+      // September charge under a linked descriptor ("Ben Franklin
+      // Plumbing"), read as paid twice, and left Carmel overdue.
+      const elsewhere = t.recurringId != null && t.recurringId !== r.id && recIds.has(t.recurringId);
       const ours = isSeriesKey(r.merchant)
         ? t.recurringId === r.id
-        : key === r.merchant || t.recurringId === r.id || clonesOf.get(r.merchant)?.has(key);
+        : !elsewhere && (key === r.merchant || t.recurringId === r.id || clonesOf.get(r.merchant)?.has(key));
       if (ours && (expense ? t.amount < 0 : t.amount > 0)) {
         consumed.add(i);
         actual[ri] += Math.abs(t.amount);
