@@ -4,6 +4,7 @@ import { usd, isCurrentMonth } from "@/lib/format";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
+import { BudgetField } from "@/components/BudgetField";
 
 export function CategoryHeader({ data, month }: { data: CatSummary | null; month: string }) {
   const label = new Date(month + "-01T00:00:00Z").toLocaleDateString("en-US", {
@@ -32,18 +33,22 @@ export function CategoryBody({
   data,
   onOpenMerchant,
   onSetExcluded,
+  onSetBudget,
   onDelete,
   confirmingDelete,
 }: {
   data: CatSummary;
   onOpenMerchant: (merchant: string) => void;
   onSetExcluded: (exclude: boolean) => void;
+  onSetBudget: (amount: number | null, period: "monthly" | "annual") => void;
   onDelete: () => void;
   confirmingDelete: boolean;
 }) {
   const isIncome = data.kind === "income";
   const isExcluded = data.excludeFromTotals === 1;
   const budgeted = data.budget != null && !isIncome && !isExcluded;
+  // Income, money movement and the catch-all carry no budget.
+  const budgetable = !isIncome && !isExcluded && data.name !== "Uncategorized";
 
   // The category's properties in the vendor shelf's anatomy: two cards (how
   // much this month; a typical month), then one caption line for the trend
@@ -98,6 +103,17 @@ export function CategoryBody({
             style={{ width: `${pctOfBudget}%` }}
           />
         </div>
+      )}
+
+      {budgetable && (
+        <BudgetField
+          key={`${data.id}-${data.budgetEntry.amount ?? "none"}-${data.budgetEntry.period}`}
+          budget={data.budgetEntry.amount}
+          period={data.budgetEntry.period}
+          suggested={data.budgetEntry.suggested}
+          suggestedAnnual={data.budgetEntry.suggestedAnnual}
+          onSave={onSetBudget}
+        />
       )}
 
       {data.upcoming.length > 0 && (
