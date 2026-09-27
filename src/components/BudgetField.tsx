@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { CommitInput } from "@/components/InlineEdit";
 import { usd } from "@/lib/format";
 
@@ -8,9 +8,7 @@ type Period = "monthly" | "annual";
 
 // A category's budget, edited in its shelf (DESIGN.md §2, "The shelf is the
 // control surface"): a bordered amount, the period as a native select, and,
-// with no budget yet, a "Use $X" offer of the typical spend; beneath them,
-// whatever measures against the budget (the shelf's bar and caption), given
-// the period on screen. The Categories
+// with no budget yet, a "Use $X" offer of the typical spend. The Categories
 // row only shows the budget. It used to be a field there disguised as text,
 // with a "/mo" label that silently converted it to an annual budget.
 // Uncontrolled and remounted via `key` when the saved value changes.
@@ -20,14 +18,12 @@ export function BudgetField({
   suggested = 0,
   suggestedAnnual = 0,
   onSave,
-  children,
 }: {
   budget: number | null;
   period?: Period;
   suggested?: number;
   suggestedAnnual?: number;
   onSave: (amount: number | null, period: Period) => void;
-  children?: (period: Period) => ReactNode;
 }) {
   const [period, setPeriod] = useState<Period>(savedPeriod);
   // How to remove a budget is said while you're editing it, not always.
@@ -82,7 +78,6 @@ export function BudgetField({
       {budget !== null && editing && (
         <p className="mt-2 text-xs text-[var(--muted)]" data-budget-hint>Empty the amount to remove the budget.</p>
       )}
-      {children?.(period)}
     </div>
   );
 }

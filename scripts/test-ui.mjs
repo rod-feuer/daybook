@@ -1415,8 +1415,17 @@ async function categoryShelfBudget(browser) {
       if (await page.$(`${shelfSel} [data-shelf-budget] input`)) { name = label; break; }
       await page.keyboard.press("Escape"); await shelfIs(page, false);
     }
-    const block = await page.evaluate((sel) => { const b = document.querySelector(`${sel} [data-shelf-budget]`); const bars = document.querySelectorAll(`${sel} [data-budget-bar], ${sel} [role=progressbar]`); return { bars: bars.length, inBlock: !!b?.querySelector("[data-budget-bar]"), hint: !!b?.querySelector("[data-budget-hint]") }; }, shelfSel);
-    record("category shelf budget", "the budget block holds the one bar (the shared BudgetBar), and the removal hint waits for focus", name != null && block.bars === 1 && block.inBlock && !block.hint, JSON.stringify(block));
+    // Readings first, the setting last: the one bar and its caption sit
+    // right under the cards they measure, above the chart and the field.
+    const block = await page.evaluate((sel) => {
+      const q = (x) => document.querySelector(`${sel} ${x}`);
+      const top = (x) => q(x)?.getBoundingClientRect().top ?? null;
+      const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)].map((c) => c.getBoundingClientRect().bottom);
+      const bars = document.querySelectorAll(`${sel} [data-budget-bar], ${sel} [role=progressbar]`).length;
+      const bar = top("[data-shelf-status] [data-budget-bar]");
+      return { bars, underCards: bar != null && bar > Math.max(...cards), aboveChart: bar != null && (top("[data-month-bars]") ?? Infinity) > bar, aboveField: bar != null && top("[data-shelf-budget]") > bar, caption: q("[data-shelf-status] p")?.textContent ?? "", hint: !!q("[data-shelf-budget] [data-budget-hint]") };
+    }, shelfSel);
+    record("category shelf budget", "the one bar and its caption sit under the cards, above the chart and the field; the caption names the whole; the removal hint waits for focus", name != null && block.bars === 1 && block.underCards && block.aboveChart && block.aboveField && /(left|over) of \$[\d,]+/.test(block.caption) && !block.hint, JSON.stringify(block));
     record("category shelf budget", "a budgeted category's shelf carries a bordered budget field and a period select", name != null && !!(await page.$(`${shelfSel} [data-shelf-budget] select[aria-label='Budget period']`)), name ?? "no shelf had one");
     if (!name) return;
     const field = () => page.$(`${shelfSel} [data-shelf-budget] input`);

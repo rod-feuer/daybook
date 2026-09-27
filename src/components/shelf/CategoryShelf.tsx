@@ -107,11 +107,41 @@ export function CategoryBody({
           <div className="text-[15px] font-semibold leading-8 tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
         </PropertyCard>
       </div>
+      {/* The budget's reading sits under the figures it measures: the bar,
+          then what's left of what, then what's recurring. The field that sets
+          the budget comes after the evidence; between the figures and this
+          line it split one reading in two. */}
+      {budgetable && (
+        <div className="-mt-2" data-shelf-status>
+          {b.amount != null && (
+            <BudgetBar spent={spentNow} budget={b.amount} pace={paceOf(data.month, b.period)} period={b.period} />
+          )}
+          <p className={`${b.amount != null ? "mt-2" : ""} text-xs text-[var(--muted)]`}>
+            {b.amount != null ? (
+              <span className={remaining < 0 ? "text-[var(--bad)]" : ""}>
+                {remaining >= 0 ? `${usd(remaining, { cents: false })} left` : `${usd(-remaining, { cents: false })} over`}{" "}
+                of {usd(b.amount, { cents: false })}
+                {annual ? " this year" : partial ? " so far" : ""}
+              </span>
+            ) : (
+              <span>No budget</span>
+            )}
+            {/* The plans' cost, as on the Categories row: what of the budget
+                is already spoken for. Warn when it alone exceeds it. */}
+            {recurring > 0 && (
+              <span data-shelf-recurring className={b.amount != null && recurNow > b.amount ? "text-[var(--warn)]" : ""}>
+                {" · "}
+                {usd(recurNow, { cents: false })} recurring
+              </span>
+            )}
+          </p>
+        </div>
+      )}
       {(trend || (!budgetable && recurring > 0)) && (
-        <div className="-mt-2 text-xs text-[var(--muted)]" data-shelf-trend>
+        <div className={`${budgetable ? "-mt-3" : "-mt-2"} text-xs text-[var(--muted)]`} data-shelf-trend>
           {trend}
-          {/* No budget block here (income, the catch-all): the recurring cost
-              joins this caption instead. */}
+          {/* No budget here (income, the catch-all): the recurring cost joins
+              this caption instead. */}
           {!budgetable && recurring > 0 && (
             <span data-shelf-recurring>{trend ? " · " : ""}{usd(recurring, { cents: false })} recurring</span>
           )}
@@ -128,33 +158,7 @@ export function CategoryBody({
           suggested={b.suggested}
           suggestedAnnual={b.suggestedAnnual}
           onSave={onSetBudget}
-        >
-          {(period) =>
-            b.amount != null ? (
-              <div className="mt-3">
-                <BudgetBar spent={spentNow} budget={b.amount} pace={paceOf(data.month, b.period)} period={b.period} />
-                <p className="mt-2 text-xs text-[var(--muted)]">
-                  <span className={remaining < 0 ? "text-[var(--bad)]" : ""}>
-                    {remaining >= 0 ? `${usd(remaining, { cents: false })} left` : `${usd(-remaining, { cents: false })} over`}
-                    {annual ? " this year" : partial ? " so far" : ""}
-                  </span>
-                  {/* The plans' cost, as on the Categories row: what of the
-                      budget is already spoken for. Warn when it alone exceeds it. */}
-                  {recurring > 0 && (
-                    <span data-shelf-recurring className={recurNow > b.amount ? "text-[var(--warn)]" : ""}>
-                      {" · "}
-                      {usd(recurNow, { cents: false })} recurring
-                    </span>
-                  )}
-                </p>
-              </div>
-            ) : recurring > 0 ? (
-              <p className="mt-2 text-xs text-[var(--muted)]" data-shelf-recurring>
-                {usd(period === "annual" ? recurring * 12 : recurring, { cents: false })} recurring
-              </p>
-            ) : null
-          }
-        </BudgetField>
+        />
       )}
 
       {data.upcoming.length > 0 && (
