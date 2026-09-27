@@ -48,6 +48,7 @@ export function SummaryCard({
   barCaption,
   alarm = false,
   status,
+  statusDetail,
   note,
   className = "",
 }: {
@@ -63,6 +64,9 @@ export function SummaryCard({
   // gauge it is about. The category bars carry the same device.
   mark?: { at: number; label: string };
   status?: ReactNode; // the line under the bar; the caller sets its colours
+  // Counts that follow the verdict ("· 12 upcoming · 70 paid"): bookkeeping,
+  // so a caption beside it. At the verdict's size they outranked the figures.
+  statusDetail?: ReactNode;
   note?: string; // a caveat on what the bar measures: a "?" beside the caption, so it costs no line
   className?: string;
 }) {
@@ -163,7 +167,12 @@ export function SummaryCard({
               budget" — so it sits under it, the panel's conclusion. Above the
               figures it claimed a headline role it didn't have, and on
               Recurrings read as a stray line of counts over the money. */}
-          {status && <div data-status className="mt-3 flex flex-wrap items-center gap-x-2 text-[15px] font-semibold">{status}</div>}
+          {status && (
+            <div data-status className="mt-3 flex flex-wrap items-baseline gap-x-2 text-[15px] font-semibold">
+              {status}
+              {statusDetail && <span data-status-detail className="flex flex-wrap items-baseline gap-x-2 text-xs font-normal">{statusDetail}</span>}
+            </div>
+          )}
         </div>
       </div>
     </div>

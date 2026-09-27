@@ -212,9 +212,10 @@ far, paid so far), at the summary size and every other at the card-title
 size, on every page — and the budget
 across the category card's (its text starting on that card's text), with the hairline
 in the middle of the gutter. The budget panel reads label, share, bar, then
-the verdict sentence at the card-title size — "on pace to finish under
-budget", "2 overdue · 20 upcoming · 60 paid" — since every verdict describes
-the bar. They stack below desktop width. One colour signal per card, the verdict's: only a finished
+the verdict at the card-title size — "on pace to finish under budget",
+"2 overdue" — since every verdict describes the bar; counts that follow it
+("· 20 upcoming · 60 paid", "· 6 not budgeted") are bookkeeping, a 12px muted
+caption on the same line, never the verdict's size. They stack below desktop width. One colour signal per card, the verdict's: only a finished
 month's net takes its colour.
 
 **Page anatomy** — header: title, optional one-line subtitle, the month picker

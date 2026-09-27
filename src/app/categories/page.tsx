@@ -305,7 +305,7 @@ function BudgetSummary({
             <Tooltip label="Show the categories over budget" onlyIfTruncated={false}>
               <button
                 onClick={() => onFilter("over")}
-                className={`tap font-medium text-[var(--bad)] hover:underline ${filter === "over" ? "underline" : ""}`}
+                className={`tap text-[var(--bad)] hover:underline ${filter === "over" ? "underline" : ""}`}
               >
                 {overLabel}
               </button>
@@ -313,6 +313,10 @@ function BudgetSummary({
           ) : (
             <span className="text-[var(--muted)]">Nothing over budget</span>
           )}
+        </>
+      }
+      statusDetail={
+        <>
           {unbudgeted.length > 0 && (
             <>
               <span className="text-[var(--muted)]">·</span>
