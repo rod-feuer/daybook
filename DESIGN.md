@@ -250,13 +250,14 @@ split), and the action row. The footer link follows the content, not the panel e
 one anatomy: a **vendor** (or one of its plans; a vendor with several plans
 lists them with their monthly total in place of the cards, each opening its
 own shelf), a **category** (its badge and name in the header are its icon, colour,
-type and name editors; two blocks: this month, spent leading at the summary
-size over the typical month, one caption for the trend, mid-month against the
-same days of last month, and the last 12 months as bars with the typical month
-dashed and an unfinished month hatched; then the budget, a
-bordered amount and a Monthly / Annual select, "Use $X" of the typical month
-when there is none, the shared `BudgetBar`, and one caption, "$416 left ·
-$6,699 recurring"; the Categories row only shows the budget), and a **charge** — the charge's cards are its date (the editor for an effective
+type and name editors; readings first, the setting last: spent leading at
+the summary size over the typical month; under them the shared `BudgetBar`
+and its caption, "$416 left of $10,375 so far · $6,699 recurring" ("No
+budget · …" without one); the trend, mid-month against the same days of last
+month; the last 12 months as bars with the typical month dashed and an
+unfinished month hatched; then the budget's field, a bordered amount and a
+Monthly / Annual select, "Use $X" of the typical month when there is none;
+the Categories row only shows the budget), and a **charge** — the charge's cards are its date (the editor for an effective
 date) and its amount (bank data); its caption carries the category and its
 plan membership; then the note and its verbs (exclude from totals, split),
 the vendor's recent charges and its spend by year (evidence only: the
