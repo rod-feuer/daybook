@@ -1446,6 +1446,28 @@ async function categoryShelfBudget(browser) {
   });
 }
 
+// The category shelf says what the row says about recurring cost: the plans'
+// monthly total was only on the Categories row, so the shelf, where the
+// budget is set, didn't show how much of it was already spoken for.
+async function categoryShelfRecurring(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const rows = await page.$$("[data-drawer-row]");
+    let pair = null;
+    for (const r of rows) {
+      const m = (await r.evaluate((el) => el.innerText)).match(/\$([\d,]+) recurring(?!\/yr)/);
+      if (!m) continue;
+      await r.click(); await shelfIs(page, true); await shelfSettled(page);
+      const shelf = await page.$eval(shelfSel, (el) => el.querySelector("[data-shelf-recurring]")?.textContent ?? "");
+      pair = { row: m[1], shelf };
+      break;
+    }
+    record("category shelf recurring", "the shelf shows the same monthly recurring cost as the category's row", pair != null && pair.shelf.includes(`$${pair.row} recurring a month`), pair ? `row $${pair.row}, shelf "${pair.shelf}"` : "no row with recurring");
+    if (errs.length) record("category shelf recurring", "page errors", false, errs[0]);
+  });
+}
+
 async function headerNav(browser) {
   await withPage(browser, async (page) => {
     await page.setViewport({ width: 1280, height: 900 });
@@ -1967,7 +1989,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["category shelf budget", categoryShelfBudget],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }
