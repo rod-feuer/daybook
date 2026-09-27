@@ -3155,3 +3155,24 @@ test("a waiting plan's charges show no plan until it is added", () => {
   assert.notEqual(charge().recurringId, null, "In plan");
   assert.equal(merchantSummary("Northwind Gym").planConfirmed, true);
 });
+
+// WHY: Ben Franklin bills two houses. The 8th's plan is keyed by the vendor's
+// own name, so the month view let it claim every charge under that name,
+// including Carmel's September charge, which the bank sent as "Ben Franklin
+// Plumbing" (linked to the vendor) and which sits in Carmel's plan. The 8th
+// read as paid twice and Carmel as overdue. A charge linked to a plan is that
+// plan's.
+test("a charge linked to one plan pays that plan, not a sibling keyed by the vendor's name", () => {
+  const db = getDb();
+  const ins = db.prepare("INSERT INTO recurrings (merchant, avgAmount, cadence, lastDate, nextDate, count) VALUES (?, -11.99, 'monthly', ?, ?, 3)");
+  const eighth = Number(ins.run("Ben Link Pl", "2026-09-08", "2026-10-08").lastInsertRowid);
+  const carmel = Number(ins.run("Ben Link Pl · $11.99", "2026-09-25", "2026-10-25").lastInsertRowid);
+  tx("Ben Link Pl", { amount: -11.99, date: "2026-09-08", recurringId: eighth });
+  tx("Ben Link Plumbing", { amount: -11.99, date: "2026-09-25", recurringId: carmel });
+  linkMerchant("Ben Link Plumbing", "Ben Link Pl");
+  confirmAll();
+  const rows = recurringsForMonth("2026-09");
+  const row = (m: string) => rows.find((r) => r.merchant === m)!;
+  assert.equal(row("Ben Link Pl · $11.99").paid, true, "Carmel is paid by its own charge");
+  assert.equal(row("Ben Link Pl").paidTimes, 1, "the 8th is paid once, not twice");
+});
