@@ -1,32 +1,50 @@
 "use client";
 
 import { usd, isCurrentMonth } from "@/lib/format";
+import { Tooltip } from "@/components/Tooltip";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
 import { BudgetField } from "@/components/BudgetField";
 import { BudgetBar, paceOf } from "@/components/BudgetBar";
+import { CategoryName, EditableCategoryBadge } from "@/components/CategoryIdentity";
 
-export function CategoryHeader({ data, month }: { data: CatSummary | null; month: string }) {
+// The category's identity, edited where it's shown (DESIGN.md §2, "The shelf
+// is the control surface"): the badge opens icon, colour and type; the name
+// renames in place. Both were only on the Categories row, so a category opened
+// from the dashboard couldn't be renamed where you met it. The catch-all
+// "Uncategorized" keeps its name and type.
+export function CategoryHeader({
+  data,
+  month,
+  onRename,
+  onEditAppearance,
+}: {
+  data: CatSummary | null;
+  month: string;
+  onRename: (name: string) => void;
+  onEditAppearance: (patch: { icon?: string; color?: string; kind?: "expense" | "income" }) => void;
+}) {
   const label = new Date(month + "-01T00:00:00Z").toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
     timeZone: "UTC",
   });
+  if (!data) return <div className="truncate text-[15px] font-semibold">…</div>;
+  const fixed = data.name === "Uncategorized";
   return (
-    <>
-      <div className="truncate text-[15px] font-semibold">
-        {data ? `${data.icon} ${data.name}` : "…"}
-      </div>
-      {data && (
+    <div className="flex items-center gap-3" data-category-identity>
+      <EditableCategoryBadge icon={data.icon} color={data.color} kind={data.kind} canEditKind={!fixed} onSave={onEditAppearance} />
+      <div className="min-w-0 flex-1">
+        <CategoryName name={data.name} onRename={fixed ? undefined : onRename} textClassName="text-[15px] font-semibold" />
         <div className="text-xs text-[var(--muted)]">
           {data.upcoming.length > 0
             ? `${data.txCount} posted`
             : `${data.txCount} transaction${data.txCount === 1 ? "" : "s"}`}{" "}
           · {label}
         </div>
-      )}
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -79,11 +97,14 @@ export function CategoryBody({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2">
+        {/* The month's figure leads at the summary size; "typical month" is
+            its benchmark, at the card-title size on the same line height so
+            the two labels still align. Equal weight was no hierarchy. */}
         <PropertyCard label={`${isIncome ? "received" : isExcluded ? "total" : "spent"}${partial ? " so far" : ""}`}>
-          <div className="text-[15px] font-semibold tabular-nums">{usd(data.spent, { cents: false })}</div>
+          <div className="text-2xl font-semibold tabular-nums" data-shelf-lead>{usd(data.spent, { cents: false })}</div>
         </PropertyCard>
         <PropertyCard label="typical month">
-          <div className="text-[15px] font-semibold tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
+          <div className="text-[15px] font-semibold leading-8 tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
         </PropertyCard>
       </div>
       {(trend || (!budgetable && recurring > 0)) && (
@@ -96,6 +117,8 @@ export function CategoryBody({
           )}
         </div>
       )}
+
+      <MonthBars history={data.history} typical={data.monthlyAvg} partial={partial} />
 
       {budgetable && (
         <BudgetField
@@ -213,3 +236,63 @@ export function CategoryBody({
 }
 
 // Calendar months from firstSeen through today (inclusive), clamped to [1, 12]
+
+// Twelve months of the category's spending, ending with the viewed one: the
+// evidence behind "typical month", which is the dashed line. Mid-month the
+// viewed bar is hatched, since it isn't a whole month (DESIGN.md §1, Honest).
+function MonthBars({ history, typical, partial }: { history: CatSummary["history"]; typical: number; partial: boolean }) {
+  const top = Math.max(typical, ...history.map((h) => h.spent));
+  if (top <= 0) return null;
+  const name = (m: string, style: "short" | "narrow") =>
+    new Date(m + "-01T00:00:00Z").toLocaleDateString("en-US", { month: style, timeZone: "UTC" });
+  const said = history
+    .map((h, i) => `${name(h.month, "short")} ${usd(h.spent, { cents: false })}${partial && i === history.length - 1 ? " so far" : ""}`)
+    .join(", ");
+  return (
+    <div data-month-bars>
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className="stat-label">Last 12 months</div>
+        <span className="flex items-center gap-1 text-[11px] text-[var(--muted)]">
+          <span aria-hidden className="w-3 border-t border-dashed border-[var(--muted)]" />
+          typical
+        </span>
+      </div>
+      <div role="img" aria-label={`Spending by month: ${said}. Typical month ${usd(typical, { cents: false })}.`}>
+        <div className="relative flex h-16 items-end gap-1">
+          {history.map((h, i) => {
+            const last = i === history.length - 1;
+            // The viewed month is dark; mid-month it's hatched as well, since
+            // it isn't a whole month yet.
+            const tone = last ? "bg-[var(--foreground)]/60" : "bg-[var(--muted)]/35";
+            const hatch = last && partial ? { backgroundImage: "repeating-linear-gradient(135deg, var(--card) 0 2px, transparent 2px 5px)" } : {};
+            return (
+              <Tooltip
+                key={h.month}
+                label={`${name(h.month, "short")} ${h.month.slice(0, 4)}: ${usd(h.spent, { cents: false })}${partial && last ? " so far" : ""}`}
+                onlyIfTruncated={false}
+                className="flex h-full flex-1 items-end"
+              >
+                <span
+                  data-bar={h.month}
+                  className={`block w-full ${tone}`}
+                  style={{ height: h.spent > 0 ? `max(2px, ${(h.spent / top) * 100}%)` : 0, ...hatch }}
+                />
+              </Tooltip>
+            );
+          })}
+          <span
+            aria-hidden
+            data-typical-line
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[var(--muted)]"
+            style={{ bottom: `${(typical / top) * 100}%` }}
+          />
+        </div>
+        <div aria-hidden className="mt-1 flex gap-1 text-[11px] text-[var(--muted)]">
+          {history.map((h) => (
+            <span key={h.month} className="flex-1 text-center">{name(h.month, "narrow")}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

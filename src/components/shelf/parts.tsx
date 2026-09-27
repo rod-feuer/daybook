@@ -139,7 +139,7 @@ export function ShelfRow({
               charge list omits it; a category's flush list keeps it (showGlyph). */}
           {membership || (flush && !showGlyph) ? null : recurring !== "none" ? (
             <Tooltip label={RECURRING_LABEL[recurring]} onlyIfTruncated={false} className="w-3.5 shrink-0">
-              <RecurringGlyph state={recurring} muted={muted} className="block w-full text-center" />
+              <RecurringGlyph state={recurring} className="block w-full text-center" />
             </Tooltip>
           ) : (
             <span className="w-3.5 shrink-0" aria-hidden />

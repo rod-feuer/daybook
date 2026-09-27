@@ -2126,6 +2126,7 @@ export type CategorySummary = {
   txCount: number;
   prevSpent: number; // same, prior month (for the MoM card), through prevThrough
   prevThrough: number | null; // mid-month: the day last month is summed through
+  history: { month: string; spent: number }[]; // the 12 months ending with this one, oldest first
   monthlyAvg: number; // trailing-12 average magnitude (the "typical month" benchmark)
   budget: number | null; // monthly equivalent (an annual budget counts at 1/12)
   // The budget as entered, and the suggestion for an empty one: the shelf edits
@@ -2196,6 +2197,25 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   }
   const cur = monthAgg(month);
   const prev = monthAgg(shiftMonth(month, -1), prevThrough ?? 31);
+  // Twelve months ending with this one, for the shelf's chart: what "typical
+  // month" is made of (steady, seasonal, or one big month).
+  const byMonth = new Map(
+    (
+      db
+        .prepare(
+          `SELECT substr(COALESCE(effectiveDate, date),1,7) AS m, COALESCE(SUM(${magExpr}), 0) AS s
+           FROM transactions
+           WHERE categoryId = ? AND excluded = 0
+             AND substr(COALESCE(effectiveDate, date),1,7) BETWEEN ? AND ?
+           GROUP BY m`
+        )
+        .all(categoryId, shiftMonth(month, -11), month) as { m: string; s: number }[]
+    ).map((r) => [r.m, r.s])
+  );
+  const history = Array.from({ length: 12 }, (_, i) => {
+    const m = shiftMonth(month, i - 11);
+    return { month: m, spent: Number((byMonth.get(m) ?? 0).toFixed(2)) };
+  });
   const t12 = (
     db
       .prepare(
@@ -2260,6 +2280,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     txCount: cur.n,
     prevSpent: Number(prev.s.toFixed(2)),
     prevThrough,
+    history,
     monthlyAvg: Number((t12 / 12).toFixed(2)),
     budget: getBudgets()[cat.id] ?? null,
     budgetEntry: (() => {
