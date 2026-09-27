@@ -1395,6 +1395,42 @@ async function suggestedPlanShelf(browser) {
 // with ‹ ›; every header is one height, so switching tabs doesn't jump; ⋯ is
 // a real menu; the phone's utilities say what they are; and every summary
 // card leads with one result at the summary size, the rest supporting it.
+// A budget is set in the category's shelf, beside the spending that
+// justifies it (DESIGN.md §2, "The shelf is the control surface"). The shelf
+// showed "$X of $Y budget" but could not change it, so the only way was a
+// field on the Categories row that reads as plain text.
+async function categoryShelfBudget(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const rows = await page.$$("[data-drawer-row]");
+    let name = null;
+    for (const r of rows) {
+      const label = (await r.evaluate((el) => el.innerText.split("\n")[0])).trim();
+      if (/uncategorized/i.test(label)) continue;
+      await r.click(); await shelfIs(page, true); await shelfSettled(page);
+      if (await page.$(`${shelfSel} [data-shelf-budget] input`)) { name = label; break; }
+      await page.keyboard.press("Escape"); await shelfIs(page, false);
+    }
+    record("category shelf budget", "an expense category's shelf carries a budget field, at rest", name != null, name ?? "no shelf had one");
+    if (!name) return;
+    const read = () => page.evaluate((sel) => document.querySelector(`${sel} [data-shelf-budget] input`).value, shelfSel);
+    const before = await read();
+    const field = await page.$(`${shelfSel} [data-shelf-budget] input`);
+    await field.click({ clickCount: 3 }); await field.type("4321"); await page.keyboard.press("Enter");
+    // the page behind the shelf re-reads: its row's field shows the new amount
+    const onRow = await page.waitForFunction((sel) => [...document.querySelectorAll("main input[aria-label$='budget']")].some((i) => !i.closest(sel) && i.value === "4,321"), { timeout: 8000 }, shelfSel).then(() => true, () => false);
+    const inShelf = await read();
+    record("category shelf budget", "a budget set in the shelf is saved, and the Categories row shows it", onRow && inShelf === "4,321", `${name}: ${before || "none"} → shelf ${inShelf}, row updated=${onRow}`);
+    // restore, so later groups see the fixture's budgets
+    const again = await page.$(`${shelfSel} [data-shelf-budget] input`);
+    await again.click({ clickCount: 3 }); await page.keyboard.press("Backspace");
+    if (before) await again.type(before);
+    await page.keyboard.press("Enter"); await sleep(800);
+    if (errs.length) record("category shelf budget", "page errors", false, errs[0]);
+  });
+}
+
 async function headerNav(browser) {
   await withPage(browser, async (page) => {
     await page.setViewport({ width: 1280, height: 900 });
@@ -1922,7 +1958,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["category shelf budget", categoryShelfBudget],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

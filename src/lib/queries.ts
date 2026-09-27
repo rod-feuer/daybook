@@ -2126,7 +2126,10 @@ export type CategorySummary = {
   txCount: number;
   prevSpent: number; // same, prior month (for the MoM card)
   monthlyAvg: number; // trailing-12 average magnitude (the "typical month" benchmark)
-  budget: number | null;
+  budget: number | null; // monthly equivalent (an annual budget counts at 1/12)
+  // The budget as entered, and the suggestion for an empty one: the shelf edits
+  // it with the Categories page's field, so both offer the same "Use $X".
+  budgetEntry: { amount: number | null; period: BudgetPeriod; suggested: number; suggestedAnnual: number };
   upcoming: { merchant: string; displayName: string; dueDate: string; amount: number }[];
   transactions: {
     id: number;
@@ -2237,6 +2240,10 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     prevSpent: Number(prev.s.toFixed(2)),
     monthlyAvg: Number((t12 / 12).toFixed(2)),
     budget: getBudgets()[cat.id] ?? null,
+    budgetEntry: (() => {
+      const c = categoriesWithTotals(month).find((x) => x.id === cat.id);
+      return { amount: c?.budget ?? null, period: c?.budgetPeriod ?? "monthly", suggested: c?.suggestedBudget ?? 0, suggestedAnnual: c?.suggestedAnnualBudget ?? 0 };
+    })(),
     upcoming,
     transactions: txns.map((t) => ({
       ...t,

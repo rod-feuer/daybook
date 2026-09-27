@@ -349,6 +349,8 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   // The category's own verbs, in its shelf (the row only opens the shelf).
   const categorySetExcluded = (id: number, excludeFromTotals: boolean) =>
     write(() => patchJson(`/api/categories/${id}`, { excludeFromTotals }), { error: "Couldn't update category — please try again" });
+  const categorySetBudget = (id: number, budget: number | null, period: "monthly" | "annual") =>
+    write(() => patchJson(`/api/categories/${id}`, { budget, period }), { error: "Couldn't save budget — please try again" });
   // Two-step delete, no native confirm: the first click arms the button for
   // three seconds, the second deletes; the shelf closes on its category.
   const [confirmingDelete, setConfirmingDelete] = useState<number | null>(null);
@@ -509,6 +511,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 data={cData}
                 onOpenMerchant={drillToMerchant}
                 onSetExcluded={(exclude) => categorySetExcluded(cData.id, exclude)}
+                onSetBudget={(amount, period) => categorySetBudget(cData.id, amount, period)}
                 onDelete={() => categoryDelete(cData)}
                 confirmingDelete={confirmingDelete === cData.id}
               />
