@@ -142,7 +142,8 @@ and §3 carry over unchanged.
   drill chevron is the reference). `opacity-0 group-hover` gating is a defect,
   not a scope decision. List rows that open the shelf are keyboard rows
   (`rowButtonProps` — role, tabIndex, Enter/Space) since they hold nested
-  controls and can't be `<button>`s. Small controls carry `tap` (`tap-native`
+  controls and can't be `<button>`s. A chart says in words what it shows
+(a `role="img"` label), and motion stops when the system asks for less. Small controls carry `tap` (`tap-native`
   for an input or select): on a coarse pointer the hit area grows 10px on
   every side without moving the type, so nothing you tap is under 32px.
   *(Reach)*
@@ -191,7 +192,11 @@ on the dashboard and the Categories page): the spend fills in the accent at
 60%, past the budget the overage is `--bad`, and one marker says how far
 through the budget's period we are (pace). A category's colour is on its
 badge, never its bar; the recurring amount is in the row's caption and the
-shelf, not on the bar.
+shelf, not on the bar. Under a bar, what's left is said, in the same words on
+every page ("$416 left so far", "$1,350 over"): a spent / budget pair makes
+you subtract. The dashboard's spending chart carries the month's budget as a
+dotted line, the summary card's figure, withheld when material spending sits
+outside the budget (the curve would count what the line doesn't).
 
 **Space and shape** — spacing steps 4 · 8 · 12 · 16 · 24 · 32 (Tailwind 1 2 3
 4 6 8). Card padding 16; the summary card 24. Rows 8 vertical × 16

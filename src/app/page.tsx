@@ -2,11 +2,12 @@
 
 import { buildVerdict } from "@/lib/verdict";
 import { withoutAmountQualifier } from "@/lib/series";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
   Area,
   AreaChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -40,11 +41,51 @@ import type { CategorySuggestion, DeferredToMerge } from "@/lib/categorizeSugges
 // Shapes come from the library that produces them; the aliases keep the file's
 // existing names.
 type Dash = DashboardData;
+
+// Spending in categories without a budget, and whether it's enough to say so
+// (2% of spend, or $250). The summary card's note names it; the chart then
+// withholds its budget line, which would set all spending against part of it.
+function outsideBudget(data: Dash) {
+  const b = data.budget;
+  const amount = b ? Math.max(0, Number((data.expenses - b.spent).toFixed(2))) : 0;
+  return { amount, material: amount > 0 && (amount >= 250 || amount / data.expenses >= 0.02) };
+}
+
+// The chart in words, for a screen reader (and anyone who'd rather read it):
+// where spending is, where it's headed, and what it's measured against.
+function chartSummary(data: Dash, budgetLine: number | null) {
+  const pts = data.pace.series;
+  const now = [...pts].reverse().find((p) => p.actual != null);
+  const end = [...pts].reverse().find((p) => p.projected != null)?.projected ?? null;
+  const prevEnd = Math.max(0, ...pts.map((p) => p.prev ?? 0));
+  const $ = (v: number) => usd(v, { cents: false });
+  return [
+    now ? `Spent ${$(now.actual as number)} through ${shortDate(now.date)}.` : "No spending yet.",
+    end != null ? `Projected to finish at ${$(end)}.` : null,
+    prevEnd > 0 ? `Last month finished at ${$(prevEnd)}.` : null,
+    budgetLine != null ? `Budget ${$(budgetLine)}.` : null,
+  ].filter(Boolean).join(" ");
+}
+
+// Charts and bars hold still when the system asks for less motion.
+const reducedMotion = "(prefers-reduced-motion: reduce)";
+function useReducedMotion() {
+  return useSyncExternalStore(
+    (on) => {
+      const q = window.matchMedia(reducedMotion);
+      q.addEventListener("change", on);
+      return () => q.removeEventListener("change", on);
+    },
+    () => window.matchMedia(reducedMotion).matches,
+    () => false
+  );
+}
 type Tx = TransactionRow;
 
 export default function DashboardPage() {
   const { months, setMonths, month, setMonth, status, setStatus, boot } = useMonthBoot();
   const [data, setData] = useState<Dash | null>(null);
+  const still = useReducedMotion();
   const [recent, setRecent] = useState<Tx[]>([]);
   const openTx = useTxDrawer();
   const shelfActive = useShelfActive();
@@ -149,7 +190,7 @@ export default function DashboardPage() {
             // projected spend it was built from appeared only under the chart.
             const projecting = data.projectedNet != null && data.projectedIncome != null && data.pace.projectedMonthEnd != null;
             const net = projecting ? (data.projectedNet as number) : data.net;
-            const unbudgeted = b ? Math.max(0, Number((data.expenses - b.spent).toFixed(2))) : 0;
+            const { amount: unbudgeted, material: unbudgetedMaterial } = outsideBudget(data);
             const progress = b && b.total > 0 ? b.spent / b.total : data.income > 0 ? data.expenses / data.income : 0;
             const barLabel =
               b && b.total > 0
@@ -239,7 +280,7 @@ export default function DashboardPage() {
                 // the bar leaves out — a sentence, not an equation: its first
                 // term (the budgeted spend) is no longer printed on the card.
                 note={
-                  b && b.total > 0 && unbudgeted > 0 && (unbudgeted >= 250 || unbudgeted / data.expenses >= 0.02)
+                  b && b.total > 0 && unbudgetedMaterial
                     ? `The bar leaves out ${usd(unbudgeted, { cents: false })} spent in categories without a budget.`
                     : undefined
                 }
@@ -277,86 +318,110 @@ export default function DashboardPage() {
                   />
                 )}
               </div>
-              <ChartLegend
-                showProjected={data.pace.projectedMonthEnd != null}
-                showPrev={data.prev != null}
-              />
-              <div className="min-h-[14rem] flex-1">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data.pace.series} margin={{ left: -8, right: 8, top: 4 }}>
-                    <defs>
-                      <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={shortDate}
-                      tick={{ fontSize: 11, fill: "var(--muted)" }}
-                      axisLine={false}
-                      tickLine={false}
-                      minTickGap={28}
+              {(() => {
+                // The month's budget as a line, so the chart answers "will I
+                // finish under?" by itself. Withheld when material spending sits
+                // outside the budget: the curve counts it, the budget doesn't.
+                const b = data.budget;
+                const budgetLine = b && b.total > 0 && !outsideBudget(data).material ? b.total : null;
+                return (
+                  <>
+                    <ChartLegend
+                      showProjected={data.pace.projectedMonthEnd != null}
+                      showPrev={data.prev != null}
+                      showBudget={budgetLine != null}
                     />
-                    <YAxis
-                      domain={[0, "auto"]}
-                      tick={{ fontSize: 11, fill: "var(--muted)" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
-                      width={44}
-                    />
-                    <Tooltip
-                      formatter={(v, name) =>
-                        [
-                          usd(Number(v), { cents: false }),
-                          name === "projected"
-                            ? "Projected"
-                            : name === "prev"
-                              ? "Last month"
-                              : "Spent",
-                        ] as [string, string]
-                      }
-                      labelFormatter={(label) => shortDate(String(label))}
-                      contentStyle={{
-                        borderRadius: 12,
-                        border: "1px solid var(--border)",
-                        background: "var(--card)",
-                        fontSize: 12,
-                      }}
-                      labelStyle={{ color: "var(--foreground)" }}
-                    />
-                    {/* Faint prior-month curve, drawn first so it sits beneath. */}
-                    <Area
-                      type="monotone"
-                      dataKey="prev"
-                      stroke="var(--border)"
-                      strokeWidth={1.5}
-                      fill="none"
-                      connectNulls
-                      dot={false}
-                      activeDot={false}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="actual"
-                      stroke="var(--accent)"
-                      strokeWidth={2}
-                      fill="url(#g)"
-                      connectNulls={false}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="projected"
-                      stroke="var(--accent)"
-                      strokeWidth={2}
-                      strokeDasharray="5 4"
-                      fill="none"
-                      connectNulls
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+                    <div className="min-h-[14rem] flex-1" role="img" aria-label={chartSummary(data, budgetLine)} data-pace-chart>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={data.pace.series} margin={{ left: -8, right: 8, top: 4 }}>
+                          <defs>
+                            <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
+                              <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <XAxis
+                            dataKey="date"
+                            tickFormatter={shortDate}
+                            tick={{ fontSize: 11, fill: "var(--muted)" }}
+                            axisLine={false}
+                            tickLine={false}
+                            minTickGap={28}
+                          />
+                          <YAxis
+                            domain={[0, (max: number) => Math.max(max, (budgetLine ?? 0) * 1.05)]}
+                            tick={{ fontSize: 11, fill: "var(--muted)" }}
+                            axisLine={false}
+                            tickLine={false}
+                            tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+                            width={44}
+                          />
+                          <Tooltip
+                            formatter={(v, name) =>
+                              [
+                                usd(Number(v), { cents: false }),
+                                name === "projected"
+                                  ? "Projected"
+                                  : name === "prev"
+                                    ? "Last month"
+                                    : "Spent",
+                              ] as [string, string]
+                            }
+                            labelFormatter={(label) => shortDate(String(label))}
+                            contentStyle={{
+                              borderRadius: 12,
+                              border: "1px solid var(--border)",
+                              background: "var(--card)",
+                              fontSize: 12,
+                            }}
+                            labelStyle={{ color: "var(--foreground)" }}
+                          />
+                          {budgetLine != null && (
+                            <ReferenceLine
+                              y={budgetLine}
+                              stroke="var(--muted)"
+                              strokeDasharray="2 3"
+                              ifOverflow="extendDomain"
+                              label={{ value: `Budget ${usd(budgetLine, { cents: false })}`, position: "insideTopRight", fontSize: 11, fill: "var(--muted)" }}
+                            />
+                          )}
+                          {/* Faint prior-month curve, drawn first so it sits beneath. */}
+                          <Area
+                            type="monotone"
+                            dataKey="prev"
+                            isAnimationActive={!still}
+                            stroke="var(--border)"
+                            strokeWidth={1.5}
+                            fill="none"
+                            connectNulls
+                            dot={false}
+                            activeDot={false}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="actual"
+                            isAnimationActive={!still}
+                            stroke="var(--accent)"
+                            strokeWidth={2}
+                            fill="url(#g)"
+                            connectNulls={false}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="projected"
+                            isAnimationActive={!still}
+                            stroke="var(--accent)"
+                            strokeWidth={2}
+                            strokeDasharray="5 4"
+                            fill="none"
+                            connectNulls
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             <div className="card p-4 lg:col-span-2">
@@ -474,9 +539,11 @@ export default function DashboardPage() {
 function ChartLegend({
   showProjected,
   showPrev,
+  showBudget,
 }: {
   showProjected: boolean;
   showPrev: boolean;
+  showBudget: boolean;
 }) {
   return (
     <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--muted)]">
@@ -494,6 +561,12 @@ function ChartLegend({
         <span className="flex items-center gap-2">
           <span className="inline-block h-0.5 w-3.5 rounded-full bg-[var(--border)]" />
           Last month
+        </span>
+      )}
+      {showBudget && (
+        <span className="flex items-center gap-2">
+          <span className="inline-block w-3.5 border-t border-dotted border-[var(--muted)]" />
+          Budget
         </span>
       )}
     </div>
@@ -865,6 +938,7 @@ function CategoryBars({
   if (rows.length === 0)
     return <p className="text-[13px] text-[var(--muted)]">No spending this month.</p>;
   const pace = paceOf(month);
+  const current = isCurrentMonth(month);
   const fmt = (v: number) => usd(v, { cents: false });
   const shown = rows.slice(0, 7);
   return (
@@ -902,6 +976,13 @@ function CategoryBars({
             </div>
             {/* Its own budget is the bar; a category without one has none. */}
             {r.budget != null && <BudgetBar spent={r.total} budget={r.budget} pace={pace} />}
+            {/* What's left, said: the pair above made you subtract. The
+                Categories row's words, so the two pages agree. */}
+            {r.budget != null && (
+              <div className={`mt-1 text-right text-xs ${over ? "font-medium text-[var(--bad)]" : "text-[var(--muted)]"}`} data-row-left>
+                {over ? `${fmt(r.total - r.budget)} over` : `${fmt(r.budget - r.total)} left${current ? " so far" : ""}`}
+              </div>
+            )}
           </>
         );
         return r.categoryId != null ? (

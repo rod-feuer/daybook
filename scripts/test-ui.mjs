@@ -1544,6 +1544,45 @@ async function categoryShelfSummary(browser) {
   });
 }
 
+// The dashboard says what it shows: the chart carries the month's budget as a
+// line and a sentence for a screen reader, each category row says what's left
+// (the pair "$9,959 / $10,375" made you subtract), and motion stops when the
+// system asks for less.
+async function dashboardReadout(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+    await page.goto(BASE + "/", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-pace-chart] .recharts-surface", { timeout: 15000 });
+    const chart = await page.evaluate(() => {
+      const c = document.querySelector("[data-pace-chart]");
+      const line = c.querySelector(".recharts-reference-line");
+      const legend = c.parentElement.innerText;
+      const caption = document.querySelector("[data-summary] [data-bar-caption]")?.textContent ?? "";
+      const outside = document.querySelector("[data-summary] [data-hint*='leaves out']")?.getAttribute("data-hint") ?? null;
+      return { said: c.getAttribute("aria-label") ?? "", role: c.getAttribute("role"), lineLabel: line?.textContent ?? null, legendBudget: /\bBudget\b/.test(legend), cardBudget: caption.match(/of (\$[\d,]+)/)?.[1] ?? null, outside };
+    });
+    // Drawn exactly when the curve and the budget count the same spending: when
+    // the card says the bar leaves some out, a line would compare all spending
+    // with part of it, so it's withheld.
+    const drawnRight = chart.outside
+      ? chart.lineLabel == null && !chart.legendBudget
+      : chart.lineLabel != null && chart.cardBudget != null && chart.lineLabel.includes(chart.cardBudget) && chart.legendBudget;
+    record("dashboard readout", "the chart's budget line is the summary card's figure, named in the legend, and withheld when spending sits outside the budget", drawnRight, chart.outside ? `withheld: ${chart.outside}` : `line "${chart.lineLabel}", card ${chart.cardBudget}`);
+    record("dashboard readout", "the chart is described in words for a screen reader", chart.role === "img" && /^(Spent \$[\d,]+ through|No spending yet)/.test(chart.said) && (chart.lineLabel == null || /Budget \$/.test(chart.said)), chart.said);
+
+    const rows = await page.$$eval("[data-drawer-row]", (els) => els.filter((e) => e.querySelector("[data-row-left]")).map((e) => {
+      const nums = [...e.innerText.matchAll(/\$([\d,]+)/g)].map((m) => Number(m[1].replace(/,/g, "")));
+      return { spent: nums[0], budget: nums[1], said: e.querySelector("[data-row-left]").textContent };
+    }));
+    const wrong = rows.filter((r) => { const d = r.budget - r.spent; const n = Number((r.said.match(/\$([\d,]+)/)?.[1] ?? "x").replace(/,/g, "")); return d >= 0 ? !(/left/.test(r.said) && Math.abs(n - d) <= 1) : !(/over/.test(r.said) && Math.abs(n + d) <= 1); });
+    record("dashboard readout", "each budgeted category row says what's left or over, and the sum is right", rows.length > 0 && wrong.length === 0, `${rows.length} rows; ${wrong.map((r) => JSON.stringify(r)).join(" ") || "all right"}`);
+
+    const motion = await page.evaluate(() => { const el = document.querySelector("[data-budget-bar] *[style*='width']") ?? document.querySelector("button"); return getComputedStyle(el).transitionDuration; });
+    record("dashboard readout", "with reduced motion asked for, transitions settle at once", motion.split(",").every((d) => parseFloat(d) < 0.001), motion);
+    if (errs.length) record("dashboard readout", "page errors", false, errs[0]);
+  });
+}
+
 async function headerNav(browser) {
   await withPage(browser, async (page) => {
     await page.setViewport({ width: 1280, height: 900 });
@@ -2065,7 +2104,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }
