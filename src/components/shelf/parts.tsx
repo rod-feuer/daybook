@@ -259,7 +259,7 @@ export function DateField({ label, value, onPick }: { label: string; value: stri
 
 // A stat that is its own editor: the value on top, the label and its
 // auto/edited state beneath, in the same box the read-only metrics use.
-export function PropertyCard({ label, edited, children }: { label: string; edited?: boolean; children: ReactNode }) {
+export function PropertyCard({ label, edited, detail, children }: { label: string; edited?: boolean; detail?: ReactNode; children: ReactNode }) {
   return (
     <div data-property-card className="rounded-lg bg-[var(--background)] px-3 py-2 focus-within:ring-2 focus-within:ring-[var(--accent)]/30">
       {children}
@@ -268,6 +268,8 @@ export function PropertyCard({ label, edited, children }: { label: string; edite
         {/* Only properties with a detected value carry an auto/edited state. */}
         {edited !== undefined && <StateTag edited={edited} />}
       </div>
+      {/* What the figure is measured against, under its label. */}
+      {detail && <div className="mt-1 text-xs text-[var(--muted)]">{detail}</div>}
     </div>
   );
 }

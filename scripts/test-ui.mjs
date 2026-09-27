@@ -1415,17 +1415,17 @@ async function categoryShelfBudget(browser) {
       if (await page.$(`${shelfSel} [data-shelf-budget] input`)) { name = label; break; }
       await page.keyboard.press("Escape"); await shelfIs(page, false);
     }
-    // Readings first, the setting last: the one bar and its caption sit
-    // right under the cards they measure, above the chart and the field.
+    // Readings first, the setting last: the cards say spent and what's left
+    // of what; the one bar sits right under them, above the chart and the field.
     const block = await page.evaluate((sel) => {
       const q = (x) => document.querySelector(`${sel} ${x}`);
       const top = (x) => q(x)?.getBoundingClientRect().top ?? null;
-      const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)].map((c) => c.getBoundingClientRect().bottom);
+      const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)];
       const bars = document.querySelectorAll(`${sel} [data-budget-bar], ${sel} [role=progressbar]`).length;
       const bar = top("[data-shelf-status] [data-budget-bar]");
-      return { bars, underCards: bar != null && bar > Math.max(...cards), aboveChart: bar != null && (top("[data-month-bars]") ?? Infinity) > bar, aboveField: bar != null && top("[data-shelf-budget]") > bar, caption: q("[data-shelf-status] p")?.textContent ?? "", hint: !!q("[data-shelf-budget] [data-budget-hint]") };
+      return { bars, underCards: bar != null && bar > Math.max(...cards.map((c) => c.getBoundingClientRect().bottom)), aboveChart: bar != null && (top("[data-month-bars]") ?? Infinity) > bar, aboveField: bar != null && top("[data-shelf-budget]") > bar, left: cards[1]?.innerText.replace(/\s+/g, " ") ?? "", hint: !!q("[data-shelf-budget] [data-budget-hint]") };
     }, shelfSel);
-    record("category shelf budget", "the one bar and its caption sit under the cards, above the chart and the field; the caption names the whole; the removal hint waits for focus", name != null && block.bars === 1 && block.underCards && block.aboveChart && block.aboveField && /(left|over) of \$[\d,]+/.test(block.caption) && !block.hint, JSON.stringify(block));
+    record("category shelf budget", "the second card says what's left (or over) of the budget; the one bar sits under the cards, above the chart and the field; the removal hint waits for focus", name != null && block.bars === 1 && block.underCards && block.aboveChart && block.aboveField && /^\$[\d,]+ (LEFT|OVER)\b.* of \$[\d,]+/i.test(block.left) && !block.hint, JSON.stringify(block));
     record("category shelf budget", "a budgeted category's shelf carries a bordered budget field and a period select", name != null && !!(await page.$(`${shelfSel} [data-shelf-budget] select[aria-label='Budget period']`)), name ?? "no shelf had one");
     if (!name) return;
     const field = () => page.$(`${shelfSel} [data-shelf-budget] input`);
@@ -1505,12 +1505,15 @@ async function categoryShelfSummary(browser) {
       const c = document.querySelector(`${sel} [data-month-bars]`);
       const bars = [...c.querySelectorAll("[data-bar]")];
       const op = (e) => getComputedStyle(e).backgroundColor;
-      return { bars: bars.length, line: !!c.querySelector("[data-typical-line]"), label: c.querySelector("[role=img]")?.getAttribute("aria-label") ?? "", lastDiffers: op(bars[bars.length - 1]) !== op(bars[0]) };
+      const figs = [...c.querySelectorAll("[data-bar-figure]")].map((e) => e.textContent);
+      // a figure must fit its column, or neighbours collide on a phone
+      const fits = [...c.querySelectorAll("[data-bar-figure]")].every((e) => e.scrollWidth <= e.getBoundingClientRect().width + 1);
+      return { bars: bars.length, figs, fits, legend: c.querySelector("[data-avg-legend]")?.textContent.trim() ?? "", line: !!c.querySelector("[data-typical-line]"), label: c.querySelector("[role=img]")?.getAttribute("aria-label") ?? "", lastDiffers: op(bars[bars.length - 1]) !== op(bars[0]) };
     }, shelfSel);
-    record("category shelf summary", "12 bars, a dashed typical line, the viewed month set apart, and the figures said to a screen reader", chart.bars === 12 && chart.line && chart.lastDiffers && /Spending by month: .*Typical month \$/.test(chart.label), `${chart.bars} bars, line=${chart.line}, last differs=${chart.lastDiffers}`);
+    record("category shelf summary", "12 bars, each with its figure (420, 9.9k, 14k) that fits its column, the average dashed and named \"Avg $X\", the viewed month set apart, and all of it said to a screen reader", chart.bars === 12 && chart.figs.length === 12 && chart.figs.every((f) => /^(\d{1,3}|\d\.\dk|\d+k)$/.test(f)) && chart.fits && /^Avg \$[\d,]+$/.test(chart.legend) && chart.line && chart.lastDiffers && /Spending by month: .*Average month \$/.test(chart.label), `${chart.bars} bars; figures ${chart.figs.join(" ")}; fit=${chart.fits}; legend "${chart.legend}"`);
 
-    const sizes = await page.evaluate((sel) => { const lead = document.querySelector(`${sel} [data-shelf-lead]`); const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)]; return { lead: lead ? getComputedStyle(lead).fontSize : null, other: cards[1] ? getComputedStyle(cards[1].firstElementChild).fontSize : null, heights: cards.map((c) => Math.round(c.getBoundingClientRect().height)) }; }, shelfSel);
-    record("category shelf summary", "spent leads at 24px over the 15px typical month, in cards of one height", sizes.lead === "24px" && sizes.other === "15px" && sizes.heights.length === 2 && sizes.heights[0] === sizes.heights[1], JSON.stringify(sizes));
+    const sizes = await page.evaluate((sel) => { const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)]; return { sizes: cards.map((c) => getComputedStyle(c.firstElementChild).fontSize), heights: cards.map((c) => Math.round(c.getBoundingClientRect().height)) }; }, shelfSel);
+    record("category shelf summary", "the two cards' figures are one size (24px), in cards of one height", sizes.sizes.length === 2 && sizes.sizes.every((z) => z === "24px") && sizes.heights[0] === sizes.heights[1], JSON.stringify(sizes));
 
     // Rename from the header; the Categories row follows.
     const renameBtn = await page.$(`${shelfSel} [data-category-identity] button[aria-label^="Rename"]`);

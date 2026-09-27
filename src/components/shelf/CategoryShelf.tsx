@@ -68,11 +68,11 @@ export function CategoryBody({
   // Income, money movement and the catch-all carry no budget.
   const budgetable = !isIncome && !isExcluded && data.name !== "Uncategorized";
 
-  // Two blocks. This month: what it spent against a typical month, and one
-  // caption for the trend. The budget: its field, the bar that measures
-  // against it (the Categories row's BudgetBar, with its pace line), and one
-  // caption for what's left and what's recurring. The budget used to be
-  // split across both, with its figure said twice. Mid-month, "spent" is
+  // Two cards at one size, each carrying what it's measured against beneath
+  // its label: spent, with the trend; what's left, of what, with what's
+  // recurring (the average month when there's no budget). Then the budget's
+  // bar, the 12 months with their average, and the field. The comparisons
+  // were two loose caption lines under the bar. Mid-month, "spent" is
   // labelled "so far" and last month is compared over the same days.
   const partial = isCurrentMonth(data.month);
   const delta = data.spent - data.prevSpent;
@@ -97,58 +97,56 @@ export function CategoryBody({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2">
-        {/* The month's figure leads at the summary size; "typical month" is
-            its benchmark, at the card-title size on the same line height so
-            the two labels still align. Equal weight was no hierarchy. */}
-        <PropertyCard label={`${isIncome ? "received" : isExcluded ? "total" : "spent"}${partial ? " so far" : ""}`}>
+        <PropertyCard label={`${isIncome ? "received" : isExcluded ? "total" : "spent"}${partial ? " so far" : ""}`} detail={trend}>
           <div className="text-2xl font-semibold tabular-nums" data-shelf-lead>{usd(data.spent, { cents: false })}</div>
         </PropertyCard>
-        <PropertyCard label="typical month">
-          <div className="text-[15px] font-semibold leading-8 tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
-        </PropertyCard>
+        {budgetable && b.amount != null ? (
+          <PropertyCard
+            label={`${remaining >= 0 ? "left" : "over"}${annual ? " this year" : partial ? " so far" : ""}`}
+            detail={
+              <>
+                <div>of {usd(b.amount, { cents: false })}</div>
+                {/* The plans' cost, as on the Categories row: what of the
+                    budget is already spoken for. Warn when it alone exceeds it.
+                    Its own line: beside "of $10,375" it wrapped mid-phrase. */}
+                {recurring > 0 && (
+                  <div data-shelf-recurring className={recurNow > b.amount ? "text-[var(--warn)]" : ""}>
+                    {usd(recurNow, { cents: false })} recurring
+                  </div>
+                )}
+              </>
+            }
+          >
+            <div className={`text-2xl font-semibold tabular-nums ${remaining < 0 ? "text-[var(--bad)]" : ""}`} data-shelf-left>
+              {usd(Math.abs(remaining), { cents: false })}
+            </div>
+          </PropertyCard>
+        ) : (
+          <PropertyCard
+            label="avg month"
+            detail={
+              <>
+                {budgetable ? "No budget" : null}
+                {recurring > 0 && (
+                  <span data-shelf-recurring>
+                    {budgetable ? " · " : ""}
+                    {usd(recurring, { cents: false })} recurring
+                  </span>
+                )}
+              </>
+            }
+          >
+            <div className="text-2xl font-semibold tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
+          </PropertyCard>
+        )}
       </div>
-      {/* The budget's reading sits under the figures it measures: the bar,
-          then what's left of what, then what's recurring. The field that sets
-          the budget comes after the evidence; between the figures and this
-          line it split one reading in two. */}
-      {budgetable && (
+      {budgetable && b.amount != null && (
         <div className="-mt-2" data-shelf-status>
-          {b.amount != null && (
-            <BudgetBar spent={spentNow} budget={b.amount} pace={paceOf(data.month, b.period)} period={b.period} />
-          )}
-          <p className={`${b.amount != null ? "mt-2" : ""} text-xs text-[var(--muted)]`}>
-            {b.amount != null ? (
-              <span className={remaining < 0 ? "text-[var(--bad)]" : ""}>
-                {remaining >= 0 ? `${usd(remaining, { cents: false })} left` : `${usd(-remaining, { cents: false })} over`}{" "}
-                of {usd(b.amount, { cents: false })}
-                {annual ? " this year" : partial ? " so far" : ""}
-              </span>
-            ) : (
-              <span>No budget</span>
-            )}
-            {/* The plans' cost, as on the Categories row: what of the budget
-                is already spoken for. Warn when it alone exceeds it. */}
-            {recurring > 0 && (
-              <span data-shelf-recurring className={b.amount != null && recurNow > b.amount ? "text-[var(--warn)]" : ""}>
-                {" · "}
-                {usd(recurNow, { cents: false })} recurring
-              </span>
-            )}
-          </p>
-        </div>
-      )}
-      {(trend || (!budgetable && recurring > 0)) && (
-        <div className={`${budgetable ? "-mt-3" : "-mt-2"} text-xs text-[var(--muted)]`} data-shelf-trend>
-          {trend}
-          {/* No budget here (income, the catch-all): the recurring cost joins
-              this caption instead. */}
-          {!budgetable && recurring > 0 && (
-            <span data-shelf-recurring>{trend ? " · " : ""}{usd(recurring, { cents: false })} recurring</span>
-          )}
+          <BudgetBar spent={spentNow} budget={b.amount} pace={paceOf(data.month, b.period)} period={b.period} />
         </div>
       )}
 
-      <MonthBars history={data.history} typical={data.monthlyAvg} partial={partial} />
+      <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
 
       {budgetable && (
         <BudgetField
@@ -241,28 +239,53 @@ export function CategoryBody({
 
 // Calendar months from firstSeen through today (inclusive), clamped to [1, 12]
 
-// Twelve months of the category's spending, ending with the viewed one: the
-// evidence behind "typical month", which is the dashed line. Mid-month the
-// viewed bar is hatched, since it isn't a whole month (DESIGN.md §1, Honest).
-function MonthBars({ history, typical, partial }: { history: CatSummary["history"]; typical: number; partial: boolean }) {
-  const top = Math.max(typical, ...history.map((h) => h.spent));
+// Twelve months of the category's spending, ending with the viewed one, each
+// bar with its figure: the evidence behind the average month, which is the
+// dashed line. Mid-month the viewed bar is hatched, since it isn't a whole
+// month (DESIGN.md §1, Honest), and the average leaves it out.
+const BAR_AREA = 64; // px
+
+// A bar's figure, short enough for a 24px column: 420, 9.9k, 14k. The "$"
+// is left to the section (every figure here is money); exact on hover.
+function barFigure(v: number): string {
+  if (v < 1000) return String(Math.round(v));
+  const k = v / 1000;
+  return k < 9.95 ? `${k.toFixed(1)}k` : `${Math.round(k)}k`;
+}
+
+function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; avg: number; partial: boolean }) {
+  const top = Math.max(avg, ...history.map((h) => h.spent));
   if (top <= 0) return null;
   const name = (m: string, style: "short" | "narrow") =>
     new Date(m + "-01T00:00:00Z").toLocaleDateString("en-US", { month: style, timeZone: "UTC" });
   const said = history
     .map((h, i) => `${name(h.month, "short")} ${usd(h.spent, { cents: false })}${partial && i === history.length - 1 ? " so far" : ""}`)
     .join(", ");
+  const px = (v: number) => (v / top) * BAR_AREA;
   return (
     <div data-month-bars>
       <div className="mb-2 flex items-baseline justify-between">
         <div className="stat-label">Last 12 months</div>
-        <span className="flex items-center gap-1 text-[11px] text-[var(--muted)]">
+        <span className="flex items-center gap-1 text-[11px] text-[var(--muted)]" data-avg-legend>
           <span aria-hidden className="w-3 border-t border-dashed border-[var(--muted)]" />
-          typical
+          Avg {usd(avg, { cents: false })}
         </span>
       </div>
-      <div role="img" aria-label={`Spending by month: ${said}. Typical month ${usd(typical, { cents: false })}.`}>
-        <div className="relative flex h-16 items-end gap-1">
+      <div role="img" aria-label={`Spending by month: ${said}. Average month ${usd(avg, { cents: false })}.`}>
+        {/* The figures in one row above the bars: over each bar, the average
+            line crossed the ones near it. */}
+        <div aria-hidden className="mb-1 flex gap-1">
+          {history.map((h, i) => (
+            <span
+              key={h.month}
+              data-bar-figure
+              className={`min-w-0 flex-1 whitespace-nowrap text-center text-[11px] tabular-nums ${i === history.length - 1 ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}
+            >
+              {barFigure(h.spent)}
+            </span>
+          ))}
+        </div>
+        <div className="relative flex items-end gap-1" style={{ height: BAR_AREA }}>
           {history.map((h, i) => {
             const last = i === history.length - 1;
             // The viewed month is dark; mid-month it's hatched as well, since
@@ -274,12 +297,12 @@ function MonthBars({ history, typical, partial }: { history: CatSummary["history
                 key={h.month}
                 label={`${name(h.month, "short")} ${h.month.slice(0, 4)}: ${usd(h.spent, { cents: false })}${partial && last ? " so far" : ""}`}
                 onlyIfTruncated={false}
-                className="flex h-full flex-1 items-end"
+                className="flex h-full min-w-0 flex-1 items-end"
               >
                 <span
                   data-bar={h.month}
                   className={`block w-full ${tone}`}
-                  style={{ height: h.spent > 0 ? `max(2px, ${(h.spent / top) * 100}%)` : 0, ...hatch }}
+                  style={{ height: h.spent > 0 ? Math.max(2, px(h.spent)) : 0, ...hatch }}
                 />
               </Tooltip>
             );
@@ -288,7 +311,7 @@ function MonthBars({ history, typical, partial }: { history: CatSummary["history
             aria-hidden
             data-typical-line
             className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[var(--muted)]"
-            style={{ bottom: `${(typical / top) * 100}%` }}
+            style={{ bottom: px(avg) }}
           />
         </div>
         <div aria-hidden className="mt-1 flex gap-1 text-[11px] text-[var(--muted)]">
