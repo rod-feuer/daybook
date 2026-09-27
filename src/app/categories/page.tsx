@@ -10,7 +10,7 @@ import Shell from "@/components/Shell";
 import { MonthPicker } from "@/components/Actions";
 import { useToast } from "@/components/Toast";
 import { useMutation } from "@/components/useMutation";
-import { usd, isCurrentMonth, monthName } from "@/lib/format";
+import { usd, isCurrentMonth } from "@/lib/format";
 import type { CategoryWithTotals } from "@/lib/queries";
 import { getJson, patchJson } from "@/lib/http";
 import { EmojiPicker } from "@/components/EmojiPicker";
@@ -130,8 +130,8 @@ export default function CategoriesPage() {
       title="Categories"
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
-        <button onClick={() => setShowAddForm((v) => !v)} className="btn-primary">
-          + New category
+        <button onClick={() => setShowAddForm((v) => !v)} className="btn-ghost">
+          New category
         </button>
       }
     >
@@ -254,7 +254,6 @@ function BudgetSummary({
     return (
       <SummaryCard
         className="mb-6"
-        eyebrow={monthName(month)}
         primary={{
           value: usd(totalSpent, { cents: false }),
           label: partial ? "spent so far" : "spent",
@@ -284,9 +283,9 @@ function BudgetSummary({
   return (
     <SummaryCard
       className="mb-6"
-      // The frame once, in the eyebrow; the whole in the panel's caption; the
-      // labels one word. "Spent so far of $42,530 budgeted" wrapped under its figure.
-      eyebrow={monthName(month)}
+      // The month is the header picker. The whole is the panel's caption;
+      // the labels are one or two words. "Spent so far of $42,530 budgeted"
+      // wrapped under its figure.
       primary={{
         value: usd(spent, { cents: false }),
         label: partial ? "spent so far" : "spent",

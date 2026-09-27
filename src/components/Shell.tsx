@@ -15,14 +15,18 @@ export function Toolbar({ children, className = "" }: { children: React.ReactNod
 export default function Shell({
   title,
   subtitle,
+  figure,
   month,
   actions,
   children,
 }: {
   title: string;
   subtitle?: string;
+  // Transactions only: the month's net at the summary size, with the count
+  // as the caption. A second card above the statement would bury the list.
+  figure?: { value: string; caption: string };
   month?: React.ReactNode; // the month picker, always in the same place
-  actions?: React.ReactNode; // page actions (rare ones behind ⋯ on a phone)
+  actions?: React.ReactNode; // page actions (rare ones behind ⋯)
   children: React.ReactNode;
 }) {
   // The header is sticky on desktop, so anything else that sticks (a day
@@ -52,15 +56,23 @@ export default function Shell({
       {/* Non-sticky on mobile so the header scrolls away and gives the small
           viewport back to content; sticky on desktop where there's room. */}
       {/* Title + subtitle form one block on the left; the actions sit on the
-          right, vertically centered against the whole block (not pinned to the
-          title line) so the header reads balanced. Keep subtitles short enough to
-          sit beside the actions; if they don't fit, the actions wrap below. */}
-      <header ref={head} className="z-30 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-[var(--border)] bg-[var(--background)] px-4 py-3 sm:sticky sm:top-0 sm:px-8 sm:py-4">
+          right, centered against that block. A summary figure (the transactions
+          net) pins the actions to the title line, so the number sits under the
+          title instead of beside the picker. */}
+      <header ref={head} className={`z-30 flex flex-wrap justify-between gap-x-3 gap-y-2 border-b border-[var(--border)] bg-[var(--background)] px-4 py-3 sm:sticky sm:top-0 sm:px-8 sm:py-4 ${figure ? "items-start" : "items-center"}`}>
         {/* On a phone the title and the month picker hold one row on every
             page, and the subtitle takes its own line beneath both: beside the
-            actions it pushed them under the title, to the left. */}
+            actions it pushed them under the title, to the left. A figure
+            (the transactions net) does the same, under the title, so the
+            picker stays on the title's row instead of centering on the number. */}
         <div className="contents sm:block">
           <h1 className="min-w-0 flex-1 text-lg font-semibold tracking-tight">{title}</h1>
+          {figure && (
+            <div className="order-last w-full sm:order-none" data-header-figure>
+              <div className="text-2xl font-semibold tracking-tight">{figure.value}</div>
+              <p className="text-xs text-[var(--muted)]" data-header-caption>{figure.caption}</p>
+            </div>
+          )}
           {subtitle && <p className="order-last w-full text-xs text-[var(--muted)] sm:order-none">{subtitle}</p>}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">

@@ -9,8 +9,9 @@ import ThemeToggle from "@/components/ThemeToggle";
 // Mobile navigation: a fixed bottom tab bar (the desktop sidebar is hidden below
 // `sm`). Reuses the sidebar's NAV items/icons so the two never drift. Hidden at
 // `sm`+. The layout pads `main` so content clears this bar.
-// `signOut`: the layout passes whether the password gate is on; the tab bar is
-// the one always-visible chrome on a phone, so that is where Sign out lives.
+// `signOut`: the layout passes whether the password gate is on. The tab bar
+// stays on screen while the header scrolls away, so Sign out lives here —
+// past a hairline, with the theme control, not as a fifth tab.
 export default function BottomNav({ signOut = false }: { signOut?: boolean }) {
   const pathname = usePathname();
   return (
@@ -26,7 +27,7 @@ export default function BottomNav({ signOut = false }: { signOut?: boolean }) {
             href={n.href}
             aria-current={active ? "page" : undefined}
             className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors ${
-              active ? "text-[var(--accent)]" : "text-[var(--muted)]"
+              active ? "bg-[var(--hover)] text-[var(--foreground)]" : "text-[var(--muted)]"
             }`}
           >
             <n.Icon />
@@ -34,10 +35,12 @@ export default function BottomNav({ signOut = false }: { signOut?: boolean }) {
           </Link>
         );
       })}
-      {signOut && <SignOut variant="tab" />}
-      {/* The sidebar's theme switch is desktop-only. The tab bar is the chrome
-          that stays on screen while the header scrolls away. */}
-      <div className="flex items-center pr-1">
+      {/* Sign out and the theme control are utilities, not a fifth page.
+          They sit past a hairline so the four destinations stay the tabs.
+          The bar is the chrome that stays on screen while the header scrolls
+          away, which is why Sign out lives here rather than in that header. */}
+      <div data-nav-utilities className="flex shrink-0 items-center gap-1 border-l border-[var(--border)] px-1">
+        {signOut && <SignOut variant="tab" />}
         <ThemeToggle compact />
       </div>
     </nav>

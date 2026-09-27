@@ -22,7 +22,7 @@ import { LoadError, LoadingRows } from "@/components/LoadState";
 import { SummaryCard } from "@/components/SummaryCard";
 import { useMonthBoot } from "@/components/useMonthBoot";
 import { billStatus, billDelta, chargedOften } from "@/lib/bills";
-import { usd, shortDate, isCurrentMonth as isCurrentMonthOf, monthName } from "@/lib/format";
+import { usd, shortDate, isCurrentMonth as isCurrentMonthOf } from "@/lib/format";
 import type { RecurringSettings, RecurringForMonth, RecurringSuggestion } from "@/lib/queries";
 import type { Category } from "@/lib/types";
 
@@ -253,22 +253,11 @@ export default function RecurringsPage() {
       title="Recurrings"
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
-        <>
-          {/* Re-scan is rare: inline on desktop, behind ⋯ on a phone, same as
-              Sync and Import on the other pages. */}
-          <span className="hidden sm:inline-flex">
-            <button className="btn-ghost" disabled={busy} onClick={recompute}>
-              {busy ? "Scanning…" : "Re-scan"}
-            </button>
-          </span>
-          <span className="sm:hidden">
-            <HeaderMenu>
-              <button className="btn-ghost" disabled={busy} onClick={recompute}>
-                {busy ? "Scanning…" : "Re-scan"}
-              </button>
-            </HeaderMenu>
-          </span>
-        </>
+        <HeaderMenu>
+          <button className="btn-ghost" disabled={busy} onClick={recompute}>
+            {busy ? "Scanning…" : "Re-scan"}
+          </button>
+        </HeaderMenu>
       }
     >
       {status === "loading" ? (
@@ -287,9 +276,8 @@ export default function RecurringsPage() {
         <div className="flex flex-col gap-6">
           {totalBills > 0 && (
             <SummaryCard
-              // The frame once, in the eyebrow; the whole in the panel's caption;
-              // the labels short. "Paid so far of $19,708 expected" wrapped under its figure.
-              eyebrow={monthName(month)}
+              // The month is the header picker. The whole is the panel's caption;
+              // the labels are short. "Paid so far of $19,708 expected" wrapped under its figure.
               primary={{
                 value: usd(paidSoFar, { cents: false }),
                 label: isCurrentMonth ? "paid so far" : "paid",
@@ -297,7 +285,7 @@ export default function RecurringsPage() {
               secondary={{
                 value: usd(leftToPay, { cents: false }),
                 // A closed month's unmatched bills weren't "left to pay"; they went unpaid.
-                label: <span className="whitespace-nowrap">{isCurrentMonth ? "left to pay" : "unpaid"}</span>,
+                label: <span className="whitespace-nowrap">{isCurrentMonth ? "Left to pay" : "Unpaid"}</span>,
               }}
               progress={paidSoFar / totalBills}
               barLabel={`${Math.round((paidSoFar / totalBills) * 100)}% of expected bills paid`}

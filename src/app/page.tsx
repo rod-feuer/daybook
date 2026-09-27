@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { usd, shortDate, defaultMonth, isCurrentMonth, monthName } from "@/lib/format";
+import { usd, shortDate, defaultMonth, isCurrentMonth } from "@/lib/format";
 import type { DashboardData } from "@/lib/core";
 import type { TransactionRow } from "@/lib/queries";
 import { MonthPicker, ImportButton, SeedButton, SyncBankButton } from "@/components/Actions";
@@ -122,20 +122,10 @@ export default function DashboardPage() {
       // as "June 2026" both here and in the picker below).
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
-        <>
-          {/* Sync / Import inline on desktop; tucked behind a ⋯ on mobile so these
-              rare actions don't crowd the top of a phone screen. */}
-          <span className="hidden items-center gap-2 sm:flex">
-            <SyncBankButton onDone={refresh} />
-            <ImportButton onDone={refresh} />
-          </span>
-          <span className="sm:hidden">
-            <HeaderMenu>
-              <SyncBankButton onDone={refresh} />
-              <ImportButton onDone={refresh} />
-            </HeaderMenu>
-          </span>
-        </>
+        <HeaderMenu>
+          <SyncBankButton onDone={refresh} />
+          <ImportButton onDone={refresh} />
+        </HeaderMenu>
       }
     >
       {status === "error" && <LoadError what="the dashboard" onRetry={start} />}
@@ -168,11 +158,10 @@ export default function DashboardPage() {
             const prevLabel = prevPeriodLabel(data.prev);
             return (
               <SummaryCard
-                // The frame, once. Three labels each carried it ("net cash
-                // flow, projected", "income, expected", "expenses, projected")
-                // and the card read as a paragraph. Too early to project, the
-                // figures are the month so far, and the eyebrow says that.
-                eyebrow={monthName(month)}
+                // The month is the header picker. Three labels each used to
+                // carry the frame ("net cash flow, projected") and the card
+                // read as a paragraph. Too early to project, the labels say
+                // "so far"; with a projection, the line under each figure does.
                 primary={{
                   value: usd(net, { sign: true, cents: false }),
                   // In progress but too early to project, the figures are the
