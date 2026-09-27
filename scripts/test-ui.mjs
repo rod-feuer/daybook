@@ -379,15 +379,17 @@ async function pageHeader(browser) {
       const r = await page.evaluate(() => {
         const header = document.querySelector("header");
         const cluster = header.querySelector("h1").parentElement.nextElementSibling;
-        const first = cluster && cluster.querySelector("select, button, input, a");
-        const monthFirst = !!first && first.tagName === "SELECT" && [...first.options].some((o) => /^\d{4}-\d{2}$/.test(o.value));
+        // The picker is ‹ select › in one group; it leads the cluster.
+        const first = cluster && cluster.firstElementChild;
+        const sel = first && (first.matches("[data-month-picker]") ? first.querySelector("select") : first.tagName === "SELECT" ? first : null);
+        const monthFirst = !!sel && [...sel.options].some((o) => /^\d{4}-\d{2}$/.test(o.value));
         // Import's hidden file input lives in the header; only a visible text input counts as search.
         const inputsInHeader = header.querySelectorAll("input:not([type=file]):not([type=hidden])").length;
         const primaries = document.querySelectorAll("main .btn-primary, header .btn-primary").length;
         const headerText = header.innerText;
         const rareVisible = /Sync from bank|Import CSV|Re-scan/.test(headerText);
         const newCat = [...header.querySelectorAll("button")].find((b) => /New category/.test(b.textContent || ""));
-        const fig = header.querySelector("[data-header-figure] .text-2xl");
+        const fig = header.querySelector("[data-header-figure] [data-header-net]");
         const caption = header.querySelector("[data-header-caption]")?.textContent ?? "";
         return { monthFirst, inputsInHeader, primaries, rareVisible, newCatGhost: newCat ? newCat.classList.contains("btn-ghost") && !newCat.classList.contains("btn-primary") : null, figPx: fig ? getComputedStyle(fig).fontSize : null, figText: fig ? fig.textContent : null, caption };
       });
@@ -397,9 +399,11 @@ async function pageHeader(browser) {
       // spent figure. They live in ⋯; New category stays, bordered.
       record("page header", `${route} rare actions stay in ⋯, and New category is not a filled button`, !r.rareVisible && (route === "/categories" ? r.newCatGhost === true : r.newCatGhost === null), `rare visible=${r.rareVisible}, new category ghost=${r.newCatGhost}`);
       if (route === "/transactions") {
-        // The statement has no summary card, so the net has to win from the
-        // header. It used to be 12px gray, with cents, inside the count.
-        record("page header", "the transactions net is the summary figure, without cents, and the count is its caption", r.figPx === "24px" && r.figText && !/\.\d\d/.test(r.figText) && /^\d+ shown/.test(r.caption), `${r.figPx} "${r.figText}" / "${r.caption}"`);
+        // The statement has no summary card, so the net sits in the header:
+        // on the title's line at the card-title size, so the header is the
+        // same height as every other page's. It used to be 12px gray, with
+        // cents, inside the count; then 24px, which made the header taller.
+        record("page header", "the transactions net sits in the header at the card-title size, without cents, with its count", r.figPx === "15px" && r.figText && !/\.\d\d/.test(r.figText) && /^\d+ shown/.test(r.caption), `${r.figPx} "${r.figText}" / "${r.caption}"`);
       }
     }
     const nav = await page.evaluate(() => {
@@ -601,7 +605,7 @@ async function vendorHeaderCounts(browser) {
       const head = document.querySelector("[data-vendor-total]").closest("div.flex").innerText;
       // The page net is a summary figure (no cents). The vendor strip is the
       // exact total of the same charges. They agree at the dollar.
-      const fig = document.querySelector("[data-header-figure] .text-2xl")?.textContent ?? "";
+      const fig = document.querySelector("[data-header-figure] [data-header-net]")?.textContent ?? "";
       return { total: money(document.querySelector("[data-vendor-total]").textContent), net: money(fig), count: Number((head.match(/(\d+) transactions?/) || [])[1]), notCounted: Number((head.match(/(\d+) not counted/) || [0, 0])[1]), rows: document.querySelectorAll("[data-drawer-row]").length };
     });
     const before = await read();
@@ -998,7 +1002,7 @@ async function phoneLayout(browser) {
     // and the sort sits on the section title's line, not in a row of its own.
     await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-summary]");
-    const c = await page.evaluate(() => { const hs = [...document.querySelectorAll("header select, header button")].map((e) => e.getBoundingClientRect().height).filter((h) => h > 0); const figs = document.querySelector("[data-summary]").querySelectorAll(".text-2xl"); const [a, b] = [figs[0].getBoundingClientRect(), figs[1].getBoundingClientRect()]; const sort = document.querySelector('select[aria-label="Sort categories"]').getBoundingClientRect(); const title = [...document.querySelectorAll("h3")].find((h) => /expenses/i.test(h.textContent)).getBoundingClientRect(); const mid = (r) => (r.top + r.bottom) / 2; return { heights: [...new Set(hs.map((h) => Math.round(h * 2) / 2))], figTops: Math.abs(Math.round(a.top - b.top)), sortLine: Math.abs(Math.round(mid(sort) - mid(title))), overflow: document.documentElement.scrollWidth - innerWidth }; });
+    const c = await page.evaluate(() => { const hs = [...document.querySelectorAll("header select, header button")].map((e) => e.getBoundingClientRect().height).filter((h) => h > 0); const figs = document.querySelector("[data-summary]").querySelectorAll("[data-figure]"); const [a, b] = [figs[0].getBoundingClientRect(), figs[1].getBoundingClientRect()]; const sort = document.querySelector('select[aria-label="Sort categories"]').getBoundingClientRect(); const title = [...document.querySelectorAll("h3")].find((h) => /expenses/i.test(h.textContent)).getBoundingClientRect(); const mid = (r) => (r.top + r.bottom) / 2; return { heights: [...new Set(hs.map((h) => Math.round(h * 2) / 2))], figTops: Math.abs(Math.round(a.top - b.top)), sortLine: Math.abs(Math.round(mid(sort) - mid(title))), overflow: document.documentElement.scrollWidth - innerWidth }; });
     record("phone layout", "the Categories header's controls are one height (a filled New category button used to be shorter than the picker, and louder than the spent figure)", c.heights.length === 1, `heights ${c.heights.join(", ")}px`);
     record("phone layout", "Categories: spent and left share a line, and the sort sits on the section title's line", c.figTops <= 1 && c.sortLine <= 2 && c.overflow <= 0, `figure tops Δ${c.figTops}px, sort vs title Δ${c.sortLine}px, page overflow ${c.overflow}px`);
     await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
@@ -1383,6 +1387,62 @@ async function suggestedPlanShelf(browser) {
     const countedAfter = await counts();
     const glyphAfter = await glyphs();
     record("suggested plan", "a waiting plan's charges show no ↻; its shelf offers Add, and after Add they do", glyphBefore === 0 && !countedBefore && suggested && !!add && countedAfter && glyphAfter >= 4, `↻ before ${glyphBefore}, counted ${countedBefore}; suggested caption ${suggested}; Add ${!!add}; counted after ${countedAfter}, ↻ after ${glyphAfter}`);
+  });
+}
+
+// Header and nav, round two. The current page must read as current even
+// while another is hovered (the wash alone lit two rows); the month steps
+// with ‹ ›; every header is one height, so switching tabs doesn't jump; ⋯ is
+// a real menu; the phone's utilities say what they are; and every summary
+// card leads with one result at the summary size, the rest supporting it.
+async function headerNav(browser) {
+  await withPage(browser, async (page) => {
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.goto(BASE + "/", { waitUntil: "networkidle2" });
+    const links = await page.$$("aside nav a");
+    await links[2].hover();
+    await new Promise((r) => setTimeout(r, 300));
+    const marked = await page.$$eval("aside nav a", (as) => as.filter((a) => getComputedStyle(a).fontWeight === "600" && getComputedStyle(a).boxShadow.includes("inset")).map((a) => a.textContent.trim()));
+    record("header nav", "one sidebar item is marked current while another is hovered", marked.length === 1 && marked[0] === "Dashboard", `marked: ${marked.join(", ") || "none"}`);
+
+    const months = await (await fetch(BASE + "/api/months")).json();
+    const val = () => page.$eval("[data-month-picker] select", (s) => s.value);
+    const newest = await val();
+    const nextDisabled = await page.$eval("[data-month-picker] button[aria-label='Next month']", (b) => b.disabled);
+    await page.click("[data-month-picker] button[aria-label='Previous month']");
+    await page.waitForFunction((m) => document.querySelector("[data-month-picker] select").value !== m, { timeout: 5000 }, newest).catch(() => {});
+    const stepped = await val();
+    record("header nav", "‹ steps to the previous month, and › rests on the newest", nextDisabled && stepped === months[months.indexOf(newest) + 1], `newest ${newest} (› disabled=${nextDisabled}) → ${stepped}`);
+
+    const heights = [];
+    for (const path of ["/", "/transactions", "/categories", "/recurrings"]) {
+      await page.goto(BASE + path, { waitUntil: "networkidle2" });
+      await page.waitForSelector("header [data-month-picker]");
+      heights.push(await page.$eval("main header, header", (h) => Math.round(h.getBoundingClientRect().height)));
+    }
+    record("header nav", "every page's header is the same height", new Set(heights).size === 1, `heights ${heights.join(", ")}px`);
+
+    await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
+    await page.click("header button[aria-label='More actions']");
+    await page.waitForSelector("[role=menu]");
+    const menu = await page.evaluate(() => ({ items: document.querySelectorAll("[role=menu] [role=menuitem]").length, focused: document.activeElement?.getAttribute("role") }));
+    await page.keyboard.press("Escape");
+    const after = await page.evaluate(() => ({ open: !!document.querySelector("[role=menu]"), focus: document.activeElement?.getAttribute("aria-label") }));
+    record("header nav", "⋯ opens a menu, focuses its first item, and Escape closes it back to ⋯", menu.items > 0 && menu.focused === "menuitem" && !after.open && after.focus === "More actions", `items ${menu.items}, focus ${menu.focused}; after Escape open=${after.open}, focus "${after.focus}"`);
+
+    const sizes = {};
+    for (const path of ["/", "/categories", "/recurrings"]) {
+      await page.goto(BASE + path, { waitUntil: "networkidle2" });
+      await page.waitForSelector("[data-summary] [data-figure]");
+      sizes[path] = await page.$$eval("[data-summary] [data-figure]", (fs) => fs.map((f) => getComputedStyle(f).fontSize));
+    }
+    const ranked = Object.values(sizes).every((f) => f[0] === "24px" && f.slice(1).every((x) => x === "15px") && f.length >= 2);
+    record("header nav", "every summary card leads with one 24px result, the rest at 15px", ranked, JSON.stringify(sizes));
+
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+    await page.goto(BASE + "/", { waitUntil: "networkidle2" });
+    const util = await page.$eval("[data-nav-utilities]", (d) => d.innerText.trim());
+    record("header nav", "the phone tab bar's utilities are labelled", /Theme/.test(util), `"${util.replace(/\s+/g, " ")}"`);
   });
 }
 
@@ -1846,7 +1906,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

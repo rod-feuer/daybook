@@ -137,8 +137,8 @@ and §3 carry over unchanged.
   hard-coded color, never a size off the scale. *(One-pattern)*
 - **Touch is in scope; hover only enhances.** The app ships a mobile bottom nav
   and a bottom-sheet shelf, so every action has a resting state. The four pages
-  are the tabs; Sign out and the theme control sit past a hairline, not as
-  another tab. Secondary controls sit at `opacity-60` and strengthen on hover/focus (the dashboard's
+  are the tabs; Sign out and the theme control sit past a hairline in narrow
+  labelled cells, not as another tab. Secondary controls sit at `opacity-60` and strengthen on hover/focus (the dashboard's
   drill chevron is the reference). `opacity-0 group-hover` gating is a defect,
   not a scope decision. List rows that open the shelf are keyboard rows
   (`rowButtonProps` — role, tabIndex, Enter/Space) since they hold nested
@@ -175,7 +175,10 @@ new floor). The audit that produced it lives in the session artifacts.
 | 18 | page title | `text-lg` |
 | 24 | summary figures | `text-2xl` |
 
-Weights: 400 body · 500 names and labels · 600 titles and figures. Tabular
+Weights: 400 body · 500 names and labels · 600 titles and figures. Case: sentence case
+describes a figure ("Spent so far", "Left to pay"); uppercase, at 11px and
+letter-spaced, names a section or a box ("BUDGET", "RECENT", "LAST 12
+MONTHS"). A label never shouts a qualifier. Tabular
 figures wherever numbers align.
 
 **Colour** — the seven surface and text tokens as today (`--background`,
@@ -204,9 +207,9 @@ carry the qualifier where one is due ("Spent so far"; a projected figure's
 measures is a "?" hint beside the caption, never a line of its own, and a
 verdict is written to fit one line);
 then two panels centred on one line on the page's own 3:2 grid, run to the card's edges: the figures as columns
-across the chart card's width below — three of them, the first at the summary
-size and the other two at the card-title size, because the first is the result;
-two of them, both at the summary size, because they are a pair — and the budget
+across the chart card's width below — the first, the result (net, spent so
+far, paid so far), at the summary size and every other at the card-title
+size, on every page — and the budget
 across the category card's (its text starting on that card's text), with the hairline
 in the middle of the gutter. The budget panel reads label, share, bar, then
 the verdict sentence at the card-title size — "on pace to finish under
@@ -217,10 +220,11 @@ month's net takes its colour.
 **Page anatomy** — header: title, optional one-line subtitle, the month picker
 in one slot on every page, page actions to its right (on a phone the title
 and the picker hold one row and the subtitle, or the transactions figure, sits beneath both). Then the summary card
-(the month). Transactions is the statement, and the exception: its net is the
-header's summary figure and its count is the caption under that figure
-("217 shown · so far"), because a second card above a day-by-day list would
-bury the statement. Then the toolbar — search, filters, sort — sitting directly
+(the month). Transactions is the statement, and the exception: its net sits on
+the title's line at the card-title size with its count beside it ("217 shown ·
+so far"), because a second card above a day-by-day list would bury the
+statement; every header is the same height, so switching tabs doesn't jump.
+The month picker steps with ‹ › and reads the month in full. Then the toolbar — search, filters, sort — sitting directly
 above the list it acts on, never in the header and never above the summary.
 Then the list, in one of two patterns: **sections** for a handful of groups
 (a small-caps title on the page above one card of rows — Recurrings, the

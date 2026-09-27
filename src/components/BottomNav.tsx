@@ -39,7 +39,7 @@ export default function BottomNav({ signOut = false }: { signOut?: boolean }) {
           They sit past a hairline so the four destinations stay the tabs.
           The bar is the chrome that stays on screen while the header scrolls
           away, which is why Sign out lives here rather than in that header. */}
-      <div data-nav-utilities className="flex shrink-0 items-center gap-1 border-l border-[var(--border)] px-1">
+      <div data-nav-utilities className="flex shrink-0 items-stretch border-l border-[var(--border)]">
         {signOut && <SignOut variant="tab" />}
         <ThemeToggle compact />
       </div>

@@ -22,8 +22,10 @@ export default function Shell({
 }: {
   title: string;
   subtitle?: string;
-  // Transactions only: the month's net at the summary size, with the count
-  // as the caption. A second card above the statement would bury the list.
+  // Transactions only: the month's net, with the count as its caption, on the
+  // title's line at the card-title size. A second card above the statement
+  // would bury the list; at the summary size the header was a line taller
+  // than every other page's, and jumped when switching tabs.
   figure?: { value: string; caption: string };
   month?: React.ReactNode; // the month picker, always in the same place
   actions?: React.ReactNode; // page actions (rare ones behind ⋯)
@@ -56,22 +58,20 @@ export default function Shell({
       {/* Non-sticky on mobile so the header scrolls away and gives the small
           viewport back to content; sticky on desktop where there's room. */}
       {/* Title + subtitle form one block on the left; the actions sit on the
-          right, centered against that block. A summary figure (the transactions
-          net) pins the actions to the title line, so the number sits under the
-          title instead of beside the picker. */}
-      <header ref={head} className={`z-30 flex flex-wrap justify-between gap-x-3 gap-y-2 border-b border-[var(--border)] bg-[var(--background)] px-4 py-3 sm:sticky sm:top-0 sm:px-8 sm:py-4 ${figure ? "items-start" : "items-center"}`}>
+          right, centered against that block. */}
+      <header ref={head} className="z-30 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-[var(--border)] bg-[var(--background)] px-4 py-3 sm:sticky sm:top-0 sm:px-8 sm:py-4">
         {/* On a phone the title and the month picker hold one row on every
             page, and the subtitle takes its own line beneath both: beside the
             actions it pushed them under the title, to the left. A figure
             (the transactions net) does the same, under the title, so the
             picker stays on the title's row instead of centering on the number. */}
-        <div className="contents sm:block">
-          <h1 className="min-w-0 flex-1 text-lg font-semibold tracking-tight">{title}</h1>
+        <div className={figure ? "contents sm:flex sm:items-baseline sm:gap-3" : "contents sm:block"}>
+          <h1 className="min-w-0 flex-1 text-lg font-semibold tracking-tight sm:flex-none">{title}</h1>
           {figure && (
-            <div className="order-last w-full sm:order-none" data-header-figure>
-              <div className="text-2xl font-semibold tracking-tight">{figure.value}</div>
-              <p className="text-xs text-[var(--muted)]" data-header-caption>{figure.caption}</p>
-            </div>
+            <p className="order-last w-full sm:order-none sm:w-auto" data-header-figure>
+              <span data-header-net className="text-[15px] font-semibold tabular-nums">{figure.value}</span>{" "}
+              <span className="text-xs text-[var(--muted)]" data-header-caption>{figure.caption}</span>
+            </p>
           )}
           {subtitle && <p className="order-last w-full text-xs text-[var(--muted)] sm:order-none">{subtitle}</p>}
         </div>
