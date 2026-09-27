@@ -1396,37 +1396,52 @@ async function suggestedPlanShelf(browser) {
 // a real menu; the phone's utilities say what they are; and every summary
 // card leads with one result at the summary size, the rest supporting it.
 // A budget is set in the category's shelf, beside the spending that
-// justifies it (DESIGN.md §2, "The shelf is the control surface"). The shelf
-// showed "$X of $Y budget" but could not change it, so the only way was a
-// field on the Categories row that reads as plain text.
+// justifies it (DESIGN.md §2, "The shelf is the control surface"), in a field
+// that looks like one. The Categories row only shows it: its field there read
+// as plain text, and a "/mo" label silently made the budget annual.
 async function categoryShelfBudget(browser) {
   await withPage(browser, async (page, errs) => {
     await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-drawer-row]");
+    const rowInputs = await page.$$eval("main input", (els) => els.filter((i) => !i.closest("aside")).map((i) => i.getAttribute("aria-label")).filter((l) => /budget/i.test(l ?? "")).length);
+    record("category shelf budget", "the Categories rows show budgets but hold no budget field", rowInputs === 0, `${rowInputs} budget inputs on the page`);
     const rows = await page.$$("[data-drawer-row]");
     let name = null;
     for (const r of rows) {
-      const label = (await r.evaluate((el) => el.innerText.split("\n")[0])).trim();
-      if (/uncategorized/i.test(label)) continue;
+      const label = (await r.evaluate((el) => el.querySelector("[data-row-budget]") ? el.innerText.split("\n").slice(0, 2).join(" ") : ""));
+      if (!label) continue;
       await r.click(); await shelfIs(page, true); await shelfSettled(page);
       if (await page.$(`${shelfSel} [data-shelf-budget] input`)) { name = label; break; }
       await page.keyboard.press("Escape"); await shelfIs(page, false);
     }
-    record("category shelf budget", "an expense category's shelf carries a budget field, at rest", name != null, name ?? "no shelf had one");
+    record("category shelf budget", "a budgeted category's shelf carries a bordered budget field and a period select", name != null && !!(await page.$(`${shelfSel} [data-shelf-budget] select[aria-label='Budget period']`)), name ?? "no shelf had one");
     if (!name) return;
-    const read = () => page.evaluate((sel) => document.querySelector(`${sel} [data-shelf-budget] input`).value, shelfSel);
-    const before = await read();
-    const field = await page.$(`${shelfSel} [data-shelf-budget] input`);
-    await field.click({ clickCount: 3 }); await field.type("4321"); await page.keyboard.press("Enter");
-    // the page behind the shelf re-reads: its row's field shows the new amount
-    const onRow = await page.waitForFunction((sel) => [...document.querySelectorAll("main input[aria-label$='budget']")].some((i) => !i.closest(sel) && i.value === "4,321"), { timeout: 8000 }, shelfSel).then(() => true, () => false);
-    const inShelf = await read();
-    record("category shelf budget", "a budget set in the shelf is saved, and the Categories row shows it", onRow && inShelf === "4,321", `${name}: ${before || "none"} → shelf ${inShelf}, row updated=${onRow}`);
+    const field = () => page.$(`${shelfSel} [data-shelf-budget] input`);
+    const before = await (await field()).evaluate((el) => el.value);
+    const period = await page.$eval(`${shelfSel} [data-shelf-budget] select`, (s) => s.value);
+    const rowSays = (want) => page.waitForFunction((sel, w) => [...document.querySelectorAll("[data-row-budget]")].some((e) => !e.closest(sel) && e.textContent.replace(/\s+/g, "") === w), { timeout: 8000 }, shelfSel, want).then(() => true, () => false);
+
+    let f = await field();
+    await f.focus(); await f.evaluate((el) => el.select()); await f.type("999999"); await page.keyboard.press("Escape");
+    await sleep(600);
+    record("category shelf budget", "Escape reverts the budget field", (await (await field()).evaluate((el) => el.value)) === before);
+
+    if (period !== "monthly") await page.select(`${shelfSel} [data-shelf-budget] select`, "monthly");
+    await sleep(800);
+    f = await field();
+    await f.focus(); await f.evaluate((el) => el.select()); await f.type("4321"); await page.keyboard.press("Enter");
+    const set = await rowSays("of$4,321/mo");
+    record("category shelf budget", "a budget set in the shelf is saved, and the Categories row shows it", set, `${name}: ${before} → 4,321`);
+    // Annual keeps the dollars: $4,321 a month is $51,852 a year.
+    await page.select(`${shelfSel} [data-shelf-budget] select`, "annual");
+    const yearly = await rowSays("of$51,852/yr");
+    record("category shelf budget", "switching to Annual keeps the dollars ($4,321/mo becomes $51,852/yr)", yearly);
+
     // restore, so later groups see the fixture's budgets
-    const again = await page.$(`${shelfSel} [data-shelf-budget] input`);
-    await again.click({ clickCount: 3 }); await page.keyboard.press("Backspace");
-    if (before) await again.type(before);
-    await page.keyboard.press("Enter"); await sleep(800);
+    await page.select(`${shelfSel} [data-shelf-budget] select`, period);
+    await sleep(800);
+    f = await field();
+    await f.focus(); await f.evaluate((el) => el.select()); await f.type(before); await page.keyboard.press("Enter"); await sleep(800);
     if (errs.length) record("category shelf budget", "page errors", false, errs[0]);
   });
 }
@@ -1608,12 +1623,6 @@ async function inlineEdit(browser) {
     await sleep(600);
     const t = await rowsText(page);
     record("inline edit", "categories · Escape reverts a rename", t.includes("Dining Out") && !t.includes("Garbage"));
-    const budget = await page.$("input[aria-label='Monthly budget']");
-    const before = await budget.evaluate((el) => el.value);
-    await budget.click({ clickCount: 3 }); await budget.type("999999"); await page.keyboard.press("Escape");
-    await sleep(600);
-    const afterB = await page.evaluate(() => document.querySelector("input[aria-label='Monthly budget']").value);
-    record("inline edit", "categories · Escape reverts the budget input", afterB === before, `${before} → ${afterB}`);
     await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-drawer-row]");
     const rec = await clickName(page);

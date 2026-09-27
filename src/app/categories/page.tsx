@@ -3,7 +3,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useCategoryShelf } from "@/components/TransactionDrawer";
 import { InlineEdit } from "@/components/InlineEdit";
-import { BudgetInput } from "@/components/BudgetInput";
 import { CategoryBadge, categoryTint } from "@/components/CategoryBadge";
 import { rowButtonProps, ROW_FOCUS } from "@/components/rowButton";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
@@ -60,18 +59,6 @@ export default function CategoriesPage() {
   function changeMonth(m: string) {
     setMonth(m);
     load(m);
-  }
-
-  async function saveBudget(
-    id: number,
-    amount: number | null,
-    period: "monthly" | "annual" = "monthly"
-  ) {
-    await mutate(
-      () => patchJson(`/api/categories/${id}`, { budget: amount, period }),
-      { error: "Couldn't save budget — please try again" },
-      { refresh: "always" }
-    );
   }
 
   // Edit a category's badge appearance (icon/color) or its kind (expense↔income).
@@ -183,7 +170,7 @@ export default function CategoriesPage() {
             <option value="name">Name A–Z</option>
           </select>
         }
-        onBudget={saveBudget}
+        showBudgets
         onEditAppearance={saveAppearance}
         onRename={saveName}
         onChange={() => load(month)}
@@ -356,7 +343,7 @@ function Group({
   aside,
   month,
   cats,
-  onBudget,
+  showBudgets = false,
   onEditAppearance,
   onRename,
   onChange,
@@ -366,7 +353,7 @@ function Group({
   aside?: ReactNode; // a control on the title's line (the sort)
   month: string;
   cats: Cat[];
-  onBudget?: (id: number, amount: number | null, period: "monthly" | "annual") => void;
+  showBudgets?: boolean; // expense lists show budgets; income has none
   onEditAppearance?: (
     id: number,
     patch: { icon?: string; color?: string; kind?: "expense" | "income" }
@@ -389,7 +376,7 @@ function Group({
           <p className="p-4 text-[13px] text-[var(--muted)]">No categories.</p>
         )}
         {cats.map((c) => {
-          const budgeted = onBudget != null && c.budget != null;
+          const budgeted = showBudgets && c.budget != null;
           const budget = c.budget ?? 0;
           const annual = c.budgetPeriod === "annual";
           // An annual budget tracks calendar-YTD spend; a monthly one tracks the
@@ -452,16 +439,11 @@ function Group({
                         ytd
                       </span>
                     )}
-                    {onBudget && c.name !== "Uncategorized" && (
-                      <span onClick={(e) => e.stopPropagation()}>
-                        <BudgetInput
-                          key={`b-${c.id}-${c.budget ?? "none"}-${c.budgetPeriod}`}
-                          budget={c.budget}
-                          period={c.budgetPeriod}
-                          suggested={c.suggestedBudget}
-                          suggestedAnnual={c.suggestedAnnualBudget}
-                          onSave={(v, p) => onBudget(c.id, v, p)}
-                        />
+                    {/* Shown, not edited: the budget is set in the shelf the row opens. */}
+                    {budgeted && (
+                      <span className="text-[var(--muted)]" data-row-budget>
+                        of <span className="font-medium tabular-nums text-[var(--foreground)]">{usd(budget, { cents: false })}</span>
+                        {annual ? "/yr" : "/mo"}
                       </span>
                     )}
                   </span>
@@ -518,7 +500,7 @@ function Group({
                         </Tooltip>
                       )}
                     </span>
-                  ) : onBudget && c.recurringBaseline > 0 ? (
+                  ) : showBudgets && c.recurringBaseline > 0 ? (
                     <span>
                       {usd(c.recurringBaseline, { cents: false })} recurring · set a budget
                     </span>

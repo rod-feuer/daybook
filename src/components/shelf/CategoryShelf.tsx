@@ -4,7 +4,7 @@ import { usd, isCurrentMonth } from "@/lib/format";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
-import { BudgetInput } from "@/components/BudgetInput";
+import { BudgetField } from "@/components/BudgetField";
 
 export function CategoryHeader({ data, month }: { data: CatSummary | null; month: string }) {
   const label = new Date(month + "-01T00:00:00Z").toLocaleDateString("en-US", {
@@ -47,8 +47,7 @@ export function CategoryBody({
   const isIncome = data.kind === "income";
   const isExcluded = data.excludeFromTotals === 1;
   const budgeted = data.budget != null && !isIncome && !isExcluded;
-  // A budget is set here, beside the spending that justifies it, with the
-  // Categories page's field. Income, money movement and the catch-all have none.
+  // Income, money movement and the catch-all carry no budget.
   const budgetable = !isIncome && !isExcluded && data.name !== "Uncategorized";
 
   // The category's properties in the vendor shelf's anatomy: two cards (how
@@ -75,32 +74,13 @@ export function CategoryBody({
         <PropertyCard label={`${isIncome ? "received" : isExcluded ? "total" : "spent"}${partial ? " so far" : ""}`}>
           <div className="text-[15px] font-semibold tabular-nums">{usd(data.spent, { cents: false })}</div>
         </PropertyCard>
-        {budgetable ? (
-          <PropertyCard label="budget">
-            <div className="text-[15px] font-semibold tabular-nums" data-shelf-budget>
-              <BudgetInput
-                key={`${data.id}-${data.budgetEntry.amount ?? "none"}-${data.budgetEntry.period}`}
-                lead=""
-                budget={data.budgetEntry.amount}
-                period={data.budgetEntry.period}
-                suggested={data.budgetEntry.suggested}
-                suggestedAnnual={data.budgetEntry.suggestedAnnual}
-                onSave={onSetBudget}
-              />
-            </div>
-          </PropertyCard>
-        ) : (
-          <PropertyCard label="typical month">
-            <div className="text-[15px] font-semibold tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
-          </PropertyCard>
-        )}
+        <PropertyCard label="typical month">
+          <div className="text-[15px] font-semibold tabular-nums">{usd(data.monthlyAvg, { cents: false })}</div>
+        </PropertyCard>
       </div>
       <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]">
         {trend && (
           <span className={hasTrend ? (better ? "text-[var(--good)]" : "text-[var(--warn)]") : ""}>{trend}</span>
-        )}
-        {budgetable && data.monthlyAvg > 0 && (
-          <span className="whitespace-nowrap">typical month {usd(data.monthlyAvg, { cents: false })}</span>
         )}
         {budgeted && data.budget != null && (
           <span className={`whitespace-nowrap ${remaining < 0 ? "text-[var(--warn)]" : ""}`}>
@@ -123,6 +103,17 @@ export function CategoryBody({
             style={{ width: `${pctOfBudget}%` }}
           />
         </div>
+      )}
+
+      {budgetable && (
+        <BudgetField
+          key={`${data.id}-${data.budgetEntry.amount ?? "none"}-${data.budgetEntry.period}`}
+          budget={data.budgetEntry.amount}
+          period={data.budgetEntry.period}
+          suggested={data.budgetEntry.suggested}
+          suggestedAnnual={data.budgetEntry.suggestedAnnual}
+          onSave={onSetBudget}
+        />
       )}
 
       {data.upcoming.length > 0 && (
