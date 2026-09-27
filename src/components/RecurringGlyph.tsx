@@ -1,5 +1,6 @@
 // The ↻ glyph, with one meaning: this charge is in a plan.
-//   "in"   — this charge is part of a plan (accent)
+//   "in"   — this charge is part of a plan (grey: a mark, not a signal; the
+//            accent is never semantic, and on every row of a list it shouted)
 //   "out"  — the vendor has a plan, but the user took this charge out. In a
 //            row this renders nothing: a charge outside a plan is outside it,
 //            whoever decided, and a struck ↻ read as a broken subscription
@@ -26,15 +27,13 @@ export const RECURRING_LABEL: Record<RecurringState, string> = {
 export function RecurringGlyph({
   state,
   onToggle,
-  muted = false,
   className = "",
 }: {
   state: RecurringState;
   onToggle?: () => void; // vendor-level force / mute
-  muted?: boolean; // the row itself is muted (e.g. excluded from totals)
   className?: string;
 }) {
-  const tone = state === "in" && !muted ? "text-[var(--accent)]" : "text-[var(--muted)]";
+  const tone = "text-[var(--muted)]";
   if (onToggle) {
     const rest = state === "none" ? "opacity-60 focus-visible:opacity-100 group-hover:opacity-100" : "opacity-100";
     return (
@@ -46,7 +45,7 @@ export function RecurringGlyph({
           onToggle();
         }}
         aria-label={state === "in" ? "Mark vendor not recurring" : "Mark vendor recurring"}
-        className={`text-center transition-opacity hover:text-[var(--accent)] ${tone} ${rest} ${className}`.trim()}
+        className={`text-center transition-opacity hover:text-[var(--foreground)] ${tone} ${rest} ${className}`.trim()}
       >
         ↻
       </button>

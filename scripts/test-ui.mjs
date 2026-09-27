@@ -1473,6 +1473,68 @@ async function categoryShelfRecurring(browser) {
   });
 }
 
+// The category shelf as a summary you decide from: its identity edited where
+// it's shown (rename and icon were only on the Categories row), the month's
+// spend ranked over its benchmark, twelve months of evidence for "typical
+// month", and the ↻ a grey mark rather than the accent on every row.
+async function categoryShelfSummary(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const rows = await page.$$("[data-drawer-row]");
+    let opened = false;
+    for (const r of rows) {
+      if (/uncategorized/i.test(await r.evaluate((el) => el.innerText))) continue;
+      await r.click(); await shelfIs(page, true); await shelfSettled(page);
+      if (await page.$(`${shelfSel} [data-month-bars]`)) { opened = true; break; }
+      await page.keyboard.press("Escape"); await shelfIs(page, false);
+    }
+    record("category shelf summary", "a category with spending opens a shelf with its 12-month chart", opened);
+    if (!opened) return;
+
+    const chart = await page.evaluate((sel) => {
+      const c = document.querySelector(`${sel} [data-month-bars]`);
+      const bars = [...c.querySelectorAll("[data-bar]")];
+      const op = (e) => getComputedStyle(e).backgroundColor;
+      return { bars: bars.length, line: !!c.querySelector("[data-typical-line]"), label: c.querySelector("[role=img]")?.getAttribute("aria-label") ?? "", lastDiffers: op(bars[bars.length - 1]) !== op(bars[0]) };
+    }, shelfSel);
+    record("category shelf summary", "12 bars, a dashed typical line, the viewed month set apart, and the figures said to a screen reader", chart.bars === 12 && chart.line && chart.lastDiffers && /Spending by month: .*Typical month \$/.test(chart.label), `${chart.bars} bars, line=${chart.line}, last differs=${chart.lastDiffers}`);
+
+    const sizes = await page.evaluate((sel) => { const lead = document.querySelector(`${sel} [data-shelf-lead]`); const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)]; return { lead: lead ? getComputedStyle(lead).fontSize : null, other: cards[1] ? getComputedStyle(cards[1].firstElementChild).fontSize : null, heights: cards.map((c) => Math.round(c.getBoundingClientRect().height)) }; }, shelfSel);
+    record("category shelf summary", "spent leads at 24px over the 15px typical month, in cards of one height", sizes.lead === "24px" && sizes.other === "15px" && sizes.heights.length === 2 && sizes.heights[0] === sizes.heights[1], JSON.stringify(sizes));
+
+    // Rename from the header; the Categories row follows.
+    const renameBtn = await page.$(`${shelfSel} [data-category-identity] button[aria-label^="Rename"]`);
+    const badgeBtn = await page.$(`${shelfSel} [data-category-identity] [data-category-badge]`);
+    record("category shelf summary", "the header carries the rename and the icon & colour editor", !!renameBtn && !!badgeBtn);
+    if (renameBtn) {
+      const before = await renameBtn.evaluate((b) => b.querySelector("span.truncate").textContent);
+      await renameBtn.click();
+      await page.waitForFunction(() => document.activeElement?.tagName === "INPUT", { timeout: 5000 });
+      await page.evaluate(() => document.activeElement.select()); await page.keyboard.type("Renamed Here"); await page.keyboard.press("Enter");
+      const followed = await page.waitForFunction(() => [...document.querySelectorAll("[data-drawer-row]")].some((r) => r.innerText.includes("Renamed Here")), { timeout: 8000 }).then(() => true, () => false);
+      record("category shelf summary", "a rename in the shelf header reaches the Categories row", followed, `${before} → Renamed Here`);
+      const again = await page.$(`${shelfSel} [data-category-identity] button[aria-label^="Rename"]`);
+      if (again) { await again.click(); await page.waitForFunction(() => document.activeElement?.tagName === "INPUT", { timeout: 5000 }); await page.evaluate(() => document.activeElement.select()); await page.keyboard.type(before); await page.keyboard.press("Enter"); await sleep(800); }
+    }
+    if (badgeBtn) {
+      // looked up each time: the header re-renders after the rename, and again when the picker opens
+      const badge = `${shelfSel} [data-category-identity] [data-category-badge]`;
+      await page.click(badge);
+      const swatches = await page.$$eval(`${shelfSel} [data-category-identity] button[aria-label^="color "]`, (b) => b.length).catch(() => 0);
+      record("category shelf summary", "the header badge opens icon and colour", swatches > 0, `${swatches} colours`);
+      await page.click(badge);
+    }
+
+    // The ↻ is the muted grey wherever it appears, never the accent.
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const glyph = await page.evaluate(() => { const g = document.querySelector("[data-recurring='in']"); const probe = document.createElement("span"); probe.style.color = "var(--muted)"; document.body.appendChild(probe); const muted = getComputedStyle(probe).color; const acc = document.createElement("span"); acc.style.color = "var(--accent)"; document.body.appendChild(acc); const accent = getComputedStyle(acc).color; probe.remove(); acc.remove(); return g ? { colour: getComputedStyle(g).color, muted, accent } : null; });
+    record("category shelf summary", "the ↻ glyph is the muted grey, not the accent", glyph != null && glyph.colour === glyph.muted && glyph.colour !== glyph.accent, JSON.stringify(glyph));
+    if (errs.length) record("category shelf summary", "page errors", false, errs[0]);
+  });
+}
+
 async function headerNav(browser) {
   await withPage(browser, async (page) => {
     await page.setViewport({ width: 1280, height: 900 });
@@ -1994,7 +2056,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

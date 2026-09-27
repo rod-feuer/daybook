@@ -347,6 +347,8 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   const txSetMembership = (txId: number, put: "in" | "out", plan: string | null) =>
     chargePatch(txId, put === "out" ? { recurringExcluded: true } : { recurringIncluded: plan }, UPDATE_ERROR);
   // The category's own verbs, in its shelf (the row only opens the shelf).
+  const categoryPatch = (id: number, patch: Record<string, unknown>, error: string) =>
+    write(() => patchJson(`/api/categories/${id}`, patch), { error });
   const categorySetExcluded = (id: number, excludeFromTotals: boolean) =>
     write(() => patchJson(`/api/categories/${id}`, { excludeFromTotals }), { error: "Couldn't update category — please try again" });
   const categorySetBudget = (id: number, budget: number | null, period: "monthly" | "annual") =>
@@ -452,7 +454,12 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                   onRename={(alias) => saveMerchantSettings({ alias })}
                 />
               ) : target.kind === "category" ? (
-                <CategoryHeader data={cData} month={target.month} />
+                <CategoryHeader
+                  data={cData}
+                  month={target.month}
+                  onRename={(name) => cData && categoryPatch(cData.id, { name }, "Couldn't rename — please try again")}
+                  onEditAppearance={(patch) => cData && categoryPatch(cData.id, patch, "Couldn't update category — please try again")}
+                />
               ) : (
                 <ChargeHeader data={xData} onOpenVendor={() => xData && drillToMerchant(xData.merchant)} />
               )}
