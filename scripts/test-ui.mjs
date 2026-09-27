@@ -1409,10 +1409,26 @@ async function headerNav(browser) {
     const val = () => page.$eval("[data-month-picker] select", (s) => s.value);
     const newest = await val();
     const nextDisabled = await page.$eval("[data-month-picker] button[aria-label='Next month']", (b) => b.disabled);
+    // A resting arrow says "no newer month", so it must still read as a
+    // button: at 40% it looked like a missing one.
+    const restOpacity = await page.$eval("[data-month-picker] button[aria-label='Next month']", (b) => Number(getComputedStyle(b).opacity));
+    record("header nav", "the resting › stays legible (at least 60% opacity)", restOpacity >= 0.6, `opacity ${restOpacity}`);
     await page.click("[data-month-picker] button[aria-label='Previous month']");
     await page.waitForFunction((m) => document.querySelector("[data-month-picker] select").value !== m, { timeout: 5000 }, newest).catch(() => {});
     const stepped = await val();
     record("header nav", "‹ steps to the previous month, and › rests on the newest", nextDisabled && stepped === months[months.indexOf(newest) + 1], `newest ${newest} (› disabled=${nextDisabled}) → ${stepped}`);
+
+    // The verdict is the one statement; the counts after it are a caption.
+    // At the verdict's size "12 upcoming · 70 paid" outranked "Left to pay".
+    for (const path of ["/recurrings", "/categories"]) {
+      await page.goto(BASE + path, { waitUntil: "networkidle2" });
+      await page.waitForSelector("[data-summary] [data-status]");
+      const v = await page.$eval("[data-summary] [data-status]", (el) => {
+        const d = el.querySelector("[data-status-detail]");
+        return { lead: getComputedStyle(el.firstElementChild).fontSize, detail: d ? getComputedStyle(d).fontSize : null, weight: d ? getComputedStyle(d).fontWeight : null, text: el.textContent.trim() };
+      });
+      record("header nav", `${path}: the verdict's counts are a 12px caption beside a 15px verdict`, v.detail == null ? v.lead === "15px" && !/upcoming|paid|not budgeted/.test(v.text) : v.lead === "15px" && v.detail === "12px" && v.weight === "400", `${v.text} — lead ${v.lead}, counts ${v.detail ?? "none"}/${v.weight ?? "-"}`);
+    }
 
     const heights = [];
     for (const path of ["/", "/transactions", "/categories", "/recurrings"]) {

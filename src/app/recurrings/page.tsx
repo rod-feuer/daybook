@@ -296,12 +296,16 @@ export default function RecurringsPage() {
               status={
                 <>
                   {overdueCount > 0 ? (
-                    <SectionLink section="od" className="font-medium text-[var(--warn)]">
+                    <SectionLink section="od" className="text-[var(--warn)]">
                       {overdueCount} {isCurrentMonth ? "overdue" : "unpaid"}
                     </SectionLink>
                   ) : (
                     <span className="text-[var(--muted)]">{isCurrentMonth ? "Nothing overdue" : "Nothing unpaid"}</span>
                   )}
+                </>
+              }
+              statusDetail={
+                <>
                   {isCurrentMonth && (
                     <>
                       <span className="text-[var(--muted)]">·</span>

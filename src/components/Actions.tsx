@@ -22,7 +22,7 @@ export function MonthPicker({
   const i = months.indexOf(value);
   const older = i >= 0 ? months[i + 1] : undefined;
   const newer = i > 0 ? months[i - 1] : undefined;
-  const step = "btn-ghost tap px-2 disabled:opacity-40";
+  const step = "btn-ghost tap px-2 disabled:opacity-60";
   return (
     <div className="inline-flex items-center gap-1" data-month-picker>
       <button type="button" className={step} aria-label="Previous month" disabled={!older} onClick={() => older && onChange(older)}>
