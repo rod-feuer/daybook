@@ -260,7 +260,7 @@ size, each with what it's measured against under its label: spent, with the
 trend (mid-month against the same days of last month), and what's left, "of
 $10,375" and "$6,699 recurring" (the average month, and "No budget", without
 one); under them the shared `BudgetBar`; the last 12 months as bars, their
-figures in a row above (420, 9.9k, 14k), the average finished month dashed
+each figure on its bar (420, 9.9k, 14k; the average line gives way to it), the average finished month dashed
 and named "Avg $X", an unfinished month hatched; then the budget's field, a bordered amount and a
 Monthly / Annual select, "Use $X" of the typical month when there is none;
 the Categories row only shows the budget), and a **charge** — the charge's cards are its date (the editor for an effective

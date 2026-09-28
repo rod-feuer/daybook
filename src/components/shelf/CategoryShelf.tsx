@@ -240,7 +240,7 @@ export function CategoryBody({
 // Calendar months from firstSeen through today (inclusive), clamped to [1, 12]
 
 // Twelve months of the category's spending, ending with the viewed one, each
-// bar with its figure: the evidence behind the average month, which is the
+// bar with its figure on top: the evidence behind the average month, which is the
 // dashed line. Mid-month the viewed bar is hatched, since it isn't a whole
 // month (DESIGN.md §1, Honest), and the average leaves it out.
 const BAR_AREA = 64; // px
@@ -272,20 +272,8 @@ function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; 
         </span>
       </div>
       <div role="img" aria-label={`Spending by month: ${said}. Average month ${usd(avg, { cents: false })}.`}>
-        {/* The figures in one row above the bars: over each bar, the average
-            line crossed the ones near it. */}
-        <div aria-hidden className="mb-1 flex gap-1">
-          {history.map((h, i) => (
-            <span
-              key={h.month}
-              data-bar-figure
-              className={`min-w-0 flex-1 whitespace-nowrap text-center text-[11px] tabular-nums ${i === history.length - 1 ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}
-            >
-              {barFigure(h.spent)}
-            </span>
-          ))}
-        </div>
-        <div className="relative flex items-end gap-1" style={{ height: BAR_AREA }}>
+        {/* Room above the tallest bar for its figure. */}
+        <div className="relative flex items-end gap-1" style={{ height: BAR_AREA + 16 }}>
           {history.map((h, i) => {
             const last = i === history.length - 1;
             // The viewed month is dark; mid-month it's hatched as well, since
@@ -297,8 +285,18 @@ function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; 
                 key={h.month}
                 label={`${name(h.month, "short")} ${h.month.slice(0, 4)}: ${usd(h.spent, { cents: false })}${partial && last ? " so far" : ""}`}
                 onlyIfTruncated={false}
-                className="flex h-full min-w-0 flex-1 items-end"
+                className="flex h-full min-w-0 flex-1 flex-col items-center justify-end"
               >
+                {/* Each figure sits on its bar. Its backing is the panel's
+                    colour, so where the average line meets a figure the
+                    figure reads and the line gives way. */}
+                <span
+                  aria-hidden
+                  data-bar-figure
+                  className={`relative z-20 whitespace-nowrap bg-card text-[11px] leading-4 tabular-nums ${last ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}
+                >
+                  {barFigure(h.spent)}
+                </span>
                 <span
                   data-bar={h.month}
                   className={`block w-full ${tone}`}
@@ -310,7 +308,7 @@ function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; 
           <span
             aria-hidden
             data-typical-line
-            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[var(--muted)]"
+            className="pointer-events-none absolute inset-x-0 z-10 border-t border-dashed border-[var(--muted)]"
             style={{ bottom: px(avg) }}
           />
         </div>
