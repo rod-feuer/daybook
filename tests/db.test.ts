@@ -93,6 +93,21 @@ test("mid-month, the category shelf compares last month over the same days, not 
   assert.equal(past.prevSpent, 600, "a finished month compares with the whole month before");
 });
 
+test("mid-month, the average month leaves the unfinished month out", () => {
+  // The chart's dashed line and "Avg": counting a half-spent month as a whole
+  // one pulled the average down early in every month.
+  const db = getDb();
+  const catId = Number(db.prepare("INSERT INTO categories (name,color,icon,kind) VALUES ('Avg','#888','•','expense')").run().lastInsertRowid);
+  const month = new Date().toISOString().slice(0, 7);
+  const [y, m] = month.split("-").map(Number);
+  const ago = (n: number) => new Date(Date.UTC(y, m - 1 - n, 1)).toISOString().slice(0, 7);
+  const ins = db.prepare("INSERT INTO transactions (date,merchant,amount,account,source,hash,categoryId) VALUES (?,?,?,?,?,?,?)");
+  for (let n = 1; n <= 11; n++) ins.run(`${ago(n)}-10`, "Shop", -1100, "Checking", "t", `avg${n}`, catId);
+  ins.run(`${month}-01`, "Shop", -50, "Checking", "t", "avg0", catId);
+  assert.equal(categorySummary(catId, month)!.monthlyAvg, 1100, "11 finished months of $1,100 average $1,100, whatever the month so far");
+  assert.equal(categorySummary(catId, ago(1))!.monthlyAvg, Number(((1100 * 11) / 12).toFixed(2)), "a finished month averages its twelve");
+});
+
 test("deleting a category clears a recurring that referenced it (FK no longer blocks the delete)", () => {
   const db = getDb();
   const catId = Number(

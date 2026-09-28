@@ -2127,7 +2127,7 @@ export type CategorySummary = {
   prevSpent: number; // same, prior month (for the MoM card), through prevThrough
   prevThrough: number | null; // mid-month: the day last month is summed through
   history: { month: string; spent: number }[]; // the 12 months ending with this one, oldest first
-  monthlyAvg: number; // trailing-12 average magnitude (the "typical month" benchmark)
+  monthlyAvg: number; // the average finished month of the trailing 12 (mid-month, the 11 before this one)
   budget: number | null; // monthly equivalent (an annual budget counts at 1/12)
   // The budget as entered, and the suggestion for an empty one: the shelf edits
   // it with the Categories page's field, so both offer the same "Use $X".
@@ -2281,7 +2281,9 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     prevSpent: Number(prev.s.toFixed(2)),
     prevThrough,
     history,
-    monthlyAvg: Number((t12 / 12).toFixed(2)),
+    // The average month the shelf's chart draws: the finished months of the
+    // twelve. Mid-month the viewed one is partial and would pull it down.
+    monthlyAvg: Number((month === new Date().toISOString().slice(0, 7) ? (t12 - cur.s) / 11 : t12 / 12).toFixed(2)),
     budget: getBudgets()[cat.id] ?? null,
     budgetEntry: (() => {
       const c = categoriesWithTotals(month).find((x) => x.id === cat.id);
