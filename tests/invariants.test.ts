@@ -1610,6 +1610,50 @@ test("the vendor shelf follows the newer series of a folded vendor, and a price 
   assert.deepEqual(merchantSummary("Mag").priceChange, { from: 10, to: 12, since: "2026-04-05" });
 });
 
+// WHY: the bank renamed the lake house's electric co-op ("MDC*SOUTH CENTRAL
+// INMARTINSVILLE IN" became "South Central Indiana REMC"). The new name's
+// first charge was too few to be a plan, so October's bill joined none: it
+// read unpaid, would go overdue, and sat in "Other".
+test("a confirmed plan follows its vendor's renamed bank descriptor, for charges as they arrive", () => {
+  const home = addCat("Lake (rename)");
+  const planOf = (merchant: string, date: string) =>
+    (getDb().prepare("SELECT r.merchant AS key FROM transactions t JOIN recurrings r ON r.id = t.recurringId WHERE t.merchant = ? AND t.date = ?").get(merchant, date) as { key: string } | undefined)?.key ?? null;
+  // As at the co-op: an older bank name with its own plan, then the current
+  // name's plan, so the vendor can't be planned as one (two plans would
+  // become one), and a new name's lone charge is left to itself. Every date
+  // is a 4th, counted back in months from the latest 4th, so each case has the
+  // same calendar at any clock.
+  const fourths = lastMonthlyDates(40, 4);
+  const e = (k: number) => fourths[fourths.length - 1 - k]; // k months before the latest 4th
+  const older = [88, 92, 179, 136, 115, 103];
+  const bill = [138, 105, 90, 150, 267, 184];
+  const vendor = (v: string, newestK: number) => {
+    older.forEach((a, i) => tx(`${v} Power Indiana`, { amount: -a, date: e(newestK + 11 - i), categoryId: home }));
+    bill.forEach((a, i) => tx(`${v} Power Mdc`, { amount: -a, date: e(newestK + 5 - i), categoryId: home }));
+  };
+  vendor("Coopa", 1); // 1. the first charge under the new name, on schedule: joins
+  vendor("Coopb", 2); // 2. a rename two charges ago: both join
+  vendor("Coopc", 1); // 3. off schedule (mid-month): a purchase, not the bill
+  vendor("Coopd", 25); // 4. the same rename two years ago: history is not rewritten
+  detectAndConfirm();
+  const plans = Object.fromEntries(([["Coopa", 1], ["Coopb", 2], ["Coopc", 1], ["Coopd", 25]] as const).map(([v, k]) => [v, planOf(`${v} Power Mdc`, e(k))]));
+  assert.ok(Object.values(plans).every(Boolean), `fixture: each current name is a confirmed plan ${JSON.stringify(plans)}`);
+
+  const mid = (k: number) => e(k).slice(0, 8) + "19";
+  tx("Coopa Power Remc", { amount: -204, date: e(0) });
+  tx("Coopb Power Remc", { amount: -175, date: e(1) });
+  tx("Coopb Power Remc", { amount: -212, date: e(0) });
+  tx("Coopc Power Remc", { amount: -204, date: mid(1) });
+  tx("Coopd Power Remc", { amount: -204, date: e(24) });
+  detectRecurrings();
+  assert.equal(planOf("Coopa Power Remc", e(0)), plans.Coopa, "the renamed descriptor's first charge pays the plan");
+  assert.deepEqual([planOf("Coopb Power Remc", e(1)), planOf("Coopb Power Remc", e(0))], [plans.Coopb, plans.Coopb], "and its next one too");
+  assert.equal(planOf("Coopc Power Remc", mid(1)), null, "off the plan's schedule: not its bill");
+  assert.equal(planOf("Coopd Power Remc", e(24)), null, "two years ago: history is not rewritten");
+  detectRecurrings();
+  assert.equal(planOf("Coopa Power Remc", e(0)), plans.Coopa, "a charge that joined stays joined");
+});
+
 test("a bill that differs every month has no price to change; a held price that moves does", () => {
   // Electricity: "price changed $267 → $184" was only this month's usage.
   const util = addCat("Utilities (power)");

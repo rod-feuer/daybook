@@ -1009,6 +1009,55 @@ function rebuildRecurrings(): Recurring[] {
         const amounts = p.txs.map((t) => Math.abs(t.amount)).sort((a, b) => a - b);
         p.key = seriesKey(seriesVendor(p.key), amountLabel(amounts[amounts.length >> 1]));
       }
+      // A confirmed plan follows its vendor's next bank name. When the bank
+      // renames a vendor ("MDC*SOUTH CENTRAL INMARTINSVILLE IN" became "South
+      // Central Indiana REMC"), the new name's first charges are too few to be
+      // a plan, so October's bill joined none and read unpaid. A charge joins
+      // a confirmed plan only when it is that rename: under a name of this
+      // vendor the plan has never billed under, which first appears after the
+      // plan's newest charge; in the plan's next billing window (a quarter of
+      // a cycle either side); at an amount in the plan's recent range, give or
+      // take a quarter; and for exactly one of the vendor's plans. A plan that
+      // stopped long ago never qualifies: its window is long past. It is a rule
+      // about charges as they arrive, not a
+      // rewrite of history (within three cycles of today): Apple's 2023 charges under its renamed descriptor
+      // would otherwise have joined a 2022 plan. A charge that joined stays
+      // joined (its membership is kept), so it doesn't leave as it ages.
+      const taken = new Set(chosen.flatMap((p) => p.txs.map((t) => t.hash)));
+      const canonOf = (t: Tx) => canonicalMerchant(t.merchant, links);
+      const firstSeen = new Map<string, string>();
+      for (const t of vendorRows) {
+        const c = canonOf(t);
+        if (!firstSeen.has(c) || t.date < firstSeen.get(c)!) firstSeen.set(c, t.date);
+      }
+      // Judged against the plan as detected, so a rename's second and third
+      // charges join after its first.
+      const before = new Map(
+        [...placed].map((p) => [p, { own: new Set(p.txs.map(canonOf)), newest: p.txs.reduce((a, x) => (x.date > a ? x.date : a), "") }])
+      );
+      const orphans = vendorRows
+        .filter((t) => !taken.has(t.hash) && !excluded.has(t.hash) && !included.has(t.hash))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      for (const t of orphans) {
+        const fits = [...placed].filter((p) => {
+          const was = before.get(p)!;
+          if (!was.newest || was.own.has(canonOf(t)) || firstSeen.get(canonOf(t))! <= was.newest) return false;
+          const age = (Date.now() - new Date(t.date + "T00:00:00Z").getTime()) / DAY;
+          if (members.get(t.hash) !== p.key && age > CADENCE_DAYS[p.cadence] * 3) return false;
+          const newest = p.txs.reduce((a, x) => (x.date > a ? x.date : a), "");
+          const due = new Date(addCadence(newest, p.cadence) + "T00:00:00Z").getTime();
+          const off = Math.abs(new Date(t.date + "T00:00:00Z").getTime() - due) / DAY;
+          if (off > Math.max(3, CADENCE_DAYS[p.cadence] * 0.25)) return false;
+          const recent = p.txs.slice(-6).map((x) => Math.abs(x.amount));
+          const amount = Math.abs(t.amount);
+          return amount >= Math.min(...recent) * 0.75 && amount <= Math.max(...recent) * 1.25;
+        });
+        if (fits.length !== 1) continue;
+        const p = fits[0];
+        p.txs = [...p.txs, t].sort((a, b) => a.date.localeCompare(b.date));
+        p.events = p.txs.map((x) => ({ date: x.date, amount: x.amount }));
+        taken.add(t.hash);
+      }
       for (const p of placed) {
         for (const t of p.txs) keepCharge.run(t.hash, p.key);
         const newest = p.txs.reduce((a, t) => (t.date > a ? t.date : a), "");
