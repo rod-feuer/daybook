@@ -253,7 +253,7 @@ glyph (a category's vendors: the verb lives in the vendor shelf a tap away);
 then match, the vendor's split rules (each removable, which restores what it
 split), and the action row. The footer link follows the content, not the panel edge. Three shelves,
 one anatomy: a **vendor** (or one of its plans; a vendor with several plans
-lists them with their monthly total in place of the cards, each opening its
+lists them with their monthly total (only plans still billing: one that stopped, as when the bank renamed the vendor, is neither listed nor counted) in place of the cards, each opening its
 own shelf), a **category** (its badge and name in the header are its icon, colour,
 type and name editors; readings first, the setting last: two cards at one
 size, each with what it's measured against under its label: spent, with the

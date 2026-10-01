@@ -1022,7 +1022,13 @@ export function merchantSummary(merchant: string, series?: string | null) {
     // News, not history: after three charges at the new price the change is
     // the price, and the banner would be a permanent stripe about the past.
     const runLength = charges.length - i;
-    if (i > 0 && runLength <= 3)
+    // A price changes only if there was one: the old amount held for the two
+    // charges before the change (or was the only one, as with a yearly
+    // renewal). A bill that differs every month (electricity) has no price,
+    // and "price changed $267 → $184" was just this month's usage.
+    const prior = i > 0 ? Math.abs(charges[i - 1].amount) : 0;
+    const held = i === 1 || (i >= 2 && Math.abs(Math.abs(charges[i - 2].amount) - prior) <= Math.max(0.5, prior * 0.01));
+    if (i > 0 && runLength <= 3 && held)
       priceChange = {
         from: Number(Math.abs(charges[i - 1].amount).toFixed(2)),
         to: Number(latest.toFixed(2)),
@@ -1040,16 +1046,21 @@ export function merchantSummary(merchant: string, series?: string | null) {
   // that costs $790. `day` is the pill that tells the plans apart — the day
   // each one bills, plus the amount when two share a day. `name` stays the
   // user's name for the plan's own shelf. `monthly` is what the live plans
-  // add up to.
+  // add up to. A plan that has stopped billing (the Recurrings page's
+  // inactive rule) isn't one of them: when a vendor's bank name changed, its
+  // old plan, silent since 2024, was listed as due, added to the total, and
+  // made every charge carry an amount to tell the two apart.
   const planRows = seriesRow
     ? []
-    : (db
-        .prepare(
-          `SELECT id, merchant, cadence, avgAmount, lastDate FROM recurrings
-           WHERE id IN (SELECT DISTINCT recurringId FROM transactions WHERE merchant IN (${ph}) AND recurringId IS NOT NULL)
-           ORDER BY lastDate DESC`
-        )
-        .all(...variants) as { id: number; merchant: string; cadence: string; avgAmount: number; lastDate: string }[]);
+    : (
+        db
+          .prepare(
+            `SELECT id, merchant, cadence, avgAmount, lastDate FROM recurrings
+             WHERE id IN (SELECT DISTINCT recurringId FROM transactions WHERE merchant IN (${ph}) AND recurringId IS NOT NULL)
+             ORDER BY lastDate DESC`
+          )
+          .all(...variants) as { id: number; merchant: string; cadence: string; avgAmount: number; lastDate: string }[]
+      ).filter((r) => isRecurringActive(r.lastDate, settings[r.merchant]?.cadence ?? r.cadence));
   const planDay = new Map((db.prepare("SELECT key, day FROM plans").all() as { key: string; day: number | null }[]).map((p) => [p.key, p.day]));
   const dayNum = (merchant: string, lastDate: string) => {
     // A confirmed plan keeps its key when its bill moves ("· 25th" billing

@@ -124,6 +124,19 @@ export const daysAgo = (n: number): string => {
   return d.toISOString().slice(0, 10);
 };
 export const daysFromNow = (n: number): string => daysAgo(-n);
+// The last `n` times day-of-month `day` fell on or before today, oldest first:
+// a monthly bill that is still live at any clock (npm run test:clock).
+export function lastMonthlyDates(n: number, day: number): string[] {
+  const now = new Date();
+  const out: string[] = [];
+  for (let back = 0; out.length < n; back++) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, day));
+    if (d.getUTCDate() !== day) continue; // the month has no such day
+    const iso = d.toISOString().slice(0, 10);
+    if (iso <= now.toISOString().slice(0, 10)) out.unshift(iso);
+  }
+  return out;
+}
 
 // Plans count only once confirmed (the owner accepts what the detector
 // found). A test about bills, totals or the digest, not about accepting,

@@ -1,4 +1,4 @@
-import { detectAndConfirm, cleanDbBeforeEach, seed, months } from "./helpers"; // first: points the DB at a throwaway file
+import { detectAndConfirm, cleanDbBeforeEach, seed, months, lastMonthlyDates } from "./helpers"; // first: points the DB at a throwaway file
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getDb, migrateMerchants } from "../src/lib/db";
@@ -346,27 +346,33 @@ test("Start a plan makes a plan from one charge; same-amount charges join it now
 // and start theirs.
 test("Start a plan on a forced vendor's off-day charge makes a second plan, not a renamed first", () => {
   const v = "Benjamin Franklin Pl";
-  seed(v, months(8, 14, -11.99).map((r) => ({ ...r, date: r.date.replace(/-15$/, "-07") }))); // Aug 2025 – Sep 2026 on the 7th
-  seed(v, [{ date: "2026-08-21", amount: -89.95 }, { date: "2026-08-22", amount: -11.99 }, { date: "2026-09-25", amount: -11.99 }]);
+  // Fourteen months on the 7th, then the second house's charges in the last
+  // two of them, then the 7th of the month after: dated back from today, so
+  // both plans still bill at any clock.
+  const sevenths = lastMonthlyDates(15, 7);
+  const m = (i: number) => sevenths[i].slice(0, 7);
+  const aug21 = `${m(12)}-21`, aug22 = `${m(12)}-22`, sep25 = `${m(13)}-25`, oct7 = sevenths[14];
+  seed(v, sevenths.slice(0, 14).map((date) => ({ date, amount: -11.99 })));
+  seed(v, [{ date: aug21, amount: -89.95 }, { date: aug22, amount: -11.99 }, { date: sep25, amount: -11.99 }]);
   setRecurringOverride(v, "force");
   const plans = () => detectRecurrings().filter((r) => r.merchant.startsWith(v)).map((r) => `${r.merchant} ${r.cadence} ${r.avgAmount} x${r.count}`).sort();
   const idOf = (date: string) => (getDb().prepare("SELECT id FROM transactions WHERE merchant = ? AND date = ?").get(v, date) as { id: number }).id;
   // The owner's marks: the second house's first charges kept out of the first plan.
-  setTransactionRecurringExcluded(idOf("2026-08-21"), true);
-  setTransactionRecurringExcluded(idOf("2026-08-22"), true);
+  setTransactionRecurringExcluded(idOf(aug21), true);
+  setTransactionRecurringExcluded(idOf(aug22), true);
   assert.deepEqual(plans(), [`${v} monthly -11.99 x15`], "forced: one plan of the 7th, plus the 25th it cannot tell apart yet");
 
-  const key = startPlanKey(idOf("2026-09-25"))!;
+  const key = startPlanKey(idOf(sep25))!;
   assert.equal(key, `${v} · $11.99`);
-  setTransactionRecurringIncluded(idOf("2026-09-25"), key);
+  setTransactionRecurringIncluded(idOf(sep25), key);
   assert.deepEqual(plans(), [`${v} monthly -11.99 x14`, `${v} · $11.99 monthly -11.99 x1`], "two plans: the 7th keeps its name and charges; the 25th's starts its own");
   // Lifting the mark on Aug 22 (the same amount, in no plan) joins it to the new plan, not the old.
-  setTransactionRecurringExcluded(idOf("2026-08-22"), false);
+  setTransactionRecurringExcluded(idOf(aug22), false);
   assert.deepEqual(plans(), [`${v} monthly -11.99 x14`, `${v} · $11.99 monthly -11.99 x2`]);
   // The catch-up rule still holds on the plan's own day: a pinned charge on
   // the 7th belongs to the plan of the 7th, which then carries the key.
-  seed(v, [{ date: "2026-10-07", amount: -11.99 }]);
-  setTransactionRecurringIncluded(idOf("2026-10-07"), `${v} · Lake`);
+  seed(v, [{ date: oct7, amount: -11.99 }]);
+  setTransactionRecurringIncluded(idOf(oct7), `${v} · Lake`);
   assert.deepEqual(plans(), [`${v} · $11.99 monthly -11.99 x2`, `${v} · Lake monthly -11.99 x15`]);
   // The keys are an amount and a name the owner typed. The shelf tells the
   // houses apart by the day each one bills, so neither has to be renamed.
@@ -393,21 +399,25 @@ test("a split parent or a charge excluded from totals can't start a plan", () =>
 // $790. A vendor with several plans lists them, named as the user named them,
 // with what the live ones add up to; a plan's own shelf is unchanged.
 test("merchantSummary lists a multi-plan vendor's plans with their monthly total; a plan's own summary does not", () => {
+  // Both plans still billing at any clock: a stopped plan isn't one of the
+  // vendor's plans.
   seed("Apple", [
-    ...months(6, 4, -9.99).map((r) => ({ ...r, date: r.date.replace(/-15$/, "-02") })),
-    ...months(6, 4, -12.99).map((r) => ({ ...r, date: r.date.replace(/-15$/, "-26") })),
+    ...lastMonthlyDates(4, 2).map((date) => ({ date, amount: -9.99 })),
+    ...lastMonthlyDates(4, 26).map((date) => ({ date, amount: -12.99 })),
   ]);
   detectRecurrings();
   setRecurringSetting("Apple · 26th", { alias: "Apple TV", expectedAmount: 14.99 });
   const v = merchantSummary("Apple");
-  assert.deepEqual(v.planList.map((p) => [p.key, p.day, p.name, p.amount, p.cadence, p.ended]), [
+  assert.deepEqual(v.planList.map((p) => [p.key, p.day, p.name, p.amount, p.cadence, p.ended]).sort(), [
     ["Apple · 26th", "26th", "Apple TV", 14.99, "monthly", false],
     ["Apple · 2nd", "2nd", "2nd", 9.99, "monthly", false],
   ], "the day pill tells the plans apart; the user's name stays for the plan's own shelf");
   assert.equal(v.monthly, 24.98);
-  assert.equal(v.recurringDetail?.perCharge, 12.99, "the single-plan figures are still there for a caller that wants them");
+  // The single-plan figures are the plan that billed last.
+  const latest = lastMonthlyDates(1, 2)[0] > lastMonthlyDates(1, 26)[0] ? 9.99 : 12.99;
+  assert.equal(v.recurringDetail?.perCharge, latest, "the single-plan figures are still there for a caller that wants them");
 
-  setRecurringSetting("Apple · 26th", { endedDate: "2025-09-30" });
+  setRecurringSetting("Apple · 26th", { endedDate: new Date().toISOString().slice(0, 10) });
   assert.equal(merchantSummary("Apple").monthly, 9.99, "an ended plan is listed but not counted");
 
   assert.deepEqual(merchantSummary("Apple", "Apple · 2nd").planList, [], "a plan's own shelf is about that plan");
