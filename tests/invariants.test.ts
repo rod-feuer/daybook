@@ -1,4 +1,4 @@
-import { detectAndConfirm, confirmAll, cleanDbBeforeEach, addCat, tx, daysAgo, daysFromNow } from "./helpers"; // first: points the DB at a throwaway file
+import { detectAndConfirm, confirmAll, cleanDbBeforeEach, addCat, tx, daysAgo, daysFromNow, lastMonthlyDates } from "./helpers"; // first: points the DB at a throwaway file
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -1610,6 +1610,37 @@ test("the vendor shelf follows the newer series of a folded vendor, and a price 
   assert.deepEqual(merchantSummary("Mag").priceChange, { from: 10, to: 12, since: "2026-04-05" });
 });
 
+test("a bill that differs every month has no price to change; a held price that moves does", () => {
+  // Electricity: "price changed $267 → $184" was only this month's usage.
+  const util = addCat("Utilities (power)");
+  const power = [120, 95, 150, 267, 184];
+  power.forEach((a, i) => tx("Power Co", { amount: -a, date: daysAgo((power.length - i) * 30), categoryId: util }));
+  // A stream that held $15.99 and moved to $16.99 is a price change.
+  const subs = addCat("Subscriptions (stream)");
+  [15.99, 15.99, 15.99, 16.99].forEach((a, i) => tx("Streamer", { amount: -a, date: daysAgo((4 - i) * 30), categoryId: subs }));
+  detectRecurrings();
+  assert.equal(merchantSummary("Power Co").priceChange, null, "no steady price, no price change");
+  assert.deepEqual(
+    { from: merchantSummary("Streamer").priceChange?.from, to: merchantSummary("Streamer").priceChange?.to },
+    { from: 15.99, to: 16.99 },
+    "a held price that moved is news"
+  );
+});
+
+test("a vendor's plan that stopped billing isn't listed, totalled, or used to tell the live one apart", () => {
+  // The bank renamed the co-op: its old name's plan last billed two years ago.
+  // It was listed as due, added to "$301 per month", and made every charge
+  // carry an amount ("4th · $184") to tell two plans apart.
+  const home = addCat("Lake (power)");
+  for (let i = 0; i < 8; i++) tx("Coop Old Name", { amount: -(100 + i * 7), date: daysAgo(900 - i * 30), categoryId: home });
+  for (let i = 0; i < 8; i++) tx("Coop", { amount: -(150 + i * 9), date: daysAgo(240 - i * 30), categoryId: home });
+  detectAndConfirm();
+  linkMerchant("Coop Old Name", "Coop");
+  const v = merchantSummary("Coop");
+  assert.equal(v.planList.length <= 1, true, `only the live plan: ${JSON.stringify(v.planList.map((p) => p.key))}`);
+  assert.ok(v.planList.every((p) => !/Old Name/.test(p.key)), "the stopped plan is not one of the vendor's plans");
+});
+
 // A fixed bill with usage on top. Anthropic: $20 on the 17th every month plus
 // $15-ish API top-ups on random days. The bill is the $20 group; the top-ups
 // stay unlinked. A variable utility whose amounts wander but whose every
@@ -2349,21 +2380,26 @@ test("a vendor-wide category edit is refused only for plans in different categor
 // is called is what search finds.
 test("a charge takes its plan's name when the user named the plan", () => {
   const v = "In 529 Dir Ach Contrib";
-  for (const m of ["04", "05", "06", "07", "08", "09"]) {
-    tx(v, { amount: -200, date: `2026-${m}-18`, categoryId: CAT, hash: `h200-${m}` });
-    tx(v, { amount: -300, date: `2026-${m}-18`, categoryId: CAT, hash: `h300-${m}` });
-  }
+  // Six months on the 18th, dated back from today so the plans still bill at
+  // any clock (the vendor shelf lists only plans that do). "last" is the newest.
+  const ms = lastMonthlyDates(6, 18).map((d) => d.slice(0, 7));
+  const last = ms[5];
+  ms.forEach((m, i) => {
+    const tag = i === 5 ? "last" : String(i);
+    tx(v, { amount: -200, date: `${m}-18`, categoryId: CAT, hash: `h200-${tag}` });
+    tx(v, { amount: -300, date: `${m}-18`, categoryId: CAT, hash: `h300-${tag}` });
+  });
   const plans = detectAndConfirm().filter((r) => r.merchant.startsWith(v)).map((r) => r.merchant).sort();
   assert.deepEqual(plans, [`${v} · $200`, `${v} · $300`], "fixture: two plans under one descriptor");
   setRecurringSetting(`${v} · $200`, { alias: "529 Contribution - Henry" } as never);
 
   const names = (rows: { amount: number; displayName: string }[]) => [...new Set(rows.map((r) => `${r.amount}: ${r.displayName}`))].sort();
   const expected = ["-200: 529 Contribution - Henry", `-300: ${v}`];
-  assert.deepEqual(names(listTransactions({ month: "2026-09" })), expected, "the Transactions row; the unnamed plan keeps the vendor's name");
-  assert.deepEqual(names(categorySummary(CAT, "2026-09")!.transactions), expected, "the category shelf's list");
+  assert.deepEqual(names(listTransactions({ month: last })), expected, "the Transactions row; the unnamed plan keeps the vendor's name");
+  assert.deepEqual(names(categorySummary(CAT, last)!.transactions), expected, "the category shelf's list");
   const id = (hash: string) => (getDb().prepare("SELECT id FROM transactions WHERE hash = ?").get(hash) as { id: number }).id;
-  assert.equal(transactionById(id("h200-09"))!.displayName, "529 Contribution - Henry", "the charge shelf");
-  assert.equal(transactionById(id("h200-09"))!.merchant, v, "with the bank's descriptor still on the row");
+  assert.equal(transactionById(id("h200-last"))!.displayName, "529 Contribution - Henry", "the charge shelf");
+  assert.equal(transactionById(id("h200-last"))!.merchant, v, "with the bank's descriptor still on the row");
 
   // search finds the plan by its name — and only that plan's charges
   const found = listTransactions({ q: "henry" });
@@ -2378,9 +2414,9 @@ test("a charge takes its plan's name when the user named the plan", () => {
   );
 
   // a charge the user took out of the plan is no longer that plan's
-  setTransactionRecurringExcluded(id("h200-09"), true);
+  setTransactionRecurringExcluded(id("h200-last"), true);
   detectAndConfirm();
-  assert.equal(transactionById(id("h200-09"))!.displayName, v);
+  assert.equal(transactionById(id("h200-last"))!.displayName, v);
 
   // The statement lists every charge of the vendor. Naming it from the newest
   // row put "529 Contribution - Henry" over the $300 plan too.
@@ -2962,15 +2998,18 @@ test("not recurring un-confirms a plan, or every plan of a vendor", () => {
 test("a per-plan category confirms it; its day follows its bill; confirmed clones still fold", () => {
   const home = addCat("Home (firm)");
   const v = "Ben Firm";
-  for (const m of ["01", "02", "03", "04", "05", "06"]) {
-    tx(v, { amount: -11.99, date: `2026-${m}-08` });
-    tx(v, { amount: -11.99, date: `2026-${m}-25` });
+  // Six months on the 8th and the 25th, then the 25th's bill moves to the
+  // 27th: dated back from today, so the plan is still billing at any clock.
+  const months27 = lastMonthlyDates(7, 27).map((d) => d.slice(0, 7));
+  for (const m of months27.slice(0, 6)) {
+    tx(v, { amount: -11.99, date: `${m}-08` });
+    tx(v, { amount: -11.99, date: `${m}-25` });
   }
   detectRecurrings();
   const id = (getDb().prepare("SELECT id FROM recurrings WHERE merchant = ?").get(`${v} · 25th`) as { id: number }).id;
   assert.equal(applyRecategorize(v, home, id), "plan");
   assert.notEqual(getDb().prepare("SELECT 1 FROM plans WHERE key = ?").get(`${v} · 25th`), undefined, "confirmed");
-  tx(v, { amount: -11.99, date: "2026-07-27" });
+  tx(v, { amount: -11.99, date: `${months27[6]}-27` });
   detectRecurrings();
   const day = merchantSummary(v).planList.find((p) => p.key === `${v} · 25th`)!.day;
   assert.equal(day, "27th", "the day it bills now");
