@@ -1,5 +1,6 @@
 import { detectAndConfirm, confirmAll, cleanDbBeforeEach, addCat, tx, daysAgo, daysFromNow, lastMonthlyDates } from "./helpers"; // first: points the DB at a throwaway file
 import { test, before } from "node:test";
+import { budgetOutlook } from "../src/lib/budgetOutlook";
 import assert from "node:assert/strict";
 import {
   getDb,
@@ -33,6 +34,7 @@ import {
   setBudget,
   getBudgets,
   getBudgetsFull,
+  deleteBudget,
   setTransactionNote,
   setTransactionExcluded,
   updateCategory,
@@ -3258,4 +3260,40 @@ test("a charge linked to one plan pays that plan, not a sibling keyed by the ven
   const row = (m: string) => rows.find((r) => r.merchant === m)!;
   assert.equal(row("Ben Link Pl · $11.99").paid, true, "Carmel is paid by its own charge");
   assert.equal(row("Ben Link Pl").paidTimes, 1, "the 8th is paid once, not twice");
+});
+
+test("raising a budget in October leaves September judged against the budget it had", () => {
+  // A budget change is a decision about the months ahead. Re-judging the past
+  // against it would turn a September that came in under its $1,000 into one
+  // "over budget" — a number the user never had a chance to meet.
+  setBudget(CAT, 1000);
+  tx("Kroger", { amount: -900, date: "2025-09-10", categoryId: CAT });
+  tx("Kroger", { amount: -900, date: "2025-10-10", categoryId: CAT });
+  const sept = () => dashboard("2025-09").budget!;
+  const before = { total: sept().total, outlook: budgetOutlook(sept().total, sept().projected!, false).kind };
+  assert.deepEqual(before, { total: 1000, outlook: "under" });
+
+  setBudget(CAT, 800, "monthly", "2025-10");
+
+  assert.deepEqual({ total: sept().total, outlook: budgetOutlook(sept().total, sept().projected!, false).kind }, before, "September keeps its $1,000 and its verdict");
+  assert.equal(dashboard("2025-10").budget!.total, 800, "October takes the new budget");
+  assert.equal(getBudgets("2026-03")[CAT], 800, "and so does every month after it");
+});
+
+test("a budget set from a month replaces later ones, removes from that month on, and stores only changes", () => {
+  // "From October on" means October and every month after it, so a budget the
+  // user had set for January gives way. Removing one keeps earlier months'.
+  setBudget(CAT, 1000);
+  setBudget(CAT, 1200, "monthly", "2026-01");
+  setBudget(CAT, 900, "monthly", "2025-10");
+  assert.deepEqual(["2025-09", "2025-10", "2026-01"].map((m) => getBudgets(m)[CAT]), [1000, 900, 900]);
+
+  deleteBudget(CAT, "2025-12");
+  assert.deepEqual(["2025-11", "2025-12", "2026-06"].map((m) => getBudgets(m)[CAT] ?? null), [900, null, null], "no budget from December on");
+
+  const rows = () => (getDb().prepare("SELECT COUNT(*) AS n FROM budget_entries WHERE categoryId = ?").get(CAT) as { n: number }).n;
+  const n = rows();
+  setBudget(CAT, 900, "monthly", "2025-11"); // what already holds in November
+  assert.equal(rows(), n - 1, "re-saving the budget that holds adds no entry (and clears the removal after it)");
+  assert.equal(getBudgets("2026-06")[CAT], 900, "the November save holds from November on");
 });

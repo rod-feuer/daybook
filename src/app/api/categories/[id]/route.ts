@@ -19,7 +19,7 @@ export async function DELETE(
   return NextResponse.json({ ok: true });
 }
 
-// Set or clear a category's monthly budget. budget === null | "" clears it.
+// Set or clear a category's budget from a month on. budget === null | "" clears it.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -53,9 +53,14 @@ export async function PATCH(
     return NextResponse.json({ ok: true });
   }
 
-  // Otherwise it's a budget set/clear.
+  // Otherwise it's a budget set/clear, from the month on screen on (earlier
+  // months keep theirs). Without a month, from the current one.
+  const month =
+    typeof body.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(body.month)
+      ? body.month
+      : new Date().toISOString().slice(0, 7);
   if (body.budget === null || body.budget === "" || body.budget === undefined) {
-    deleteBudget(Number(id));
+    deleteBudget(Number(id), month);
     return NextResponse.json({ ok: true });
   }
   const amount = Number(body.budget);
@@ -63,6 +68,6 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid budget" }, { status: 400 });
   }
   const period = body.period === "annual" ? "annual" : "monthly";
-  setBudget(Number(id), amount, period);
+  setBudget(Number(id), amount, period, month);
   return NextResponse.json({ ok: true });
 }
