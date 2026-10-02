@@ -2261,7 +2261,9 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
 
   // Recurrings tied to this category still expected this month (unpaid) — only
   // for the current month, and only ACTIVE ones (a stale/stopped recurring that
-  // hasn't charged within ~1.5 cycles isn't "upcoming"; it's inactive).
+  // hasn't charged within ~1.5 cycles isn't "upcoming"; it's inactive), and not
+  // one the user marked ended: the Epic Pass, ended Sep 27, was still listed
+  // as $100 due Oct 1. The dashboard, Recurrings and the digest already skip it.
   const currentMonth = new Date().toISOString().slice(0, 7);
   const upcoming =
     month !== currentMonth
@@ -2273,6 +2275,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
               r.avgAmount < 0 &&
               r.expectedThisMonth &&
               !r.paid &&
+              !r.ended &&
               isRecurringActive(r.lastDate, r.cadence)
           )
           .map((r) => ({

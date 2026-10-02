@@ -93,6 +93,19 @@ test("mid-month, the category shelf compares last month over the same days, not 
   assert.equal(past.prevSpent, 600, "a finished month compares with the whole month before");
 });
 
+test("a plan the user marked ended isn't upcoming on its category's shelf", () => {
+  // The Epic Pass, ended Sep 27, still showed "$100 due Oct 1" there.
+  const cat = Number(getDb().prepare("INSERT INTO categories (name,color,icon,kind) VALUES ('Trips','#888','✈️','expense')").run().lastInsertRowid);
+  const month = new Date().toISOString().slice(0, 7);
+  // Monthly on the 28th through last month, so this month's is still to come.
+  const dates = lastMonthlyDates(6, 28).filter((d) => d.slice(0, 7) !== month).slice(-4);
+  seed("Ski Pass Co", dates.map((date) => ({ date, amount: -100 })), { categoryId: cat });
+  detectAndConfirm();
+  assert.equal(categorySummary(cat, month)!.upcoming.length, 1, "fixture: this month's charge is upcoming");
+  setRecurringSetting("Ski Pass Co", { endedDate: new Date().toISOString().slice(0, 10) });
+  assert.deepEqual(categorySummary(cat, month)!.upcoming, [], "ended: not upcoming");
+});
+
 test("mid-month, the average month leaves the unfinished month out", () => {
   // The chart's dashed line and "Avg": counting a half-spent month as a whole
   // one pulled the average down early in every month.
