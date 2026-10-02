@@ -1,12 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { usd, isCurrentMonth, monthName } from "@/lib/format";
 import { Tooltip } from "@/components/Tooltip";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
 import { BudgetField } from "@/components/BudgetField";
-import { BudgetPlan } from "@/components/BudgetPlan";
+import { BudgetPlan, PlanBars } from "@/components/BudgetPlan";
 import { BAR_AREA, barFigure, HATCH, monthLabel } from "@/components/shelf/bars";
 import { BudgetBar, paceOf } from "@/components/BudgetBar";
 import { CategoryName, EditableCategoryBadge } from "@/components/CategoryIdentity";
@@ -93,6 +94,10 @@ export function CategoryBody({
 
   // The budget as saved: an annual one measures the year to date.
   const b = data.budgetEntry;
+  // Plan by month is open for one category at a time (the shelf can move to
+  // another without remounting), and only on a monthly budget.
+  const [planFor, setPlanFor] = useState<number | null>(null);
+  const planning = planFor === data.id && b.period === "monthly";
   const annual = b.period === "annual";
   const spentNow = annual ? b.ytdSpent : data.spent;
   const recurNow = annual ? recurring * 12 : recurring;
@@ -150,7 +155,11 @@ export function CategoryBody({
         </div>
       )}
 
-      <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
+      {planning ? (
+        <PlanBars plan={b.plan} />
+      ) : (
+        <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
+      )}
 
       {budgetable && (
         <div className="space-y-2">
@@ -170,7 +179,7 @@ export function CategoryBody({
               {monthName(data.month)} has its own budget, {usd(b.amount, { cents: false })}; the field sets the usual one.
             </p>
           )}
-          {b.period === "monthly" && <BudgetPlan plan={b.plan} avg={data.monthlyAvg} onSave={onSetMonthBudget} />}
+          {b.period === "monthly" && <BudgetPlan plan={b.plan} open={planning} onToggle={() => setPlanFor(planning ? null : data.id)} onSave={onSetMonthBudget} />}
         </div>
       )}
 

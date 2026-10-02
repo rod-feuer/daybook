@@ -1484,9 +1484,10 @@ async function categoryShelfBudget(browser) {
         const bars = document.querySelectorAll(`${sel} [data-plan-bars] [data-plan-bar]`).length;
         const own = [...document.querySelectorAll(`${sel} [data-plan-bars] [data-budget-outline]`)].filter((o) => getComputedStyle(o).borderTopColor === accentRgb).length;
         const fig = q(`[data-plan-bar="${m}"] [data-bar-figure]`); const out = q(`[data-plan-bar="${m}"] [data-budget-outline]`);
-        return { bars, own, figure: fig?.textContent, gap: fig && out ? Math.round(out.getBoundingClientRect().top - fig.getBoundingClientRect().bottom) : null };
+        const figures = document.querySelectorAll(`${sel} [data-plan-bars] [data-bar-figure]`).length;
+        return { bars, own, figures, past: !!q("[data-month-bars]"), figure: fig?.textContent, gap: fig && out ? Math.round(out.getBoundingClientRect().top - fig.getBoundingClientRect().bottom) : null };
       }, shelfSel, months[2]);
-      record("category shelf budget", "the plan's chart draws twelve budget outlines, the months set in the accent, each figure on its own outline", chart.bars === 12 && chart.own === 2 && chart.figure === "1.2k" && chart.gap !== null && Math.abs(chart.gap) <= 1, JSON.stringify(chart));
+      record("category shelf budget", "the plan's chart takes the last 12 months' place, draws twelve budget outlines, the months set in the accent, and only they carry a figure, on their outline", !chart.past && chart.bars === 12 && chart.own === 2 && chart.figures === 2 && chart.figure === "1.2k" && chart.gap !== null && Math.abs(chart.gap) <= 1, JSON.stringify(chart));
       record("category shelf budget", "the months set carry the edited tag, and the dashboard judges each against its own amount", edited && totals[1] - totals[0] === 1200 - 4321 && totals[2] - totals[0] === 2500 - 4321, `edited=${edited}; dashboard budget ${totals.join(" / ")}`);
       // empty them: each returns to the usual budget, without the tag
       for (const i of [2, 6]) {
@@ -1495,6 +1496,9 @@ async function categoryShelfBudget(browser) {
       }
       const back = await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-plan-month][data-edited]`), { timeout: 8000 }, shelfSel).then(() => true, () => false);
       record("category shelf budget", "emptying a month returns it to the usual budget", back);
+      await (await page.$(`${shelfSel} [data-budget-plan] button`)).click();
+      const swapped = await page.waitForFunction((sel) => document.querySelector(`${sel} [data-month-bars]`) && !document.querySelector(`${sel} [data-plan-bars]`), { timeout: 5000 }, shelfSel).then(() => true, () => false);
+      record("category shelf budget", "closing Plan by month brings the last 12 months back", swapped);
     }
     // Annual keeps the dollars: $4,321 a month is $51,852 a year.
     await page.select(`${shelfSel} [data-shelf-budget] select`, "annual");
