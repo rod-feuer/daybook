@@ -18,7 +18,7 @@ type PlaidTxn = {
   amount: number; // Plaid sign: positive = money out (our expenses)
   pending: boolean;
 };
-type PlaidAccount = { account_id: string; name: string };
+type PlaidAccount = { account_id: string; name: string; type?: string };
 export type PlaidItem = { accounts: PlaidAccount[]; transactions: PlaidTxn[] };
 
 // Pull transactions for a date range via the Plaid CLI. We use `transactions
@@ -189,10 +189,18 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     held.delete(from);
     held.set(to, { ...was, hash: to });
   };
-  type Row = { hash: string; date: string; merchant: string; rawMerchant: string; amount: number; account: string; pending: number };
+  // The vendor check reads both names Plaid sends: a link can return the
+  // bank's descriptor where another returned Plaid's cleaned-up name for the
+  // same charge ("Benjamin Franklin Pl" against "Ben Franklin Plumbing").
+  type Row = { hash: string; date: string; merchant: string; rawMerchant: string; descriptor: string; amount: number; account: string; pending: number };
+  const sameSlot = (r: Row, h: Held) =>
+    h.account === r.account && h.date === r.date && h.amount === r.amount && h.pending === r.pending;
   const sameCharge = (r: Row, h: Held) =>
-    h.account === r.account && h.date === r.date && h.amount === r.amount && h.pending === r.pending &&
-    (h.rawMerchant === r.rawMerchant || nameAffinity(r.merchant, h.merchant) >= NAME_MATCH);
+    sameSlot(r, h) &&
+    (h.rawMerchant === r.rawMerchant ||
+      h.rawMerchant === r.descriptor ||
+      nameAffinity(r.merchant, h.merchant) >= NAME_MATCH ||
+      nameAffinity(normalizeMerchant(r.descriptor), h.merchant) >= NAME_MATCH);
 
   let inserted = 0;
   let updated = 0;
@@ -203,7 +211,14 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     // can see its posted twin already in the table.
     const flat = rows.flatMap((item) => {
       const acctName = new Map(item.accounts.map((a) => [a.account_id, a.name]));
-      return item.transactions.map((t) => {
+      // A loan's or an investment account's own transactions aren't spending:
+      // a mortgage payment is already the payment out of checking, and its
+      // loan-side record would count it a second time, as income. Their
+      // balances are what matter, and come separately.
+      const ledger = new Set(
+        item.accounts.filter((a) => a.type !== "loan" && a.type !== "investment").map((a) => a.account_id)
+      );
+      return item.transactions.filter((t) => ledger.has(t.account_id) || !acctName.has(t.account_id)).map((t) => {
         const rawMerchant = t.merchant_name || t.name;
         return {
           date: t.date,
@@ -213,6 +228,7 @@ export function importPlaidTransactions(items: PlaidItem[]): {
           account: acctName.get(t.account_id) ?? t.account_id,
           pending: t.pending ? 1 : 0,
           hash: t.transaction_id,
+          descriptor: t.name, // the bank's own text; merchant_name is Plaid's cleanup of it
         };
       });
     });
@@ -241,7 +257,14 @@ export function importPlaidTransactions(items: PlaidItem[]): {
         }
       }
       if (!held.has(r.hash)) {
-        const i = orphans.findIndex((h) => sameCharge(r, h));
+        // The vendor's names agree; failing that, the one held charge this
+        // pull dropped on that account, day and amount ("Sweetnew" came back
+        // as "Grubhub"). Two candidates and no name to choose by: no match.
+        let i = orphans.findIndex((h) => sameCharge(r, h));
+        if (i < 0) {
+          const slot = orphans.flatMap((h, j) => (sameSlot(r, h) ? [j] : []));
+          if (slot.length === 1) i = slot[0];
+        }
         if (i >= 0) {
           rekey(orphans[i].hash, r.hash);
           orphans.splice(i, 1);
