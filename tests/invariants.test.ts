@@ -3401,3 +3401,51 @@ test("a new charge that merely resembles a held one, still in the pull, is not t
   const res = importPlaidTransactions([item([{ id: "u1", amount: 12 }, { id: "u2", amount: 12 }])]);
   assert.deepEqual([res.relinked, res.inserted], [0, 1]);
 });
+
+test("a relinked charge matches even when the new link sends Plaid's cleaned-up name instead of the bank's", () => {
+  // The real relink of 2026-10-02: the old link stored "Benjamin Franklin Pl"
+  // (the bank's descriptor, no merchant_name); the new one sent merchant_name
+  // "Ben Franklin Plumbing" with that same descriptor as `name`. Matching on
+  // merchant_name alone imported 24 charges a second time.
+  const acct = [{ account_id: "a1", name: "Platinum" }];
+  importPlaidTransactions([{ accounts: acct, transactions: [
+    { transaction_id: "old-bf", account_id: "a1", date: "2026-08-12", name: "Benjamin Franklin Pl", merchant_name: null, amount: 215, pending: false },
+  ] }]);
+  const res = importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Platinum" }], transactions: [
+    { transaction_id: "new-bf", account_id: "a2", date: "2026-08-12", name: "Benjamin Franklin Pl", merchant_name: "Ben Franklin Plumbing", amount: 215, pending: false },
+  ] }]);
+  assert.deepEqual([res.relinked, res.inserted], [1, 0]);
+});
+
+test("a loan's own transactions stay out of the ledger: the payment from checking is the spending", () => {
+  // A relinked Chase brought its mortgage along, and the mortgage account's
+  // records of three payments came in as $14,583 of income. The payment out
+  // of checking already counts; the loan side is a balance, not spending.
+  const res = importPlaidTransactions([{
+    accounts: [{ account_id: "chk", name: "Checking", type: "depository" }, { account_id: "mtg", name: "MORTGAGE LOAN", type: "loan" }],
+    transactions: [
+      { transaction_id: "pay-out", account_id: "chk", date: "2026-09-01", name: "CHASE MORTGAGE PMT", merchant_name: null, amount: 4861.04, pending: false },
+      { transaction_id: "pay-in", account_id: "mtg", date: "2026-09-01", name: "PAYMENT", merchant_name: null, amount: -4861.04, pending: false },
+    ],
+  }]);
+  const accounts = (getDb().prepare("SELECT account FROM transactions WHERE source = 'plaid' AND hash IN ('pay-out', 'pay-in')").all() as { account: string }[]).map((r) => r.account);
+  assert.deepEqual([res.inserted, accounts], [1, ["Checking"]]);
+});
+
+test("a relinked charge with no name in common is still matched when it's the only one in its slot", () => {
+  // Grubhub orders came back from the new link as "Grubhub" where the old one
+  // said "Sweetnew": nothing to compare by name. One held charge dropped from
+  // the pull on that account, day and amount is that charge; two would be a
+  // guess, so they import rather than merge.
+  const acct = [{ account_id: "a1", name: "Gold" }];
+  importPlaidTransactions([{ accounts: acct, transactions: [
+    { transaction_id: "old-sw", account_id: "a1", date: "2026-08-07", name: "SWEETNEW", merchant_name: null, amount: 31.4, pending: false },
+    { transaction_id: "old-a", account_id: "a1", date: "2026-08-09", name: "CAFE ONE", merchant_name: null, amount: 9, pending: false },
+    { transaction_id: "old-b", account_id: "a1", date: "2026-08-09", name: "KIOSK TWO", merchant_name: null, amount: 9, pending: false },
+  ] }]);
+  const res = importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Gold" }], transactions: [
+    { transaction_id: "new-sw", account_id: "a2", date: "2026-08-07", name: "Grubhub", merchant_name: "Grubhub", amount: 31.4, pending: false },
+    { transaction_id: "new-x", account_id: "a2", date: "2026-08-09", name: "Square Inc", merchant_name: "Square", amount: 9, pending: false },
+  ] }]);
+  assert.deepEqual([res.relinked, res.inserted], [1, 1], "the lone Grubhub slot matches; the ambiguous $9 doesn't");
+});
