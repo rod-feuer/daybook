@@ -7,6 +7,11 @@
 > (free OSS competition + papercut-level pain). This document stands as a **completed strategy
 > exercise and a reusable template**; the buyability experiment has moved to a different
 > problem. See memory note `copilot-lite-personal-tool-decision` for the decision + portable playbook.
+>
+> **Scope amended (2026-10-02): the whole household picture.** As a personal tool, Daybook's
+> job is the owner's household, not a market segment, so the spending ledger grows into net
+> worth, investments, and income and taxes (§12). Two §11 non-goals were revised to match.
+> §1–§10 stand as written: they describe the market bet that was set aside.
 
 This is the strategy companion to `DESIGN.md`. `DESIGN.md` says *how we build*;
 this says *what we believe, who it's for, and why we win*. When a product,
@@ -380,9 +385,72 @@ Challenger headline to test: *"All the control of a spreadsheet. None of the dat
 ## §11 — Deliberate non-goals
 - **No budgeting religion** (no envelopes/zero-based). *(That's Actual/YNAB.)*
 - **No cloud / multi-tenant SaaS** for the core app. *(Optional managed sync is a relay, not the product.)*
-- **No household / multi-user.** *(That's Monarch.)*
-- **No comprehensive accounting** (investments/net worth/multi-currency) as a core bet — possible P3 expansion, never the lead.
+- **No multi-user.** One person keeps one household's books, every account and both
+  earners included, with no logins, roles or sharing. *(Revised 2026-10-02: it read "No
+  household / multi-user"; the household is now the subject, §12, but there is still one
+  operator.)*
+- **No accounting system.** Net worth, investment balances, and income and taxes are in
+  scope as balances and flows (§12). Holdings analytics, cost basis, trading, tax filing,
+  bill pay and multi-currency stay out. *(Revised 2026-10-02: it read "No comprehensive
+  accounting (investments/net worth/multi-currency) as a core bet — possible P3 expansion,
+  never the lead".)*
 - **No rules engine.** Correct-don't-configure is the point.
+
+---
+
+## §12 — Scope: the whole household picture (amended 2026-10-02)
+
+**Why.** Daybook answers "where is this month heading?" well, but spending is one flow among
+several. The owner's real question is "where do we stand?": what the household owns and owes,
+whether savings are growing, and whether income and taxes are on track. Today Daybook sees
+only spending accounts (cards and checking). Its categories already point at the rest:
+payments to homes, vehicles, loans, education savings, insurance, a small business and
+taxes leave the ledger toward balances it can't see.
+
+**The picture, in three layers.** Each one is a balance or a flow over time, never a
+second ledger.
+
+| Layer | What Daybook shows | Where the numbers come from |
+|---|---|---|
+| **Net worth** | What the household owns (homes, vehicles, cash, investments) and owes (mortgages, loans, card balances), dated, as a trend | Account balances from statements or imports; property and vehicle values the owner sets |
+| **Investments** | Brokerage, retirement and education-savings balances; contributions in; growth | Balances and contributions only. Holdings and analytics stay in the owner's separate local portfolio project |
+| **Income and taxes** | Income by source (wages, business, investment income); tax paid so far against the year's projected liability | Paid so far from the ledger; the projection from the owner's separate local tax-projection project |
+
+**The convictions carry over.**
+- *Honest (§1, and DESIGN.md §1.5).* Every balance says the date it's as of. A value the
+  owner sets (a home's worth) is marked as an estimate. A tax projection is labelled as a
+  projection, never shown as what's owed.
+- *Transparent, not automatic.* Each figure shows its source: from a statement, imported,
+  or set by the owner (the auto vs. edited rule, DESIGN.md §2).
+- *Annotate truth.* Statement balances are facts, and the owner's valuations are overlays
+  on them, the same rule as transactions.
+- *Owned.* Local only. Sensitive figures never enter the repo, which is public: docs,
+  tests and fixtures use sample data.
+
+**What this changes in the ledger.** A transfer today leaves every total and goes nowhere
+(DESIGN.md §2, "A category that isn't counted"). With balances it gets a destination: a
+529 contribution or a loan payment moves money from spending into an asset or against a
+liability, and the net worth layer shows it arrive.
+
+**In:** balances over time, net worth and its trend, contributions, income by source,
+tax paid against projected.
+**Out:** trading, holdings analytics and cost basis (the portfolio project's job), tax
+forms and filing (the tax project's job, and it doesn't file either), bill pay,
+multi-currency, multi-user.
+
+**Order.** Each layer is useful alone and builds on the one before.
+1. **Accounts and balances**, ending in net worth: every account and asset with a dated
+   balance, manual first.
+2. **Investments**: balances and contributions, read from the portfolio project.
+3. **Income and taxes**: income by source and tax paid against the projection, read from
+   the tax project.
+
+**Open questions, for the owner to decide before building.**
+- How balances arrive: a manual month-end entry, a statement import, or both.
+- How often property and vehicle values are revisited, and whether they appear in net
+  worth by default or only on request.
+- Whether the two local projects write a file that Daybook reads, or Daybook stays
+  unaware of them and the owner enters the totals.
 
 ---
 
