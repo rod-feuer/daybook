@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { getDb } from "./db";
+import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges } from "./db";
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
 import { normalizeMerchant } from "./merchant";
@@ -98,12 +98,13 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   inserted: number;
   updated: number;
   reconciled: number;
+  relinked: number;
 } {
   const db = getDb();
-  type Held = { hash: string; date: string; merchant: string; amount: number; account: string; pending: number };
+  type Held = { hash: string; date: string; merchant: string; rawMerchant: string | null; amount: number; account: string; pending: number };
   const held = new Map<string, Held>();
   for (const r of db
-    .prepare("SELECT hash, date, merchant, amount, account, pending FROM transactions WHERE source = 'plaid'")
+    .prepare("SELECT hash, date, merchant, rawMerchant, amount, account, pending FROM transactions WHERE source = 'plaid'")
     .all() as Held[])
     held.set(r.hash, r);
   // User edits on pending rows. A re-pulled pending row keeps them (the upsert
@@ -163,9 +164,40 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     restoreEdits.run({ hash: to, ...e });
   };
 
+  // A relinked bank: re-adding an institution (or Plaid replacing a link)
+  // issues new transaction_ids for charges already held, so they'd all import
+  // a second time. A charge under an id we don't hold takes over a held row
+  // whose own id this pull no longer carries, when account, date, amount,
+  // pending state and vendor all agree, one row for one charge. The row keeps
+  // its id, category, note and plan; its split parts and plan entries follow
+  // the new id.
+  ensureRecurringTxExclusions(db);
+  ensureRecurringTxInclusions(db);
+  ensurePlanCharges(db);
+  const rekeyRow = db.prepare("UPDATE transactions SET hash = @to WHERE hash = @from");
+  const rekeyParts = db.prepare(
+    "UPDATE transactions SET hash = @to || substr(hash, length(@from) + 1) WHERE hash LIKE @from || ':s%'"
+  );
+  const rekeyRefs = ["recurring_tx_exclusions", "recurring_tx_inclusions", "plan_charges"].map((t) =>
+    db.prepare(`UPDATE ${t} SET hash = @to || substr(hash, length(@from) + 1) WHERE hash = @from OR hash LIKE @from || ':s%'`)
+  );
+  const rekey = (from: string, to: string) => {
+    rekeyRow.run({ from, to });
+    rekeyParts.run({ from, to });
+    for (const r of rekeyRefs) r.run({ from, to });
+    const was = held.get(from)!;
+    held.delete(from);
+    held.set(to, { ...was, hash: to });
+  };
+  type Row = { hash: string; date: string; merchant: string; rawMerchant: string; amount: number; account: string; pending: number };
+  const sameCharge = (r: Row, h: Held) =>
+    h.account === r.account && h.date === r.date && h.amount === r.amount && h.pending === r.pending &&
+    (h.rawMerchant === r.rawMerchant || nameAffinity(r.merchant, h.merchant) >= NAME_MATCH);
+
   let inserted = 0;
   let updated = 0;
   let reconciled = 0;
+  let relinked = 0;
   const tx = db.transaction((rows: PlaidItem[]) => {
     // Flatten + normalize, then import POSTED before PENDING so a pending row
     // can see its posted twin already in the table.
@@ -186,6 +218,11 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     });
     flat.sort((a, b) => a.pending - b.pending); // posted (0) first
 
+    // Held rows this pull doesn't carry by id: the ones a relinked charge may
+    // be. Split parts are never Plaid's own rows, so they're never candidates.
+    const ids = new Set(flat.map((r) => r.hash));
+    const orphans = [...held.values()].filter((h) => !ids.has(h.hash) && !h.hash.includes(":s"));
+
     const pulled = new Set<string>();
     for (const r of flat) {
       // In-pull pending→posted reconciliation: Plaid returns BOTH versions of a
@@ -201,6 +238,14 @@ export function importPlaidTransactions(items: PlaidItem[]): {
           carryEdits(r.hash, twin.hash);
           reconciled++;
           continue;
+        }
+      }
+      if (!held.has(r.hash)) {
+        const i = orphans.findIndex((h) => sameCharge(r, h));
+        if (i >= 0) {
+          rekey(orphans[i].hash, r.hash);
+          orphans.splice(i, 1);
+          relinked++;
         }
       }
       upsert.run({
@@ -231,13 +276,13 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   // writes. Deferred, a commit from another process in between fails it at once
   // with SQLITE_BUSY_SNAPSHOT, which no busy timeout retries.
   tx.immediate(items);
-  return { inserted, updated, reconciled };
+  return { inserted, updated, reconciled, relinked };
 }
 
 // A whole sync, callable from anywhere (the route, the digest job): pull from
 // the bank since the last imported day, import, apply the split rules, and
 // rebuild the plans when anything changed.
-export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; split: number; total: number }> {
+export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; split: number; total: number }> {
   const end = new Date().toISOString().slice(0, 10);
   // Start after existing history so Plaid doesn't duplicate the back-import.
   // Clamp to `end` in case prior data is future-dated (nothing to pull then).

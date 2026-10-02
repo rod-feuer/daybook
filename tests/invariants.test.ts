@@ -3350,3 +3350,54 @@ test("the budget plan's chart carries each month's spend so far and the same mon
   assert.deepEqual([plan[0].spent, plan[0].lastYear], [120, 0], "this month: spent so far; nothing a year ago");
   assert.deepEqual([plan[1].month, plan[1].spent, plan[1].lastYear], [ym(1), null, 2400], "next month: not spent yet; last year's $2,400");
 });
+
+// WHY: re-adding a bank in Plaid (or Plaid replacing a link, as Chase did on
+// 2026-10-02) issues new transaction_ids for every charge already held. Keyed
+// on the id, the next sync imported months of history a second time: every
+// figure since the last CSV import doubled for that bank.
+test("a relinked bank's charges take over the rows already held instead of importing twice", () => {
+  const pull = (prefix: string, accountId: string) => ({
+    accounts: [{ account_id: accountId, name: "Rod Checking" }],
+    transactions: [
+      { transaction_id: `${prefix}-kroger`, account_id: accountId, date: "2026-07-03", name: "KROGER #123", merchant_name: "Kroger", amount: 84.12, pending: false },
+      // Two identical coffees on one day are two charges, not one.
+      { transaction_id: `${prefix}-cof1`, account_id: accountId, date: "2026-07-04", name: "Starbucks", merchant_name: "Starbucks", amount: 5.25, pending: false },
+      { transaction_id: `${prefix}-cof2`, account_id: accountId, date: "2026-07-04", name: "Starbucks", merchant_name: "Starbucks", amount: 5.25, pending: false },
+      { transaction_id: `${prefix}-gym`, account_id: accountId, date: "2026-07-05", name: "Gym", merchant_name: "Gym", amount: 50, pending: false },
+    ],
+  });
+  importPlaidTransactions([pull("old", "acct-old")]);
+  const db = getDb();
+  const kroger = db.prepare("SELECT id FROM transactions WHERE hash = 'old-kroger'").get() as { id: number };
+  db.prepare("UPDATE transactions SET categoryId = ?, note = 'weekly shop' WHERE hash = 'old-kroger'").run(CAT);
+  db.prepare("INSERT INTO plan_charges (hash, key) VALUES ('old-gym', 'Gym')").run();
+  db.prepare("INSERT INTO transactions (date, merchant, rawMerchant, amount, account, source, hash) VALUES ('2026-07-05', 'Gym — Kids', 'Gym — Kids', -20, 'Rod Checking', 'plaid', 'old-gym:s0')").run();
+
+  // The bank is relinked: the same charges, new ids, a new account id. One new
+  // charge arrives alongside them.
+  const relinked = pull("new", "acct-new");
+  relinked.transactions.push({ transaction_id: "new-shell", account_id: "acct-new", date: "2026-07-06", name: "Shell", merchant_name: "Shell", amount: 40, pending: false });
+  const res = importPlaidTransactions([relinked]);
+
+  const count = (db.prepare("SELECT COUNT(*) n FROM transactions WHERE source = 'plaid' AND hash NOT LIKE '%:s%'").get() as { n: number }).n;
+  assert.deepEqual([res.relinked, res.inserted, count], [4, 1, 5], "four charges taken over, one genuinely new, nothing doubled");
+  const k = db.prepare("SELECT id, categoryId, note FROM transactions WHERE hash = 'new-kroger'").get() as { id: number; categoryId: number; note: string };
+  assert.deepEqual([k.id, k.categoryId, k.note], [kroger.id, CAT, "weekly shop"], "the row keeps its id, category and note");
+  assert.equal((db.prepare("SELECT key FROM plan_charges WHERE hash = 'new-gym'").get() as { key: string } | undefined)?.key, "Gym", "its plan follows the new id");
+  assert.equal((db.prepare("SELECT COUNT(*) n FROM transactions WHERE hash = 'new-gym:s0'").get() as { n: number }).n, 1, "and so does its split part");
+
+  const again = importPlaidTransactions([relinked]);
+  assert.deepEqual([again.relinked, again.inserted], [0, 0], "the next sync is a no-op");
+});
+
+test("a new charge that merely resembles a held one, still in the pull, is not taken over", () => {
+  // A held row the pull still carries by its own id is a live charge, so a
+  // same-day, same-amount charge from the same vendor is a second charge.
+  const item = (txns: { id: string; amount: number }[]) => ({
+    accounts: [{ account_id: "a1", name: "Card" }],
+    transactions: txns.map((t) => ({ transaction_id: t.id, account_id: "a1", date: "2026-08-01", name: "Uber", merchant_name: "Uber", amount: t.amount, pending: false })),
+  });
+  importPlaidTransactions([item([{ id: "u1", amount: 12 }])]);
+  const res = importPlaidTransactions([item([{ id: "u1", amount: 12 }, { id: "u2", amount: 12 }])]);
+  assert.deepEqual([res.relinked, res.inserted], [0, 1]);
+});
