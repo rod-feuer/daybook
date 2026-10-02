@@ -379,8 +379,8 @@ test("an annual budget tracks calendar-YTD spend, not a single month, and reads 
 
   setBudget(cat, 3108, "annual"); // 259 × 12
 
-  assert.deepEqual(getBudgetsFull()[cat], { amount: 3108, period: "annual" }, "full config keeps the period");
-  assert.equal(getBudgets()[cat], 259, "single-month consumers see the annual cap ÷ 12");
+  assert.deepEqual(getBudgetsFull(`${year}-03`)[cat], { amount: 3108, period: "annual" }, "full config keeps the period");
+  assert.equal(getBudgets(`${year}-03`)[cat], 259, "single-month consumers see the annual cap ÷ 12");
 
   const row = categoriesWithTotals(`${year}-03`).find((c) => c.id === cat)!;
   assert.equal(row.budget, 3108, "the row carries the full annual amount");

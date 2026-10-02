@@ -37,7 +37,7 @@ export const TABLES = [
   "merchant_merge_dismissals",
   "merchant_cleanup_log",
   "split_rules",
-  "budgets",
+  "budget_entries",
   "categories",
 ];
 

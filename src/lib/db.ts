@@ -3,6 +3,9 @@ import path from "node:path";
 import fs from "node:fs";
 import { normalizeMerchant } from "./merchant";
 
+// The month of a budget entry that holds for every month (see budget_entries).
+export const BUDGET_ALWAYS = "0000-01";
+
 // Single shared connection. Next dev reloads modules, so cache on globalThis.
 const DATA_DIR = path.join(process.cwd(), "data");
 // The DB path is resolved at call time so tests (and seed tooling) can point at
@@ -69,10 +72,18 @@ function init(db: Database.Database) {
       count INTEGER NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS budgets (
-      categoryId INTEGER PRIMARY KEY REFERENCES categories(id),
-      amount REAL NOT NULL CHECK (amount >= 0),
-      period TEXT NOT NULL DEFAULT 'monthly' CHECK (period IN ('monthly','annual'))
+    -- A category's budget by month. A 'from' entry holds from its month until
+    -- the next 'from' entry; an 'only' entry (monthly budgets) holds for its
+    -- month alone. A null amount is "no budget" from that month on, so earlier
+    -- months keep theirs. BUDGET_ALWAYS is the month of an entry that has
+    -- held since before any data.
+    CREATE TABLE IF NOT EXISTS budget_entries (
+      categoryId INTEGER NOT NULL REFERENCES categories(id),
+      month TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK (scope IN ('from','only')),
+      amount REAL CHECK (amount IS NULL OR amount >= 0),
+      period TEXT NOT NULL DEFAULT 'monthly' CHECK (period IN ('monthly','annual')),
+      PRIMARY KEY (categoryId, month, scope)
     );
 
     -- Auto-split rules: when a transaction matches (merchant pattern + total
@@ -138,6 +149,18 @@ function init(db: Database.Database) {
   const budgetCols = db.prepare("PRAGMA table_info(budgets)").all() as { name: string }[];
   if (budgetCols.length && !budgetCols.some((c) => c.name === "period")) {
     db.exec("ALTER TABLE budgets ADD COLUMN period TEXT NOT NULL DEFAULT 'monthly'");
+  }
+
+  // Migration: one budget per category becomes a 'from' entry that has always
+  // held, so every month reads as before; then the old table goes.
+  if (budgetCols.length) {
+    db.transaction(() => {
+      db.prepare(
+        `INSERT OR IGNORE INTO budget_entries (categoryId, month, scope, amount, period)
+         SELECT categoryId, ?, 'from', amount, period FROM budgets`
+      ).run(BUDGET_ALWAYS);
+      db.exec("DROP TABLE budgets");
+    })();
   }
 
   migrateMerchants(db);
@@ -459,7 +482,7 @@ export function wipeAll() {
     DELETE FROM transactions;
     DELETE FROM recurrings;
     DELETE FROM rules;
-    DELETE FROM budgets;
+    DELETE FROM budget_entries;
     DELETE FROM categories;
   `);
 }
