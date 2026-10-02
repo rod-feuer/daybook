@@ -1,3 +1,5 @@
+import { MIN_ELAPSED_DAYS } from "./budgetOutlook";
+
 export function usd(
   n: number,
   opts: { sign?: boolean; cents?: boolean } = {},
@@ -69,4 +71,17 @@ export function longDate(iso: string): string {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+// The spent card's comparison with last month. Mid-month (`prevThrough`, the
+// day this month's data runs to) last month is summed over the same days, and
+// only once there are enough of them: the dashboard's projection waits as
+// long, and on day 1 a comparison is mostly when a bill happened to post.
+export function spendTrend(spent: number, prevSpent: number, prevThrough: number | null, month: string): string | null {
+  if (prevSpent === 0) return spent === 0 ? null : "new this month";
+  if (prevThrough != null && prevThrough < MIN_ELAPSED_DAYS) return "too early to compare";
+  const pct = Math.round(((spent - prevSpent) / prevSpent) * 100);
+  const [y, m] = month.split("-").map(Number);
+  const prevName = new Date(Date.UTC(y, m - 2, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  return `${pct > 0 ? "↑" : pct < 0 ? "↓" : "="} ${Math.abs(pct)}% vs ${prevThrough ? `${prevName} 1–${prevThrough}` : "last month"}`;
 }

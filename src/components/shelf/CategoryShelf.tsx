@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { usd, isCurrentMonth, monthName } from "@/lib/format";
+import { usd, isCurrentMonth, monthName, spendTrend } from "@/lib/format";
 import { Tooltip } from "@/components/Tooltip";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
@@ -80,16 +80,7 @@ export function CategoryBody({
   // were two loose caption lines under the bar. Mid-month, "spent" is
   // labelled "so far" and last month is compared over the same days.
   const partial = isCurrentMonth(data.month);
-  const delta = data.spent - data.prevSpent;
-  const pct = data.prevSpent ? Math.round((delta / data.prevSpent) * 100) : 0;
-  const [py, pm] = data.month.split("-").map(Number);
-  const prevName = new Date(Date.UTC(py, pm - 2, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
-  const trend =
-    data.prevSpent === 0
-      ? data.spent === 0
-        ? null
-        : "new this month"
-      : `${pct > 0 ? "↑" : pct < 0 ? "↓" : "="} ${Math.abs(pct)}% vs ${data.prevThrough ? `${prevName} 1–${data.prevThrough}` : "last month"}`;
+  const trend = spendTrend(data.spent, data.prevSpent, data.prevThrough, data.month);
   const recurring = !isExcluded && data.recurringMonthly > 0 ? data.recurringMonthly : 0;
 
   // The budget as saved: an annual one measures the year to date.

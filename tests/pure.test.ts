@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { normalizeMerchant, merchantKey } from "../src/lib/merchant";
 import { classifyCadence, addCadence, txHash } from "../src/lib/core";
 import { medianGap, monthlyFactor, CADENCE_DAYS, PER_YEAR, CADENCE_LABEL } from "../src/lib/cadence";
+import { spendTrend } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
@@ -308,4 +309,16 @@ test("isOverBudget: an annual budget is judged on the year so far, a monthly one
   assert.equal(isOverBudget({ budget: 500, budgetPeriod: "monthly", ytdSpent: 9000, total: 499 }), false);
   assert.equal(isOverBudget({ budget: 500, budgetPeriod: "monthly", ytdSpent: 9000, total: 501 }), true);
   assert.equal(isOverBudget({ budget: null, budgetPeriod: "monthly", ytdSpent: 0, total: 999 }), false, "no budget, never over");
+});
+
+test("spendTrend: last month over the same days, and only once five days of the month have data", () => {
+  // On October 1 the card said "↓ 16% vs Sep 1–1": $908 against $1,086, one
+  // day each, mostly when a car payment posted. That's noise, not a trend,
+  // so it waits as long as the dashboard's projection does.
+  assert.equal(spendTrend(908, 1086, 1, "2026-10"), "too early to compare");
+  assert.equal(spendTrend(908, 1086, 4, "2026-10"), "too early to compare");
+  assert.equal(spendTrend(908, 1086, 5, "2026-10"), "↓ 16% vs Sep 1–5");
+  assert.equal(spendTrend(1200, 1000, null, "2026-09"), "↑ 20% vs last month", "a finished month compares whole months");
+  assert.equal(spendTrend(50, 0, 1, "2026-10"), "new this month", "nothing last month is said even early");
+  assert.equal(spendTrend(0, 0, 1, "2026-10"), null);
 });
