@@ -19,6 +19,7 @@ import {
 } from "./queries";
 import type { Recurring } from "./types";
 import { CADENCE_DAYS, medianGap } from "./cadence";
+import { MIN_ELAPSED_DAYS } from "./budgetOutlook";
 
 // ---- Dedupe key -----------------------------------------------------------
 // A transaction is uniquely identified by date + merchant + amount + account.
@@ -1268,7 +1269,6 @@ export function dashboard(month?: string): DashboardData {
 
   // Only project when we're partway through a month with enough days elapsed to
   // have a stable rate (else a flat or 1-point month yields a nonsense forecast).
-  const MIN_ELAPSED_DAYS = 5;
   const [yy, mm] = m.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
   const lastDataDay = rows.length ? Number(rows[rows.length - 1].date.slice(8, 10)) : 0;

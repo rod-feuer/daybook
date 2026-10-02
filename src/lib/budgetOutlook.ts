@@ -9,6 +9,11 @@
 // is $88 over.
 export const BUDGET_TOLERANCE = 0.01;
 
+// Days of a month's data before a rate or a comparison means anything: the
+// dashboard's projection and the category shelf's "vs last month" wait for
+// them. On day 1 a comparison is mostly when a bill happened to post.
+export const MIN_ELAPSED_DAYS = 5;
+
 export type BudgetOutlook = { kind: "over" | "under" | "on"; delta: number };
 
 export function budgetOutlook(total: number, projected: number, isForecast: boolean): BudgetOutlook {
