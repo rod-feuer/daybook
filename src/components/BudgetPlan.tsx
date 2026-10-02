@@ -16,10 +16,13 @@ export type PlanMonth = {
 };
 
 // A monthly budget, planned month by month in the category shelf: the twelve
-// months from the one on screen, each box the budget that holds in it. Type a
-// month's own amount and Tab to the next; Enter or leaving a box saves it. A
-// month with its own amount carries the `edited` tag; emptying it returns it
-// to the usual budget. Behind a visible link, never a hover (DESIGN.md §1).
+// months from the one on screen. A box holds only a month's own amount, with
+// the `edited` tag; the rest show the usual budget as a placeholder, so the
+// months that differ stand out. Type an amount and Tab to the next; Enter or
+// leaving a box saves it; emptying it returns the month to the usual budget.
+// Under each box, the same month last year: the evidence you plan from, on
+// every device (the chart's figures are a hover). The toggle sits directly
+// under the chart it swaps, never behind a hover (DESIGN.md §1).
 export function BudgetPlan({
   plan,
   open,
@@ -58,7 +61,7 @@ export function BudgetPlan({
       </button>
       {open && (
         <>
-          <div className="mt-2 grid grid-cols-4 gap-2">
+          <div className="mt-3 grid grid-cols-4 gap-x-2 gap-y-3">
             {plan.map((p) => (
               <label key={p.month} className="min-w-0" data-plan-month={p.month} data-edited={p.edited ? "1" : undefined}>
                 <span className="mb-1 flex items-center justify-between gap-1 text-xs text-[var(--muted)]">
@@ -66,14 +69,17 @@ export function BudgetPlan({
                   {p.edited && <StateTag edited />}
                 </span>
                 <CommitInput
-                  key={`${p.month}-${p.amount ?? "none"}`}
-                  defaultValue={p.amount === null ? "" : p.amount.toLocaleString("en-US")}
+                  key={`${p.month}-${p.edited ? p.amount : "usual"}`}
+                  defaultValue={p.edited && p.amount !== null ? p.amount.toLocaleString("en-US") : ""}
                   onCommit={(raw) => commit(p, raw)}
-                  placeholder="—"
+                  placeholder={p.usual === null ? "—" : p.usual.toLocaleString("en-US")}
                   inputMode="decimal"
-                  aria-label={`Budget for ${monthName(p.month)} ${p.month.slice(0, 4)}`}
-                  className="tap-native w-full min-w-0 rounded-lg border border-[var(--border)] bg-card px-2 py-2 text-[13px] tabular-nums focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40"
+                  aria-label={`Budget for ${monthName(p.month)} ${p.month.slice(0, 4)}${p.edited || p.usual === null ? "" : `, usual ${usd(p.usual, { cents: false })}`}`}
+                  className="tap-native w-full min-w-0 rounded-lg border border-[var(--border)] bg-card px-2 py-2 text-[13px] font-medium tabular-nums placeholder:font-normal placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40"
                 />
+                <span className="mt-1 block truncate text-[11px] tabular-nums text-[var(--muted)]" data-last-year-figure>
+                  Last yr {usd(p.lastYear, { cents: false })}
+                </span>
               </label>
             ))}
           </div>
@@ -100,7 +106,13 @@ export function PlanBars({ plan }: { plan: PlanMonth[] }) {
   const top = Math.max(...plan.flatMap((p) => [p.amount ?? 0, p.spent ?? 0, p.lastYear]));
   if (top <= 0) return null;
   const px = (v: number) => (v / top) * BAR_AREA;
-  const anySpent = plan.some((p) => (p.spent ?? 0) > 0); // the legend names only marks it draws
+  // The legend names only the marks it draws.
+  const anyBudget = plan.some((p) => (p.amount ?? 0) > 0);
+  const anySpent = plan.some((p) => (p.spent ?? 0) > 0);
+  const soFar = plan.some((p) => (p.spent ?? 0) > 0 && isCurrentMonth(p.month));
+  // Named like the chart it replaces ("Last 12 months").
+  const first = plan[0]?.month ?? "";
+  const title = isCurrentMonth(first) ? "Next 12 months" : `12 months from ${monthLabel(first, "short")} ${first.slice(0, 4)}`;
   const money = (v: number) => usd(v, { cents: false });
   const said = plan
     .map((p) => `${monthLabel(p.month, "short")} ${p.amount == null ? "no budget" : money(p.amount)}${p.edited ? " (its own)" : ""}${p.spent != null ? `, spent ${money(p.spent)}${isCurrentMonth(p.month) ? " so far" : ""}` : ""}, last year ${money(p.lastYear)}`)
@@ -109,14 +121,19 @@ export function PlanBars({ plan }: { plan: PlanMonth[] }) {
   return (
     <div data-plan-bars>
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <div className="stat-label">Budget by month</div>
+        <div className="stat-label">{title}</div>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]" data-plan-legend>
-          <span className="flex items-center gap-1"><span aria-hidden className={`${swatch} border border-[var(--foreground)]/60`} />Budget</span>
-          {anySpent && <span className="flex items-center gap-1"><span aria-hidden className={`${swatch} bg-[var(--foreground)]/60`} />Spent</span>}
+          {anyBudget && <span className="flex items-center gap-1"><span aria-hidden className={`${swatch} border border-[var(--foreground)]/60`} />Budget</span>}
+          {anySpent && (
+            <span className="flex items-center gap-1">
+              <span aria-hidden className={`${swatch} bg-[var(--foreground)]/60`} style={soFar ? HATCH : undefined} />
+              {soFar ? "Spent so far" : "Spent"}
+            </span>
+          )}
           <span className="flex items-center gap-1"><span aria-hidden className={`${swatch} bg-[var(--muted)]/25`} />Last year</span>
         </span>
       </div>
-      <div role="img" aria-label={`Budget by month: ${said}.`}>
+      <div role="img" aria-label={`${title}, budget by month: ${said}.`}>
         {/* Room above the tallest bar for a figure. */}
         <div className="relative flex items-end gap-1" style={{ height: BAR_AREA + 16 }}>
           {plan.map((p) => {
@@ -161,9 +178,13 @@ export function PlanBars({ plan }: { plan: PlanMonth[] }) {
             );
           })}
         </div>
-        <div aria-hidden className="mt-1 flex gap-1 text-[11px] text-[var(--muted)]">
+        {/* January carries its year, so the turn of the year is said. */}
+        <div aria-hidden className="mt-1 flex gap-1 text-[11px] leading-4 text-[var(--muted)]">
           {plan.map((p) => (
-            <span key={p.month} className="flex-1 text-center">{monthLabel(p.month, "narrow")}</span>
+            <span key={p.month} className="flex-1 text-center">
+              {monthLabel(p.month, "narrow")}
+              {p.month.endsWith("-01") && <span className="block" data-year-mark>&rsquo;{p.month.slice(2, 4)}</span>}
+            </span>
           ))}
         </div>
       </div>

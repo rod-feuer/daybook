@@ -1488,6 +1488,25 @@ async function categoryShelfBudget(browser) {
         return { bars, own, figures, past: !!q("[data-month-bars]"), figure: fig?.textContent, gap: fig && out ? Math.round(out.getBoundingClientRect().top - fig.getBoundingClientRect().bottom) : null };
       }, shelfSel, months[2]);
       record("category shelf budget", "the plan's chart takes the last 12 months' place, draws twelve budget outlines, the months set in the accent, and only they carry a figure, on their outline", !chart.past && chart.bars === 12 && chart.own === 2 && chart.figures === 2 && chart.figure === "1.2k" && chart.gap !== null && Math.abs(chart.gap) <= 1, JSON.stringify(chart));
+      // The design review's fixes: a box holds only a month's own amount (the
+      // usual one is its placeholder, so the months that differ stand out);
+      // last year's figure is under every box, on any device (the chart's are
+      // a hover); the toggle sits right under the chart it swaps; the chart is
+      // named for its window.
+      const grid = await page.evaluate((sel, ms) => {
+        const boxes = ms.map((m) => document.querySelector(`${sel} [data-plan-month="${m}"] input`));
+        const lastYr = document.querySelectorAll(`${sel} [data-plan-month] [data-last-year-figure]`);
+        const chart = document.querySelector(`${sel} [data-plan-bars]`)?.getBoundingClientRect();
+        const toggle = document.querySelector(`${sel} [data-budget-plan] button`)?.getBoundingClientRect();
+        return {
+          own: [2, 6].map((i) => boxes[i]?.value),
+          usual: boxes.filter((_, i) => i !== 2 && i !== 6).every((b) => b && b.value === "" && b.placeholder === "4,321"),
+          lastYr: [...lastYr].filter((e) => /^Last yr \$[\d,]+$/.test(e.textContent.trim())).length,
+          toggleGap: chart && toggle ? Math.round(toggle.top - chart.bottom) : null,
+          title: document.querySelector(`${sel} [data-plan-bars] .stat-label`)?.textContent ?? "",
+        };
+      }, shelfSel, months);
+      record("category shelf budget", "the months set hold their amounts and the rest show the usual one as a placeholder; last year is under every box; the toggle sits right under the chart; the chart is named for its window", grid.own.join() === "1,200,2,500" && grid.usual && grid.lastYr === 12 && grid.toggleGap !== null && grid.toggleGap >= 0 && grid.toggleGap <= 12 && /^(Next 12 months|12 months from [A-Z][a-z]{2} \d{4})$/.test(grid.title), JSON.stringify(grid));
       record("category shelf budget", "the months set carry the edited tag, and the dashboard judges each against its own amount", edited && totals[1] - totals[0] === 1200 - 4321 && totals[2] - totals[0] === 2500 - 4321, `edited=${edited}; dashboard budget ${totals.join(" / ")}`);
       // empty them: each returns to the usual budget, without the tag
       for (const i of [2, 6]) {

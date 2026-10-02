@@ -155,11 +155,18 @@ export function CategoryBody({
         </div>
       )}
 
-      {planning ? (
-        <PlanBars plan={b.plan} />
-      ) : (
-        <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
-      )}
+      {/* The chart, then its toggle right under it: Plan by month swaps
+          the last 12 months for the next 12, with the months to edit below. */}
+      <div className="space-y-2">
+        {planning ? (
+          <PlanBars plan={b.plan} />
+        ) : (
+          <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
+        )}
+        {budgetable && b.period === "monthly" && (
+          <BudgetPlan plan={b.plan} open={planning} onToggle={() => setPlanFor(planning ? null : data.id)} onSave={onSetMonthBudget} />
+        )}
+      </div>
 
       {budgetable && (
         <div className="space-y-2">
@@ -179,7 +186,6 @@ export function CategoryBody({
               {monthName(data.month)} has its own budget, {usd(b.amount, { cents: false })}; the field sets the usual one.
             </p>
           )}
-          {b.period === "monthly" && <BudgetPlan plan={b.plan} open={planning} onToggle={() => setPlanFor(planning ? null : data.id)} onSave={onSetMonthBudget} />}
         </div>
       )}
 
