@@ -1449,6 +1449,76 @@ async function categoryShelfBudget(browser) {
     await f.focus(); await f.evaluate((el) => el.select()); await f.type("4321"); await page.keyboard.press("Enter");
     const set = await rowSays("of$4,321/mo");
     record("category shelf budget", "a budget set in the shelf is saved, and the Categories row shows it", set, `${name}: ${before} → 4,321`);
+
+    // Plan by month: a visible link on a monthly budget opens the twelve
+    // months from the one on screen. One click on the link and one in the
+    // first box; the keyboard alone does the rest (Tab, type, Tab), and a
+    // save must not throw focus out of the row. A month set this way is its
+    // own (the edited tag) and the dashboard judges that month against it.
+    const link = await page.$(`${shelfSel} [data-budget-plan] button`);
+    record("category shelf budget", "a monthly budget offers Plan by month as a visible link", !!link);
+    if (link) {
+      await link.click();
+      await page.waitForSelector(`${shelfSel} [data-plan-month] input`);
+      const months = await page.$$eval(`${shelfSel} [data-plan-month]`, (els) => els.map((e) => e.getAttribute("data-plan-month")));
+      await (await page.$(`${shelfSel} [data-plan-month] input`)).click();
+      const own = { 2: "1200", 6: "2500" };
+      for (let i = 1; i < 12; i++) {
+        await page.keyboard.press("Tab");
+        if (own[i]) await page.keyboard.type(own[i]);
+        else if (own[i - 1]) await sleep(700); // the save after a typed box lands while focus moves on
+      }
+      const focused = await page.evaluate(() => document.activeElement?.closest("[data-plan-month]")?.getAttribute("data-plan-month") ?? null);
+      record("category shelf budget", "Plan by month fills by keyboard alone after two clicks; focus stays in the row through each save", months.length === 12 && focused === months[11], `${months.length} months; focus on ${focused}, want ${months[11]}`);
+      await page.keyboard.press("Tab"); await sleep(800);
+      const edited = await page.waitForFunction((sel, ms) => ms.every((m) => document.querySelector(`${sel} [data-plan-month="${m}"][data-edited]`)), { timeout: 8000 }, shelfSel, [months[2], months[6]]).then(() => true, () => false);
+      const totals = await page.evaluate(async (ms) => Promise.all(ms.map((m) => fetch(`/api/dashboard?month=${m}`).then((r) => r.json()).then((d) => d.budget?.total ?? null))), [months[1], months[2], months[6]]);
+      // The plan's chart (IBCS notation): one outline per month; a month's own
+      // is outlined in the accent; its figure is the budget's and sits on the
+      // outline, not on whatever bar is taller.
+      const chart = await page.evaluate((sel, m) => {
+        const q = (x) => document.querySelector(`${sel} ${x}`);
+        const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+        const probe = document.createElement("span"); probe.style.color = accent; document.body.append(probe);
+        const accentRgb = getComputedStyle(probe).color; probe.remove();
+        const bars = document.querySelectorAll(`${sel} [data-plan-bars] [data-plan-bar]`).length;
+        const own = [...document.querySelectorAll(`${sel} [data-plan-bars] [data-budget-outline]`)].filter((o) => getComputedStyle(o).borderTopColor === accentRgb).length;
+        const fig = q(`[data-plan-bar="${m}"] [data-bar-figure]`); const out = q(`[data-plan-bar="${m}"] [data-budget-outline]`);
+        const figures = document.querySelectorAll(`${sel} [data-plan-bars] [data-bar-figure]`).length;
+        return { bars, own, figures, past: !!q("[data-month-bars]"), figure: fig?.textContent, gap: fig && out ? Math.round(out.getBoundingClientRect().top - fig.getBoundingClientRect().bottom) : null };
+      }, shelfSel, months[2]);
+      record("category shelf budget", "the plan's chart takes the last 12 months' place, draws twelve budget outlines, the months set in the accent, and only they carry a figure, on their outline", !chart.past && chart.bars === 12 && chart.own === 2 && chart.figures === 2 && chart.figure === "1.2k" && chart.gap !== null && Math.abs(chart.gap) <= 1, JSON.stringify(chart));
+      // The design review's fixes: a box holds only a month's own amount (the
+      // usual one is its placeholder, so the months that differ stand out);
+      // last year's figure is under every box, on any device (the chart's are
+      // a hover); the toggle sits right under the chart it swaps; the chart is
+      // named for its window.
+      const grid = await page.evaluate((sel, ms) => {
+        const boxes = ms.map((m) => document.querySelector(`${sel} [data-plan-month="${m}"] input`));
+        const lastYr = document.querySelectorAll(`${sel} [data-plan-month] [data-last-year-figure]`);
+        const chart = document.querySelector(`${sel} [data-plan-bars]`)?.getBoundingClientRect();
+        const toggle = document.querySelector(`${sel} [data-budget-plan] button`)?.getBoundingClientRect();
+        return {
+          own: [2, 6].map((i) => boxes[i]?.value),
+          usual: boxes.filter((_, i) => i !== 2 && i !== 6).every((b) => b && b.value === "" && b.placeholder === "4,321"),
+          lastYr: [...lastYr].filter((e) => /^Last yr \$[\d,]+$/.test(e.textContent.trim())).length,
+          toggleGap: chart && toggle ? Math.round(toggle.top - chart.bottom) : null,
+          title: document.querySelector(`${sel} [data-plan-bars] .stat-label`)?.textContent ?? "",
+        };
+      }, shelfSel, months);
+      record("category shelf budget", "the months set hold their amounts and the rest show the usual one as a placeholder; last year is under every box; the toggle sits right under the chart; the chart is named for its window", grid.own.join() === "1,200,2,500" && grid.usual && grid.lastYr === 12 && grid.toggleGap !== null && grid.toggleGap >= 0 && grid.toggleGap <= 12 && /^(Next 12 months|12 months from [A-Z][a-z]{2} \d{4})$/.test(grid.title), JSON.stringify(grid));
+      record("category shelf budget", "the months set carry the edited tag, and the dashboard judges each against its own amount", edited && totals[1] - totals[0] === 1200 - 4321 && totals[2] - totals[0] === 2500 - 4321, `edited=${edited}; dashboard budget ${totals.join(" / ")}`);
+      // empty them: each returns to the usual budget, without the tag
+      for (const i of [2, 6]) {
+        const box = await page.$(`${shelfSel} [data-plan-month="${months[i]}"] input`);
+        await box.focus(); await box.evaluate((el) => el.select()); await page.keyboard.press("Backspace"); await page.keyboard.press("Enter"); await sleep(800);
+      }
+      const back = await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-plan-month][data-edited]`), { timeout: 8000 }, shelfSel).then(() => true, () => false);
+      record("category shelf budget", "emptying a month returns it to the usual budget", back);
+      await (await page.$(`${shelfSel} [data-budget-plan] button`)).click();
+      const swapped = await page.waitForFunction((sel) => document.querySelector(`${sel} [data-month-bars]`) && !document.querySelector(`${sel} [data-plan-bars]`), { timeout: 5000 }, shelfSel).then(() => true, () => false);
+      record("category shelf budget", "closing Plan by month brings the last 12 months back", swapped);
+    }
     // Annual keeps the dollars: $4,321 a month is $51,852 a year.
     await page.select(`${shelfSel} [data-shelf-budget] select`, "annual");
     const yearly = await rowSays("of$51,852/yr");

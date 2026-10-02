@@ -1,11 +1,14 @@
 "use client";
 
-import { usd, isCurrentMonth } from "@/lib/format";
+import { useState } from "react";
+import { usd, isCurrentMonth, monthName } from "@/lib/format";
 import { Tooltip } from "@/components/Tooltip";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
 import { BudgetField } from "@/components/BudgetField";
+import { BudgetPlan, PlanBars } from "@/components/BudgetPlan";
+import { BAR_AREA, barFigure, HATCH, monthLabel } from "@/components/shelf/bars";
 import { BudgetBar, paceOf } from "@/components/BudgetBar";
 import { CategoryName, EditableCategoryBadge } from "@/components/CategoryIdentity";
 
@@ -53,6 +56,7 @@ export function CategoryBody({
   onOpenMerchant,
   onSetExcluded,
   onSetBudget,
+  onSetMonthBudget,
   onDelete,
   confirmingDelete,
 }: {
@@ -60,6 +64,7 @@ export function CategoryBody({
   onOpenMerchant: (merchant: string) => void;
   onSetExcluded: (exclude: boolean) => void;
   onSetBudget: (amount: number | null, period: "monthly" | "annual") => void;
+  onSetMonthBudget: (month: string, amount: number | null) => void;
   onDelete: () => void;
   confirmingDelete: boolean;
 }) {
@@ -89,6 +94,10 @@ export function CategoryBody({
 
   // The budget as saved: an annual one measures the year to date.
   const b = data.budgetEntry;
+  // Plan by month is open for one category at a time (the shelf can move to
+  // another without remounting), and only on a monthly budget.
+  const [planFor, setPlanFor] = useState<number | null>(null);
+  const planning = planFor === data.id && b.period === "monthly";
   const annual = b.period === "annual";
   const spentNow = annual ? b.ytdSpent : data.spent;
   const recurNow = annual ? recurring * 12 : recurring;
@@ -146,18 +155,38 @@ export function CategoryBody({
         </div>
       )}
 
-      <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
+      {/* The chart, then its toggle right under it: Plan by month swaps
+          the last 12 months for the next 12, with the months to edit below. */}
+      <div className="space-y-2">
+        {planning ? (
+          <PlanBars plan={b.plan} />
+        ) : (
+          <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
+        )}
+        {budgetable && b.period === "monthly" && (
+          <BudgetPlan plan={b.plan} open={planning} onToggle={() => setPlanFor(planning ? null : data.id)} onSave={onSetMonthBudget} />
+        )}
+      </div>
 
       {budgetable && (
-        <BudgetField
-          key={`${data.id}-${b.amount ?? "none"}-${b.period}`}
-          budget={b.amount}
-          period={b.period}
-          suggested={b.suggested}
-          suggestedAnnual={b.suggestedAnnual}
-          month={data.month}
-          onSave={onSetBudget}
-        />
+        <div className="space-y-2">
+          {/* The field edits the usual budget; a month with its own (set in
+              Plan by month) says so, since the bar above shows that one. */}
+          <BudgetField
+            key={`${data.id}-${b.usual ?? "none"}-${b.period}`}
+            budget={b.usual}
+            period={b.period}
+            suggested={b.suggested}
+            suggestedAnnual={b.suggestedAnnual}
+            month={data.month}
+            onSave={onSetBudget}
+          />
+          {b.plan[0]?.edited && b.amount !== null && (
+            <p className="text-xs text-[var(--muted)]" data-month-own>
+              {monthName(data.month)} has its own budget, {usd(b.amount, { cents: false })}; the field sets the usual one.
+            </p>
+          )}
+        </div>
       )}
 
       {data.upcoming.length > 0 && (
@@ -244,21 +273,10 @@ export function CategoryBody({
 // bar with its figure on top: the evidence behind the average month, which is the
 // dashed line. Mid-month the viewed bar is hatched, since it isn't a whole
 // month (DESIGN.md §1, Honest), and the average leaves it out.
-const BAR_AREA = 64; // px
-
-// A bar's figure, short enough for a 24px column: 420, 9.9k, 14k. The "$"
-// is left to the section (every figure here is money); exact on hover.
-function barFigure(v: number): string {
-  if (v < 1000) return String(Math.round(v));
-  const k = v / 1000;
-  return k < 9.95 ? `${k.toFixed(1)}k` : `${Math.round(k)}k`;
-}
-
 function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; avg: number; partial: boolean }) {
   const top = Math.max(avg, ...history.map((h) => h.spent));
   if (top <= 0) return null;
-  const name = (m: string, style: "short" | "narrow") =>
-    new Date(m + "-01T00:00:00Z").toLocaleDateString("en-US", { month: style, timeZone: "UTC" });
+  const name = monthLabel;
   const said = history
     .map((h, i) => `${name(h.month, "short")} ${usd(h.spent, { cents: false })}${partial && i === history.length - 1 ? " so far" : ""}`)
     .join(", ");
@@ -280,7 +298,7 @@ function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; 
             // The viewed month is dark; mid-month it's hatched as well, since
             // it isn't a whole month yet.
             const tone = last ? "bg-[var(--foreground)]/60" : "bg-[var(--muted)]/35";
-            const hatch = last && partial ? { backgroundImage: "repeating-linear-gradient(135deg, var(--card) 0 2px, transparent 2px 5px)" } : {};
+            const hatch = last && partial ? HATCH : {};
             return (
               <Tooltip
                 key={h.month}

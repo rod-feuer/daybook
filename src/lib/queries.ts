@@ -1676,10 +1676,12 @@ export function upcomingRecurringExpenses(
 
 export type BudgetPeriod = "monthly" | "annual";
 
-// A category's budget as it stands in `month` ('YYYY-MM'): the latest 'from'
-// entry at or before it (see budget_entries). A month with no budget — none
-// set yet, or removed from an earlier month on — has no key. Keyed by categoryId.
-export function getBudgetsFull(month: string): Record<number, { amount: number; period: BudgetPeriod }> {
+// A category's budget as it stands in `month` ('YYYY-MM'): the month's own
+// (an 'only' entry, monthly budgets only) or else the usual one, the latest
+// 'from' entry at or before it (see budget_entries). `monthOwn` false reads
+// the usual one alone. A month with no budget — none set yet, or removed from
+// an earlier month on — has no key. Keyed by categoryId.
+export function getBudgetsFull(month: string, monthOwn = true): Record<number, { amount: number; period: BudgetPeriod }> {
   const db = getDb();
   ensureBudgetEntries(db);
   const rows = db
@@ -1694,6 +1696,12 @@ export function getBudgetsFull(month: string): Record<number, { amount: number; 
   for (const r of rows)
     if (r.amount != null)
       out[r.categoryId] = { amount: r.amount, period: r.period === "annual" ? "annual" : "monthly" };
+  if (!monthOwn) return out;
+  const own = db
+    .prepare("SELECT categoryId, amount FROM budget_entries WHERE scope = 'only' AND month = ?")
+    .all(month) as { categoryId: number; amount: number }[];
+  for (const r of own)
+    if (out[r.categoryId]?.period !== "annual") out[r.categoryId] = { amount: r.amount, period: "monthly" };
   return out;
 }
 
@@ -1736,6 +1744,41 @@ export function setBudget(
 
 export function deleteBudget(categoryId: number, from: string = BUDGET_ALWAYS) {
   setBudget(categoryId, null, "monthly", from);
+}
+
+// A month's own budget, for a monthly budget only: it holds for that month
+// alone, and the months around it keep the usual one. Null, or the usual
+// amount, returns the month to the usual one. False when the budget is annual
+// (an annual budget already absorbs a lumpy month).
+export function setMonthBudget(categoryId: number, month: string, amount: number | null): boolean {
+  const db = getDb();
+  ensureBudgetEntries(db);
+  const usual = getBudgetsFull(month, false)[categoryId] ?? null;
+  if (usual?.period === "annual") return false;
+  db.transaction(() => {
+    db.prepare("DELETE FROM budget_entries WHERE categoryId = ? AND scope = 'only' AND month = ?").run(categoryId, month);
+    if (amount !== null && amount !== usual?.amount)
+      db.prepare(
+        "INSERT INTO budget_entries (categoryId, month, scope, amount, period) VALUES (?, ?, 'only', ?, 'monthly')"
+      ).run(categoryId, month, amount);
+  })();
+  return true;
+}
+
+// The twelve months from `from` as the shelf plans them: what holds in each,
+// the usual budget, and whether the month has its own.
+export function budgetPlan(categoryId: number, from: string): { month: string; amount: number | null; usual: number | null; edited: boolean }[] {
+  return Array.from({ length: 12 }, (_, i) => {
+    const month = shiftMonth(from, i);
+    const usual = getBudgetsFull(month, false)[categoryId] ?? null;
+    const amount = getBudgetsFull(month)[categoryId] ?? null;
+    return {
+      month,
+      amount: amount?.amount ?? null,
+      usual: usual?.amount ?? null,
+      edited: amount != null && (usual == null || amount.amount !== usual.amount),
+    };
+  });
 }
 
 // Toggle whether a category's transactions are omitted from all totals (e.g. a
@@ -2171,7 +2214,19 @@ export type CategorySummary = {
   budget: number | null; // monthly equivalent (an annual budget counts at 1/12)
   // The budget as entered, and the suggestion for an empty one: the shelf edits
   // it with the Categories page's field, so both offer the same "Use $X".
-  budgetEntry: { amount: number | null; period: BudgetPeriod; suggested: number; suggestedAnnual: number; ytdSpent: number };
+  // amount is what holds in the month (its own, if it has one); usual is the
+  // budget the field edits; plan is the twelve months from this one.
+  budgetEntry: {
+    amount: number | null;
+    usual: number | null;
+    period: BudgetPeriod;
+    suggested: number;
+    suggestedAnnual: number;
+    ytdSpent: number;
+    // spent: what's been spent in the month (null for one still ahead);
+    // lastYear: the same month a year before.
+    plan: (ReturnType<typeof budgetPlan>[number] & { spent: number | null; lastYear: number })[];
+  };
   recurringMonthly: number; // the plans' monthly cost, the same figure the Categories row shows
   upcoming: { merchant: string; displayName: string; dueDate: string; amount: number }[];
   transactions: {
@@ -2238,7 +2293,9 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   const cur = monthAgg(month);
   const prev = monthAgg(shiftMonth(month, -1), prevThrough ?? 31);
   // Twelve months ending with this one, for the shelf's chart: what "typical
-  // month" is made of (steady, seasonal, or one big month).
+  // month" is made of (steady, seasonal, or one big month). The query reaches
+  // a year back and eleven months on for the budget plan's chart: each
+  // planned month's spend so far and the same month last year.
   const byMonth = new Map(
     (
       db
@@ -2249,7 +2306,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
              AND substr(COALESCE(effectiveDate, date),1,7) BETWEEN ? AND ?
            GROUP BY m`
         )
-        .all(categoryId, shiftMonth(month, -11), month) as { m: string; s: number }[]
+        .all(categoryId, shiftMonth(month, -12), shiftMonth(month, 11)) as { m: string; s: number }[]
     ).map((r) => [r.m, r.s])
   );
   const history = Array.from({ length: 12 }, (_, i) => {
@@ -2330,7 +2387,19 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     budget: getBudgets(month)[cat.id] ?? null,
     budgetEntry: (() => {
       const c = categoriesWithTotals(month).find((x) => x.id === cat.id);
-      return { amount: c?.budget ?? null, period: c?.budgetPeriod ?? "monthly", suggested: c?.suggestedBudget ?? 0, suggestedAnnual: c?.suggestedAnnualBudget ?? 0, ytdSpent: c?.ytdSpent ?? 0 };
+      return {
+        amount: c?.budget ?? null,
+        usual: getBudgetsFull(month, false)[cat.id]?.amount ?? null,
+        period: c?.budgetPeriod ?? "monthly",
+        suggested: c?.suggestedBudget ?? 0,
+        suggestedAnnual: c?.suggestedAnnualBudget ?? 0,
+        ytdSpent: c?.ytdSpent ?? 0,
+        plan: budgetPlan(cat.id, month).map((p) => ({
+          ...p,
+          spent: p.month <= new Date().toISOString().slice(0, 7) ? Number((byMonth.get(p.month) ?? 0).toFixed(2)) : null,
+          lastYear: Number((byMonth.get(shiftMonth(p.month, -12)) ?? 0).toFixed(2)),
+        })),
+      };
     })(),
     recurringMonthly: Number((recurringMonthlyByCategory()[cat.id] ?? 0).toFixed(2)),
     upcoming,

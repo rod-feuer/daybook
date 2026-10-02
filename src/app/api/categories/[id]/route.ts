@@ -3,6 +3,7 @@ import {
   deleteCategory,
   setBudget,
   deleteBudget,
+  setMonthBudget,
   setCategoryExcluded,
   updateCategory,
 } from "@/lib/queries";
@@ -59,7 +60,19 @@ export async function PATCH(
     typeof body.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(body.month)
       ? body.month
       : new Date().toISOString().slice(0, 7);
-  if (body.budget === null || body.budget === "" || body.budget === undefined) {
+  const clear = body.budget === null || body.budget === "" || body.budget === undefined;
+  // One month's own budget (scope "only"): empty returns it to the usual one.
+  if (body.scope === "only") {
+    const amount = clear ? null : Number(body.budget);
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0)) {
+      return NextResponse.json({ error: "invalid budget" }, { status: 400 });
+    }
+    if (!setMonthBudget(Number(id), month, amount)) {
+      return NextResponse.json({ error: "an annual budget has no month of its own" }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+  if (clear) {
     deleteBudget(Number(id), month);
     return NextResponse.json({ ok: true });
   }
