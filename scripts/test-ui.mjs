@@ -1449,6 +1449,39 @@ async function categoryShelfBudget(browser) {
     await f.focus(); await f.evaluate((el) => el.select()); await f.type("4321"); await page.keyboard.press("Enter");
     const set = await rowSays("of$4,321/mo");
     record("category shelf budget", "a budget set in the shelf is saved, and the Categories row shows it", set, `${name}: ${before} → 4,321`);
+
+    // Plan by month: a visible link on a monthly budget opens the twelve
+    // months from the one on screen. One click on the link and one in the
+    // first box; the keyboard alone does the rest (Tab, type, Tab), and a
+    // save must not throw focus out of the row. A month set this way is its
+    // own (the edited tag) and the dashboard judges that month against it.
+    const link = await page.$(`${shelfSel} [data-budget-plan] button`);
+    record("category shelf budget", "a monthly budget offers Plan by month as a visible link", !!link);
+    if (link) {
+      await link.click();
+      await page.waitForSelector(`${shelfSel} [data-plan-month] input`);
+      const months = await page.$$eval(`${shelfSel} [data-plan-month]`, (els) => els.map((e) => e.getAttribute("data-plan-month")));
+      await (await page.$(`${shelfSel} [data-plan-month] input`)).click();
+      const own = { 2: "1200", 6: "2500" };
+      for (let i = 1; i < 12; i++) {
+        await page.keyboard.press("Tab");
+        if (own[i]) await page.keyboard.type(own[i]);
+        else if (own[i - 1]) await sleep(700); // the save after a typed box lands while focus moves on
+      }
+      const focused = await page.evaluate(() => document.activeElement?.closest("[data-plan-month]")?.getAttribute("data-plan-month") ?? null);
+      record("category shelf budget", "Plan by month fills by keyboard alone after two clicks; focus stays in the row through each save", months.length === 12 && focused === months[11], `${months.length} months; focus on ${focused}, want ${months[11]}`);
+      await page.keyboard.press("Tab"); await sleep(800);
+      const edited = await page.waitForFunction((sel, ms) => ms.every((m) => document.querySelector(`${sel} [data-plan-month="${m}"][data-edited]`)), { timeout: 8000 }, shelfSel, [months[2], months[6]]).then(() => true, () => false);
+      const totals = await page.evaluate(async (ms) => Promise.all(ms.map((m) => fetch(`/api/dashboard?month=${m}`).then((r) => r.json()).then((d) => d.budget?.total ?? null))), [months[1], months[2], months[6]]);
+      record("category shelf budget", "the months set carry the edited tag, and the dashboard judges each against its own amount", edited && totals[1] - totals[0] === 1200 - 4321 && totals[2] - totals[0] === 2500 - 4321, `edited=${edited}; dashboard budget ${totals.join(" / ")}`);
+      // empty them: each returns to the usual budget, without the tag
+      for (const i of [2, 6]) {
+        const box = await page.$(`${shelfSel} [data-plan-month="${months[i]}"] input`);
+        await box.focus(); await box.evaluate((el) => el.select()); await page.keyboard.press("Backspace"); await page.keyboard.press("Enter"); await sleep(800);
+      }
+      const back = await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-plan-month][data-edited]`), { timeout: 8000 }, shelfSel).then(() => true, () => false);
+      record("category shelf budget", "emptying a month returns it to the usual budget", back);
+    }
     // Annual keeps the dollars: $4,321 a month is $51,852 a year.
     await page.select(`${shelfSel} [data-shelf-budget] select`, "annual");
     const yearly = await rowSays("of$51,852/yr");

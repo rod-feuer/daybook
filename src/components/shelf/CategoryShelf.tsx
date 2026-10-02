@@ -1,11 +1,12 @@
 "use client";
 
-import { usd, isCurrentMonth } from "@/lib/format";
+import { usd, isCurrentMonth, monthName } from "@/lib/format";
 import { Tooltip } from "@/components/Tooltip";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
 import { BudgetField } from "@/components/BudgetField";
+import { BudgetPlan } from "@/components/BudgetPlan";
 import { BudgetBar, paceOf } from "@/components/BudgetBar";
 import { CategoryName, EditableCategoryBadge } from "@/components/CategoryIdentity";
 
@@ -53,6 +54,7 @@ export function CategoryBody({
   onOpenMerchant,
   onSetExcluded,
   onSetBudget,
+  onSetMonthBudget,
   onDelete,
   confirmingDelete,
 }: {
@@ -60,6 +62,7 @@ export function CategoryBody({
   onOpenMerchant: (merchant: string) => void;
   onSetExcluded: (exclude: boolean) => void;
   onSetBudget: (amount: number | null, period: "monthly" | "annual") => void;
+  onSetMonthBudget: (month: string, amount: number | null) => void;
   onDelete: () => void;
   confirmingDelete: boolean;
 }) {
@@ -149,15 +152,25 @@ export function CategoryBody({
       <MonthBars history={data.history} avg={data.monthlyAvg} partial={partial} />
 
       {budgetable && (
-        <BudgetField
-          key={`${data.id}-${b.amount ?? "none"}-${b.period}`}
-          budget={b.amount}
-          period={b.period}
-          suggested={b.suggested}
-          suggestedAnnual={b.suggestedAnnual}
-          month={data.month}
-          onSave={onSetBudget}
-        />
+        <div className="space-y-2">
+          {/* The field edits the usual budget; a month with its own (set in
+              Plan by month) says so, since the bar above shows that one. */}
+          <BudgetField
+            key={`${data.id}-${b.usual ?? "none"}-${b.period}`}
+            budget={b.usual}
+            period={b.period}
+            suggested={b.suggested}
+            suggestedAnnual={b.suggestedAnnual}
+            month={data.month}
+            onSave={onSetBudget}
+          />
+          {b.plan[0]?.edited && b.amount !== null && (
+            <p className="text-xs text-[var(--muted)]" data-month-own>
+              {monthName(data.month)} has its own budget, {usd(b.amount, { cents: false })}; the field sets the usual one.
+            </p>
+          )}
+          {b.period === "monthly" && <BudgetPlan plan={b.plan} onSave={onSetMonthBudget} />}
+        </div>
       )}
 
       {data.upcoming.length > 0 && (

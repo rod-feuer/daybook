@@ -35,6 +35,8 @@ import {
   getBudgets,
   getBudgetsFull,
   deleteBudget,
+  setMonthBudget,
+  budgetPlan,
   setTransactionNote,
   setTransactionExcluded,
   updateCategory,
@@ -3296,4 +3298,41 @@ test("a budget set from a month replaces later ones, removes from that month on,
   setBudget(CAT, 900, "monthly", "2025-11"); // what already holds in November
   assert.equal(rows(), n - 1, "re-saving the budget that holds adds no entry (and clears the removal after it)");
   assert.equal(getBudgets("2026-06")[CAT], 900, "the November save holds from November on");
+});
+
+test("a month's own budget holds for that month alone, and the months around it keep the usual one", () => {
+  // Gifts at $300 a month, $1,200 in December. December's dashboard must judge
+  // against $1,200; November and January must not inherit it, and raising the
+  // usual budget later must not wipe the December the user planned.
+  setBudget(CAT, 300);
+  tx("Target", { amount: -1000, date: "2025-12-10", categoryId: CAT });
+  assert.equal(setMonthBudget(CAT, "2025-12", 1200), true);
+
+  assert.equal(dashboard("2025-12").budget!.total, 1200, "December is judged against its own $1,200");
+  assert.deepEqual(["2025-11", "2026-01"].map((m) => getBudgets(m)[CAT]), [300, 300], "the months around it keep the usual $300");
+
+  setBudget(CAT, 350, "monthly", "2025-11");
+  assert.deepEqual(["2025-11", "2025-12", "2026-01"].map((m) => getBudgets(m)[CAT]), [350, 1200, 350], "a new usual budget leaves December's own");
+
+  const plan = budgetPlan(CAT, "2025-11");
+  assert.equal(plan.length, 12);
+  assert.deepEqual(plan.slice(0, 3).map((p) => [p.month, p.amount, p.usual, p.edited]), [
+    ["2025-11", 350, 350, false],
+    ["2025-12", 1200, 350, true],
+    ["2026-01", 350, 350, false],
+  ]);
+
+  setMonthBudget(CAT, "2025-12", null);
+  assert.equal(getBudgets("2025-12")[CAT], 350, "emptying the month returns it to the usual budget");
+  setMonthBudget(CAT, "2026-02", 350);
+  assert.equal(budgetPlan(CAT, "2026-02")[0].edited, false, "a month set to the usual amount isn't its own (no edited tag)");
+});
+
+test("an annual budget has no month of its own", () => {
+  // An annual budget already absorbs a lumpy month; a monthly figure inside it
+  // would be judged twice. The request is refused and the year is unchanged.
+  setBudget(CAT, 6000, "annual");
+  assert.equal(setMonthBudget(CAT, "2025-07", 2500), false);
+  assert.deepEqual(getBudgetsFull("2025-07")[CAT], { amount: 6000, period: "annual" });
+  assert.equal(budgetPlan(CAT, "2025-07").some((p) => p.edited), false);
 });
