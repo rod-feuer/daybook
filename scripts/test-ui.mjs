@@ -1473,6 +1473,20 @@ async function categoryShelfBudget(browser) {
       await page.keyboard.press("Tab"); await sleep(800);
       const edited = await page.waitForFunction((sel, ms) => ms.every((m) => document.querySelector(`${sel} [data-plan-month="${m}"][data-edited]`)), { timeout: 8000 }, shelfSel, [months[2], months[6]]).then(() => true, () => false);
       const totals = await page.evaluate(async (ms) => Promise.all(ms.map((m) => fetch(`/api/dashboard?month=${m}`).then((r) => r.json()).then((d) => d.budget?.total ?? null))), [months[1], months[2], months[6]]);
+      // The plan's chart (IBCS notation): one outline per month; a month's own
+      // is outlined in the accent; its figure is the budget's and sits on the
+      // outline, not on whatever bar is taller.
+      const chart = await page.evaluate((sel, m) => {
+        const q = (x) => document.querySelector(`${sel} ${x}`);
+        const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+        const probe = document.createElement("span"); probe.style.color = accent; document.body.append(probe);
+        const accentRgb = getComputedStyle(probe).color; probe.remove();
+        const bars = document.querySelectorAll(`${sel} [data-plan-bars] [data-plan-bar]`).length;
+        const own = [...document.querySelectorAll(`${sel} [data-plan-bars] [data-budget-outline]`)].filter((o) => getComputedStyle(o).borderTopColor === accentRgb).length;
+        const fig = q(`[data-plan-bar="${m}"] [data-bar-figure]`); const out = q(`[data-plan-bar="${m}"] [data-budget-outline]`);
+        return { bars, own, figure: fig?.textContent, gap: fig && out ? Math.round(out.getBoundingClientRect().top - fig.getBoundingClientRect().bottom) : null };
+      }, shelfSel, months[2]);
+      record("category shelf budget", "the plan's chart draws twelve budget outlines, the months set in the accent, each figure on its own outline", chart.bars === 12 && chart.own === 2 && chart.figure === "1.2k" && chart.gap !== null && Math.abs(chart.gap) <= 1, JSON.stringify(chart));
       record("category shelf budget", "the months set carry the edited tag, and the dashboard judges each against its own amount", edited && totals[1] - totals[0] === 1200 - 4321 && totals[2] - totals[0] === 2500 - 4321, `edited=${edited}; dashboard budget ${totals.join(" / ")}`);
       // empty them: each returns to the usual budget, without the tag
       for (const i of [2, 6]) {

@@ -1768,9 +1768,8 @@ export function setMonthBudget(categoryId: number, month: string, amount: number
 // The twelve months from `from` as the shelf plans them: what holds in each,
 // the usual budget, and whether the month has its own.
 export function budgetPlan(categoryId: number, from: string): { month: string; amount: number | null; usual: number | null; edited: boolean }[] {
-  const [y, m] = from.split("-").map(Number);
   return Array.from({ length: 12 }, (_, i) => {
-    const month = new Date(Date.UTC(y, m - 1 + i, 1)).toISOString().slice(0, 7);
+    const month = shiftMonth(from, i);
     const usual = getBudgetsFull(month, false)[categoryId] ?? null;
     const amount = getBudgetsFull(month)[categoryId] ?? null;
     return {
@@ -2224,7 +2223,9 @@ export type CategorySummary = {
     suggested: number;
     suggestedAnnual: number;
     ytdSpent: number;
-    plan: ReturnType<typeof budgetPlan>;
+    // spent: what's been spent in the month (null for one still ahead);
+    // lastYear: the same month a year before.
+    plan: (ReturnType<typeof budgetPlan>[number] & { spent: number | null; lastYear: number })[];
   };
   recurringMonthly: number; // the plans' monthly cost, the same figure the Categories row shows
   upcoming: { merchant: string; displayName: string; dueDate: string; amount: number }[];
@@ -2292,7 +2293,9 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   const cur = monthAgg(month);
   const prev = monthAgg(shiftMonth(month, -1), prevThrough ?? 31);
   // Twelve months ending with this one, for the shelf's chart: what "typical
-  // month" is made of (steady, seasonal, or one big month).
+  // month" is made of (steady, seasonal, or one big month). The query reaches
+  // a year back and eleven months on for the budget plan's chart: each
+  // planned month's spend so far and the same month last year.
   const byMonth = new Map(
     (
       db
@@ -2303,7 +2306,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
              AND substr(COALESCE(effectiveDate, date),1,7) BETWEEN ? AND ?
            GROUP BY m`
         )
-        .all(categoryId, shiftMonth(month, -11), month) as { m: string; s: number }[]
+        .all(categoryId, shiftMonth(month, -12), shiftMonth(month, 11)) as { m: string; s: number }[]
     ).map((r) => [r.m, r.s])
   );
   const history = Array.from({ length: 12 }, (_, i) => {
@@ -2391,7 +2394,11 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
         suggested: c?.suggestedBudget ?? 0,
         suggestedAnnual: c?.suggestedAnnualBudget ?? 0,
         ytdSpent: c?.ytdSpent ?? 0,
-        plan: budgetPlan(cat.id, month),
+        plan: budgetPlan(cat.id, month).map((p) => ({
+          ...p,
+          spent: p.month <= new Date().toISOString().slice(0, 7) ? Number((byMonth.get(p.month) ?? 0).toFixed(2)) : null,
+          lastYear: Number((byMonth.get(shiftMonth(p.month, -12)) ?? 0).toFixed(2)),
+        })),
       };
     })(),
     recurringMonthly: Number((recurringMonthlyByCategory()[cat.id] ?? 0).toFixed(2)),

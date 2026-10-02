@@ -3336,3 +3336,17 @@ test("an annual budget has no month of its own", () => {
   assert.deepEqual(getBudgetsFull("2025-07")[CAT], { amount: 6000, period: "annual" });
   assert.equal(budgetPlan(CAT, "2025-07").some((p) => p.edited), false);
 });
+
+test("the budget plan's chart carries each month's spend so far and the same month last year", () => {
+  // Planning a seasonal month needs last year's same month beside it (the
+  // average hides a $13k November), and a month still ahead has spent
+  // nothing yet, so it must say none rather than $0 spent.
+  const now = new Date();
+  const ym = (dm: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + dm, 1)).toISOString().slice(0, 7);
+  setBudget(CAT, 300);
+  tx("Target", { amount: -120, date: `${ym(0)}-01`, categoryId: CAT });
+  tx("Target", { amount: -2400, date: `${ym(-11)}-15`, categoryId: CAT }); // last year's next month
+  const plan = categorySummary(CAT, ym(0))!.budgetEntry.plan;
+  assert.deepEqual([plan[0].spent, plan[0].lastYear], [120, 0], "this month: spent so far; nothing a year ago");
+  assert.deepEqual([plan[1].month, plan[1].spent, plan[1].lastYear], [ym(1), null, 2400], "next month: not spent yet; last year's $2,400");
+});

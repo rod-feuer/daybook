@@ -7,6 +7,7 @@ import type { CatSummary } from "@/components/shelf/types";
 import { PropertyCard, ShelfRow } from "@/components/shelf/parts";
 import { BudgetField } from "@/components/BudgetField";
 import { BudgetPlan } from "@/components/BudgetPlan";
+import { BAR_AREA, barFigure, HATCH, monthLabel } from "@/components/shelf/bars";
 import { BudgetBar, paceOf } from "@/components/BudgetBar";
 import { CategoryName, EditableCategoryBadge } from "@/components/CategoryIdentity";
 
@@ -169,7 +170,7 @@ export function CategoryBody({
               {monthName(data.month)} has its own budget, {usd(b.amount, { cents: false })}; the field sets the usual one.
             </p>
           )}
-          {b.period === "monthly" && <BudgetPlan plan={b.plan} onSave={onSetMonthBudget} />}
+          {b.period === "monthly" && <BudgetPlan plan={b.plan} avg={data.monthlyAvg} onSave={onSetMonthBudget} />}
         </div>
       )}
 
@@ -257,21 +258,10 @@ export function CategoryBody({
 // bar with its figure on top: the evidence behind the average month, which is the
 // dashed line. Mid-month the viewed bar is hatched, since it isn't a whole
 // month (DESIGN.md §1, Honest), and the average leaves it out.
-const BAR_AREA = 64; // px
-
-// A bar's figure, short enough for a 24px column: 420, 9.9k, 14k. The "$"
-// is left to the section (every figure here is money); exact on hover.
-function barFigure(v: number): string {
-  if (v < 1000) return String(Math.round(v));
-  const k = v / 1000;
-  return k < 9.95 ? `${k.toFixed(1)}k` : `${Math.round(k)}k`;
-}
-
 function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; avg: number; partial: boolean }) {
   const top = Math.max(avg, ...history.map((h) => h.spent));
   if (top <= 0) return null;
-  const name = (m: string, style: "short" | "narrow") =>
-    new Date(m + "-01T00:00:00Z").toLocaleDateString("en-US", { month: style, timeZone: "UTC" });
+  const name = monthLabel;
   const said = history
     .map((h, i) => `${name(h.month, "short")} ${usd(h.spent, { cents: false })}${partial && i === history.length - 1 ? " so far" : ""}`)
     .join(", ");
@@ -293,7 +283,7 @@ function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; 
             // The viewed month is dark; mid-month it's hatched as well, since
             // it isn't a whole month yet.
             const tone = last ? "bg-[var(--foreground)]/60" : "bg-[var(--muted)]/35";
-            const hatch = last && partial ? { backgroundImage: "repeating-linear-gradient(135deg, var(--card) 0 2px, transparent 2px 5px)" } : {};
+            const hatch = last && partial ? HATCH : {};
             return (
               <Tooltip
                 key={h.month}
