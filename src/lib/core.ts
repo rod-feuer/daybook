@@ -1213,7 +1213,7 @@ export function dashboard(month?: string): DashboardData {
     ckind: string | null;
   }[];
 
-  const budgets = getBudgets();
+  const budgets = getBudgets(m);
 
   let income = 0;
   let expenses = 0;

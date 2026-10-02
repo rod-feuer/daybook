@@ -7,6 +7,8 @@ import {
   ensureMerchantLinks,
   ensureRecurringTxExclusions,
   ensureRecurringTxInclusions,
+  ensureBudgetEntries,
+  BUDGET_ALWAYS,
 } from "./db";
 import type { TransactionWithCategory, Recurring, Category } from "./types";
 import { nameAffinity, LOW_MATCH } from "./similarity";
@@ -1674,40 +1676,54 @@ export function upcomingRecurringExpenses(
 
 export type BudgetPeriod = "monthly" | "annual";
 
-// Full budget config per category: the amount and whether it's a monthly or
-// annual limit. Keyed by categoryId.
-export function getBudgetsFull(): Record<number, { amount: number; period: BudgetPeriod }> {
-  const rows = getDb()
-    .prepare("SELECT categoryId, amount, period FROM budgets")
-    .all() as { categoryId: number; amount: number; period: string }[];
+// A category's budget as it stands in `month` ('YYYY-MM'): the latest 'from'
+// entry at or before it (see budget_entries). A month with no budget — none
+// set yet, or removed from an earlier month on — has no key. Keyed by categoryId.
+export function getBudgetsFull(month: string): Record<number, { amount: number; period: BudgetPeriod }> {
+  const db = getDb();
+  ensureBudgetEntries(db);
+  const rows = db
+    .prepare(
+      `SELECT e.categoryId, e.amount, e.period FROM budget_entries e
+       WHERE e.scope = 'from' AND e.month = (
+         SELECT MAX(month) FROM budget_entries
+         WHERE categoryId = e.categoryId AND scope = 'from' AND month <= ?)`
+    )
+    .all(month) as { categoryId: number; amount: number | null; period: string }[];
   const out: Record<number, { amount: number; period: BudgetPeriod }> = {};
   for (const r of rows)
-    out[r.categoryId] = { amount: r.amount, period: r.period === "annual" ? "annual" : "monthly" };
+    if (r.amount != null)
+      out[r.categoryId] = { amount: r.amount, period: r.period === "annual" ? "annual" : "monthly" };
   return out;
 }
 
-// Monthly-EQUIVALENT budget per category (an annual budget counts as amount/12),
-// so single-month consumers (dashboard, category shelf) put every budget on one
-// comparable basis. categoriesWithTotals uses getBudgetsFull, so the categories page
-// gets period-aware budgets from it.
-export function getBudgets(): Record<number, number> {
+// Monthly-EQUIVALENT budget per category in `month` (an annual budget counts as
+// amount/12), so single-month consumers (dashboard, category shelf) put every
+// budget on one comparable basis. categoriesWithTotals uses getBudgetsFull, so
+// the categories page gets period-aware budgets from it.
+export function getBudgets(month: string): Record<number, number> {
   const out: Record<number, number> = {};
-  for (const [id, b] of Object.entries(getBudgetsFull()))
+  for (const [id, b] of Object.entries(getBudgetsFull(month)))
     out[Number(id)] = b.period === "annual" ? Number((b.amount / 12).toFixed(2)) : b.amount;
   return out;
 }
 
+// Setting a budget replaces its every month (one budget per category, as
+// before budget_entries).
 export function setBudget(categoryId: number, amount: number, period: BudgetPeriod = "monthly") {
-  getDb()
-    .prepare(
-      `INSERT INTO budgets (categoryId, amount, period) VALUES (?, ?, ?)
-       ON CONFLICT(categoryId) DO UPDATE SET amount = excluded.amount, period = excluded.period`
-    )
-    .run(categoryId, amount, period === "annual" ? "annual" : "monthly");
+  const db = getDb();
+  db.transaction(() => {
+    deleteBudget(categoryId);
+    db.prepare(
+      "INSERT INTO budget_entries (categoryId, month, scope, amount, period) VALUES (?, ?, 'from', ?, ?)"
+    ).run(categoryId, BUDGET_ALWAYS, amount, period === "annual" ? "annual" : "monthly");
+  })();
 }
 
 export function deleteBudget(categoryId: number) {
-  getDb().prepare("DELETE FROM budgets WHERE categoryId = ?").run(categoryId);
+  const db = getDb();
+  ensureBudgetEntries(db);
+  db.prepare("DELETE FROM budget_entries WHERE categoryId = ?").run(categoryId);
 }
 
 // Toggle whether a category's transactions are omitted from all totals (e.g. a
@@ -1800,7 +1816,7 @@ export function categoriesWithTotals(month?: string): CategoryWithTotals[] {
        ORDER BY c.kind DESC, COALESCE(c.excludeFromTotals, 0) ASC, total DESC`
     )
     .all({ month }) as (Category & { total: number; txCount: number })[];
-  const budgets = getBudgetsFull();
+  const budgets = getBudgetsFull(month ?? new Date().toISOString().slice(0, 7));
   const baseline = recurringMonthlyByCategory();
 
   // Calendar year-to-date spend per category — the comparison basis for annual
@@ -1923,7 +1939,8 @@ export function deleteCategory(id: number) {
   // remaining transactions still pinning the category).
   db.prepare("UPDATE recurrings SET categoryId = NULL WHERE categoryId = ?").run(id);
   db.prepare("DELETE FROM rules WHERE categoryId = ?").run(id);
-  db.prepare("DELETE FROM budgets WHERE categoryId = ?").run(id);
+  ensureBudgetEntries(db);
+  db.prepare("DELETE FROM budget_entries WHERE categoryId = ?").run(id);
   db.prepare("DELETE FROM categories WHERE id = ?").run(id);
 }
 
@@ -2298,7 +2315,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     // The average month the shelf's chart draws: the finished months of the
     // twelve. Mid-month the viewed one is partial and would pull it down.
     monthlyAvg: Number((month === new Date().toISOString().slice(0, 7) ? (t12 - cur.s) / 11 : t12 / 12).toFixed(2)),
-    budget: getBudgets()[cat.id] ?? null,
+    budget: getBudgets(month)[cat.id] ?? null,
     budgetEntry: (() => {
       const c = categoriesWithTotals(month).find((x) => x.id === cat.id);
       return { amount: c?.budget ?? null, period: c?.budgetPeriod ?? "monthly", suggested: c?.suggestedBudget ?? 0, suggestedAnnual: c?.suggestedAnnualBudget ?? 0, ytdSpent: c?.ytdSpent ?? 0 };
