@@ -1708,22 +1708,34 @@ export function getBudgets(month: string): Record<number, number> {
   return out;
 }
 
-// Setting a budget replaces its every month (one budget per category, as
-// before budget_entries).
-export function setBudget(categoryId: number, amount: number, period: BudgetPeriod = "monthly") {
+// A budget set in month `from` holds from that month on: earlier months keep
+// the budget they had, and any set for a later month is replaced (the shelf
+// says "From October on"). An amount of null removes it from that month on.
+// Without a month it holds for every month.
+export function setBudget(
+  categoryId: number,
+  amount: number | null,
+  period: BudgetPeriod = "monthly",
+  from: string = BUDGET_ALWAYS
+) {
   const db = getDb();
+  ensureBudgetEntries(db);
   db.transaction(() => {
-    deleteBudget(categoryId);
+    db.prepare("DELETE FROM budget_entries WHERE categoryId = ? AND scope = 'from' AND month >= ?").run(categoryId, from);
+    // No entry when it would say what already holds (re-saving, or removing
+    // a budget that started this month), so the table holds only changes.
+    const before = (db
+      .prepare("SELECT amount, period FROM budget_entries WHERE categoryId = ? AND scope = 'from' AND month < ? ORDER BY month DESC LIMIT 1")
+      .get(categoryId, from) as { amount: number | null; period: string } | undefined) ?? { amount: null, period: "monthly" };
+    if (amount === null ? before.amount === null : before.amount === amount && before.period === period) return;
     db.prepare(
       "INSERT INTO budget_entries (categoryId, month, scope, amount, period) VALUES (?, ?, 'from', ?, ?)"
-    ).run(categoryId, BUDGET_ALWAYS, amount, period === "annual" ? "annual" : "monthly");
+    ).run(categoryId, from, amount, period === "annual" ? "annual" : "monthly");
   })();
 }
 
-export function deleteBudget(categoryId: number) {
-  const db = getDb();
-  ensureBudgetEntries(db);
-  db.prepare("DELETE FROM budget_entries WHERE categoryId = ?").run(categoryId);
+export function deleteBudget(categoryId: number, from: string = BUDGET_ALWAYS) {
+  setBudget(categoryId, null, "monthly", from);
 }
 
 // Toggle whether a category's transactions are omitted from all totals (e.g. a

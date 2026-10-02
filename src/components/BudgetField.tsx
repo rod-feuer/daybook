@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CommitInput } from "@/components/InlineEdit";
-import { usd } from "@/lib/format";
+import { usd, monthName } from "@/lib/format";
 
 type Period = "monthly" | "annual";
 
@@ -17,12 +17,14 @@ export function BudgetField({
   period: savedPeriod = "monthly",
   suggested = 0,
   suggestedAnnual = 0,
+  month,
   onSave,
 }: {
   budget: number | null;
   period?: Period;
   suggested?: number;
   suggestedAnnual?: number;
+  month: string; // the month on screen: a save holds from it on
   onSave: (amount: number | null, period: Period) => void;
 }) {
   const [period, setPeriod] = useState<Period>(savedPeriod);
@@ -75,8 +77,12 @@ export function BudgetField({
           </button>
         )}
       </div>
-      {budget !== null && editing && (
-        <p className="mt-2 text-xs text-[var(--muted)]" data-budget-hint>Empty the amount to remove the budget.</p>
+      {/* What a save does is said while you're editing: it holds from the
+          month on screen, so the months before keep the budget they had. */}
+      {editing && (
+        <p className="mt-2 text-xs text-[var(--muted)]" data-budget-hint>
+          From {monthName(month)} on; earlier months keep theirs.{budget !== null && " Empty the amount to remove it."}
+        </p>
       )}
     </div>
   );

@@ -155,6 +155,7 @@ export function CategoryBody({
           period={b.period}
           suggested={b.suggested}
           suggestedAnnual={b.suggestedAnnual}
+          month={data.month}
           onSave={onSetBudget}
         />
       )}

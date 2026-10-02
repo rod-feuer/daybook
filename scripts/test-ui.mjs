@@ -1435,7 +1435,10 @@ async function categoryShelfBudget(browser) {
 
     let f = await field();
     await f.focus(); await f.evaluate((el) => el.select());
-    record("category shelf budget", "editing the budget says how to remove it", !!(await page.$(`${shelfSel} [data-budget-hint]`)));
+    // A save holds from the month on screen on, so editing says which month,
+    // that the months before keep theirs, and how to remove it.
+    const hint = await page.$eval(`${shelfSel} [data-budget-hint]`, (e) => e.textContent).catch(() => "");
+    record("category shelf budget", "editing the budget says it holds from the month on screen, earlier months keep theirs, and how to remove it", /^From [A-Z][a-z]+ on; earlier months keep theirs\. Empty the amount to remove it\.$/.test(hint), hint || "no hint");
     await f.type("999999"); await page.keyboard.press("Escape");
     await sleep(600);
     record("category shelf budget", "Escape reverts the budget field", (await (await field()).evaluate((el) => el.value)) === before);
