@@ -451,21 +451,20 @@ test("merchantSummary lists a multi-plan vendor's plans with their monthly total
   assert.equal(merchantSummary("Apple", "Apple · 2nd").otherCharges.length, 0, "a plan's shelf pulls one-offs into its own list");
 });
 
-test("budgets move to budget_entries with every month reading as before", () => {
-  // The old table held one budget per category for all time. The migration
-  // must keep each budget, period included, for every month — past, current
-  // and future — or opening the app would quietly re-judge history.
+test("budgets move to budget_entries on a connection already open, every month reading as before", () => {
+  // The old table held one budget per category for all time. A running server
+  // keeps the connection it opened under the old code, so the move must happen
+  // on that live connection (not only when one opens), or every budget query
+  // fails. It must keep each budget, period included, for every month — past,
+  // current and future — or the app would quietly re-judge history.
   const db = getDb();
   const cat = (name: string) =>
     Number(db.prepare("INSERT INTO categories (name,color,icon,kind) VALUES (?,'#888','•','expense')").run(name).lastInsertRowid);
   const groceries = cat("Groceries");
   const travel = cat("Travel");
+  db.exec("DROP TABLE budget_entries"); // the connection as the old code left it
   db.exec(`CREATE TABLE budgets (categoryId INTEGER PRIMARY KEY, amount REAL NOT NULL, period TEXT NOT NULL DEFAULT 'monthly')`);
   db.prepare("INSERT INTO budgets VALUES (?, 800, 'monthly'), (?, 6000, 'annual')").run(groceries, travel);
-
-  db.close();
-  global.__copilotDb = undefined; // reopen: init runs the migration
-  const reopened = getDb();
 
   for (const month of ["2019-04", "2026-10", "2031-01"]) {
     assert.deepEqual(getBudgetsFull(month), {
@@ -473,6 +472,6 @@ test("budgets move to budget_entries with every month reading as before", () => 
       [travel]: { amount: 6000, period: "annual" },
     }, `${month} reads the old budgets`);
   }
-  const old = reopened.prepare("SELECT name FROM sqlite_master WHERE name = 'budgets'").get();
+  const old = db.prepare("SELECT name FROM sqlite_master WHERE name = 'budgets'").get();
   assert.equal(old, undefined, "the old table is gone, so nothing reads a stale copy");
 });

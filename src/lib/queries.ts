@@ -7,6 +7,7 @@ import {
   ensureMerchantLinks,
   ensureRecurringTxExclusions,
   ensureRecurringTxInclusions,
+  ensureBudgetEntries,
   BUDGET_ALWAYS,
 } from "./db";
 import type { TransactionWithCategory, Recurring, Category } from "./types";
@@ -1679,7 +1680,9 @@ export type BudgetPeriod = "monthly" | "annual";
 // entry at or before it (see budget_entries). A month with no budget — none
 // set yet, or removed from an earlier month on — has no key. Keyed by categoryId.
 export function getBudgetsFull(month: string): Record<number, { amount: number; period: BudgetPeriod }> {
-  const rows = getDb()
+  const db = getDb();
+  ensureBudgetEntries(db);
+  const rows = db
     .prepare(
       `SELECT e.categoryId, e.amount, e.period FROM budget_entries e
        WHERE e.scope = 'from' AND e.month = (
@@ -1718,7 +1721,9 @@ export function setBudget(categoryId: number, amount: number, period: BudgetPeri
 }
 
 export function deleteBudget(categoryId: number) {
-  getDb().prepare("DELETE FROM budget_entries WHERE categoryId = ?").run(categoryId);
+  const db = getDb();
+  ensureBudgetEntries(db);
+  db.prepare("DELETE FROM budget_entries WHERE categoryId = ?").run(categoryId);
 }
 
 // Toggle whether a category's transactions are omitted from all totals (e.g. a
@@ -1934,6 +1939,7 @@ export function deleteCategory(id: number) {
   // remaining transactions still pinning the category).
   db.prepare("UPDATE recurrings SET categoryId = NULL WHERE categoryId = ?").run(id);
   db.prepare("DELETE FROM rules WHERE categoryId = ?").run(id);
+  ensureBudgetEntries(db);
   db.prepare("DELETE FROM budget_entries WHERE categoryId = ?").run(id);
   db.prepare("DELETE FROM categories WHERE id = ?").run(id);
 }

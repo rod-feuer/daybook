@@ -72,19 +72,6 @@ function init(db: Database.Database) {
       count INTEGER NOT NULL
     );
 
-    -- A category's budget by month. A 'from' entry holds from its month until
-    -- the next 'from' entry; an 'only' entry (monthly budgets) holds for its
-    -- month alone. A null amount is "no budget" from that month on, so earlier
-    -- months keep theirs. BUDGET_ALWAYS is the month of an entry that has
-    -- held since before any data.
-    CREATE TABLE IF NOT EXISTS budget_entries (
-      categoryId INTEGER NOT NULL REFERENCES categories(id),
-      month TEXT NOT NULL,
-      scope TEXT NOT NULL CHECK (scope IN ('from','only')),
-      amount REAL CHECK (amount IS NULL OR amount >= 0),
-      period TEXT NOT NULL DEFAULT 'monthly' CHECK (period IN ('monthly','annual')),
-      PRIMARY KEY (categoryId, month, scope)
-    );
 
     -- Auto-split rules: when a transaction matches (merchant pattern + total
     -- amount), it is split into the category parts in the parts column (JSON).
@@ -145,24 +132,7 @@ function init(db: Database.Database) {
     );
   }
 
-  // Migration: add a budget `period` (monthly vs annual) to older DBs.
-  const budgetCols = db.prepare("PRAGMA table_info(budgets)").all() as { name: string }[];
-  if (budgetCols.length && !budgetCols.some((c) => c.name === "period")) {
-    db.exec("ALTER TABLE budgets ADD COLUMN period TEXT NOT NULL DEFAULT 'monthly'");
-  }
-
-  // Migration: one budget per category becomes a 'from' entry that has always
-  // held, so every month reads as before; then the old table goes.
-  if (budgetCols.length) {
-    db.transaction(() => {
-      db.prepare(
-        `INSERT OR IGNORE INTO budget_entries (categoryId, month, scope, amount, period)
-         SELECT categoryId, ?, 'from', amount, period FROM budgets`
-      ).run(BUDGET_ALWAYS);
-      db.exec("DROP TABLE budgets");
-    })();
-  }
-
+  ensureBudgetEntries(db);
   migrateMerchants(db);
   ensureRecurringSettings(db);
   ensureMerchantLinks(db);
@@ -178,6 +148,38 @@ function init(db: Database.Database) {
 // merchant's recurring series. Keyed by the stable transaction hash so it
 // survives re-imports and detectRecurrings() rebuilds. Idempotent; callable on
 // the live connection so the feature works without a dev-server restart.
+// A category's budget by month. A 'from' entry holds from its month until the
+// next 'from' entry; an 'only' entry (monthly budgets) holds for its month
+// alone. A null amount is "no budget" from that month on, so earlier months
+// keep theirs. BUDGET_ALWAYS is the month of an entry that has held since
+// before any data. Exported so the budget queries create it on the live
+// connection without a restart (init only runs on a fresh connection).
+export function ensureBudgetEntries(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS budget_entries (
+      categoryId INTEGER NOT NULL REFERENCES categories(id),
+      month TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK (scope IN ('from','only')),
+      amount REAL CHECK (amount IS NULL OR amount >= 0),
+      period TEXT NOT NULL DEFAULT 'monthly' CHECK (period IN ('monthly','annual')),
+      PRIMARY KEY (categoryId, month, scope)
+    )
+  `);
+  // Migration: the old one-row-per-category budgets table becomes one 'from'
+  // entry per category that has always held, so every month reads as before;
+  // then the old table goes.
+  const budgetCols = db.prepare("PRAGMA table_info(budgets)").all() as { name: string }[];
+  if (!budgetCols.length) return;
+  const period = budgetCols.some((c) => c.name === "period") ? "period" : "'monthly'";
+  db.transaction(() => {
+    db.prepare(
+      `INSERT OR IGNORE INTO budget_entries (categoryId, month, scope, amount, period)
+       SELECT categoryId, ?, 'from', amount, ${period} FROM budgets`
+    ).run(BUDGET_ALWAYS);
+    db.exec("DROP TABLE budgets");
+  })();
+}
+
 export function ensureRecurringTxExclusions(db: Database.Database) {
   db.exec("CREATE TABLE IF NOT EXISTS recurring_tx_exclusions (hash TEXT PRIMARY KEY)");
 }
@@ -478,6 +480,7 @@ export function undoRenormalizeMerchants(db: Database.Database): number {
 // are recreated by the importer.
 export function wipeAll() {
   const db = getDb();
+  ensureBudgetEntries(db);
   db.exec(`
     DELETE FROM transactions;
     DELETE FROM recurrings;
