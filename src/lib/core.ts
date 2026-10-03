@@ -804,18 +804,50 @@ function rebuildRecurrings(): Recurring[] {
     // years (a few old cheap charges fall >15% below the multi-year mean) and
     // usage-based bills (utilities). CV is robust to a few outliers yet still
     // rejects wildly-variable spend (e.g. a plumber, CV ~2.4).
-    const amounts = txs.map((t) => t.amount);
-    if (!amountsConsistent(amounts)) return plans;
+    // Gaps between consecutive dates must be regular: timing must be
+    // regular, not just a median that happens to land in range, or the
+    // vendor is a plan that changed rhythm, regular in each era.
+    const rhythm = (series: Tx[]) => {
+      const dates = series.map((t) => new Date(t.date + "T00:00:00Z").getTime());
+      const gaps: number[] = [];
+      for (let i = 1; i < dates.length; i++) gaps.push((dates[i] - dates[i - 1]) / DAY);
+      let cadence = classifyCadence(medianGap(gaps));
+      if (cadence && onGridFraction(gaps, CADENCE_DAYS[cadence]) < 0.6) cadence = null;
+      return cadence ?? rhythmChange(gaps);
+    };
 
-    // Gaps between consecutive dates must be regular.
-    const dates = txs.map((t) => new Date(t.date + "T00:00:00Z").getTime());
-    const gaps: number[] = [];
-    for (let i = 1; i < dates.length; i++) gaps.push((dates[i] - dates[i - 1]) / DAY);
-    let cadence = classifyCadence(medianGap(gaps));
-    // Timing must be regular, not just a median that happens to land in range.
-    if (cadence && onGridFraction(gaps, CADENCE_DAYS[cadence]) < 0.6) cadence = null;
-    // Or the vendor is a plan that changed rhythm, regular in each era.
-    if (!cadence) cadence = rhythmChange(gaps);
+    const amounts = txs.map((t) => t.amount);
+    if (!amountsConsistent(amounts)) {
+      // One or two odd charges beside a regular bill: the bill is the plan
+      // and the odd ones stay out. Southern's seven $400 monthly payments
+      // lost their plan to a $2,600 landscaping job and a $412 bill once the
+      // landscaper was combined into it. Three or more are usage (regularCore
+      // above) or a variable bill, and the vendor is left alone.
+      // The bill is its longest run at one price: a gap of more than three
+      // periods ends a run (as for skipped months), so a later charge at a
+      // near price ($412 nine months after the last $400) isn't its history.
+      const sameAmount = (a: Tx, b: Tx) => Math.abs(Math.abs(a.amount) - Math.abs(b.amount)) <= 0.05 * Math.abs(b.amount);
+      const runs = (g: Tx[]) => {
+        const out: Tx[][] = [];
+        for (const t of g) {
+          const run = out[out.length - 1];
+          if (run && (Date.parse(t.date) - Date.parse(run[run.length - 1].date)) / DAY <= 3 * MONTH_DAYS) run.push(t);
+          else out.push([t]);
+        }
+        return out;
+      };
+      const core = txs
+        .flatMap((t) => runs(txs.filter((u) => sameAmount(u, t))))
+        .reduce((a, b) => (b.length > a.length ? b : a), [] as Tx[]);
+      const odd = txs.length - core.length;
+      if (core.length < 3 || odd < 1 || odd > 2) return plans;
+      const cadence = rhythm(core);
+      if (!cadence) return plans;
+      emitPart(merchant, { txs: core, events: core.map((t) => ({ date: t.date, amount: t.amount })) }, cadence);
+      return plans;
+    }
+
+    const cadence = rhythm(txs);
     if (!cadence) return plans;
 
     emitPart(merchant, { txs, events: txs.map((t) => ({ date: t.date, amount: t.amount })) }, cadence);

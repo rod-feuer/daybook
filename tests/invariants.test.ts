@@ -3514,3 +3514,23 @@ test("a name already combined into a vendor is never offered to another vendor's
   getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge', 'Southern')").run();
   assert.equal(offered(), false, "combined into Southern, it isn't offered elsewhere");
 });
+
+test("a regular bill keeps its plan beside one or two odd charges, even after it ended", () => {
+  // Southern: seven $400 monthly payments (Jul 2025 – Jan 2026), then, once
+  // the user combined a landscaper into the vendor, a $2,600.72 job and a
+  // $412.26 charge. The odd two broke the amount test for the whole vendor,
+  // and the plan's past charges came loose. The $412 is near $400 but nine
+  // months on: not the bill's history.
+  const days = ["2025-07-13", "2025-08-20", "2025-09-03", "2025-10-13", "2025-11-04", "2025-12-08", "2026-01-13"];
+  for (const d of days) tx("Southern", { amount: -400, date: d, categoryId: CAT });
+  tx("Southern", { amount: -2600.72, date: "2026-09-01", categoryId: CAT });
+  tx("Southern", { amount: -412.26, date: "2026-10-01", categoryId: CAT });
+  detectRecurrings();
+  const linked = (getDb().prepare("SELECT amount FROM transactions WHERE merchant = 'Southern' AND recurringId IS NOT NULL ORDER BY date").all() as { amount: number }[]).map((r) => r.amount);
+  assert.deepEqual(linked, days.map(() => -400), "the seven $400 charges hold the plan; the two odd ones stay out");
+
+  // Three odd charges are usage or a variable bill: left to the other paths.
+  tx("Southern", { amount: -1800, date: "2026-10-15", categoryId: CAT });
+  detectRecurrings();
+  assert.equal((getDb().prepare("SELECT COUNT(*) n FROM transactions WHERE merchant = 'Southern' AND recurringId IS NOT NULL").get() as { n: number }).n, 0);
+});
