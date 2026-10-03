@@ -3449,3 +3449,48 @@ test("a relinked charge with no name in common is still matched when it's the on
   ] }]);
   assert.deepEqual([res.relinked, res.inserted], [1, 1], "the lone Grubhub slot matches; the ambiguous $9 doesn't");
 });
+
+// WHY: combines, name cleanups and vendor shelves key on a charge's stored
+// name. The 2026-10-02 relink sent Plaid's cleaned-up names where the old link
+// had sent the bank's descriptor, and the import overwrote the stored names:
+// 69 charges fell out of the vendor the user had combined them into.
+test("a re-pulled charge keeps the name it was stored under, so it stays in its combined vendor", () => {
+  const db = getDb();
+  importPlaidTransactions([{ accounts: [{ account_id: "a1", name: "Gold" }], transactions: [
+    { transaction_id: "old-sr", account_id: "a1", date: "2026-09-01", name: "Southern Ridge Landscaindianapolis", merchant_name: null, amount: 2600.72, pending: false },
+  ] }]);
+  db.prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge Landscaindianapolis', 'Southern')").run();
+  importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Gold" }], transactions: [
+    { transaction_id: "new-sr", account_id: "a2", date: "2026-09-01", name: "Southern Ridge Landscaindianapolis", merchant_name: "Southern Ridge", amount: 2600.72, pending: false },
+  ] }]);
+  const row = db.prepare("SELECT merchant, rawMerchant FROM transactions WHERE hash = 'new-sr'").get() as { merchant: string; rawMerchant: string };
+  assert.deepEqual(row, { merchant: "Southern Ridge Landscaindianapolis", rawMerchant: "Southern Ridge Landscaindianapolis" });
+});
+
+test("a relinked charge's new name becomes an alias, so the vendor's next charges join it", () => {
+  // The Oct 1 Southern Ridge charge posted under the new link's name, "Southern
+  // Ridge", which no charge or combine knew, so it sat apart from Southern. The
+  // relink had already matched Sep 1's charge, stored as "Southern Ridge
+  // Landscaindianapolis", to that same new name: that pair is the alias.
+  const db = getDb();
+  db.prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge Landscaindianapolis', 'Southern')").run();
+  importPlaidTransactions([{ accounts: [{ account_id: "a1", name: "Gold" }], transactions: [
+    { transaction_id: "old-sr", account_id: "a1", date: "2026-09-01", name: "Southern Ridge Landscaindianapolis", merchant_name: null, amount: 2600.72, pending: false },
+  ] }]);
+  const res = importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Gold" }], transactions: [
+    { transaction_id: "new-sr", account_id: "a2", date: "2026-09-01", name: "SOUTHERNRIDGELANDSCAINDIANAPOLIS IN", merchant_name: "Southern Ridge", amount: 2600.72, pending: false },
+    { transaction_id: "new-oct", account_id: "a2", date: "2026-10-01", name: "SOUTHERNRIDGELANDSCAINDIANAPOLIS IN", merchant_name: "Southern Ridge", amount: 412.26, pending: false },
+  ] }]);
+  const links = Object.fromEntries((db.prepare("SELECT alias, primaryMerchant FROM merchant_links").all() as { alias: string; primaryMerchant: string }[]).map((r) => [r.alias, r.primaryMerchant]));
+  assert.equal(res.aliased, 1);
+  assert.equal(canonicalMerchant("Southern Ridge", links), "Southern", "the new name resolves to the combined vendor");
+  // A name already in use is the user's own vendor, never re-pointed.
+  tx("Kroger", { amount: -5, date: "2026-07-01" });
+  importPlaidTransactions([{ accounts: [{ account_id: "a1", name: "Gold" }], transactions: [
+    { transaction_id: "k-old", account_id: "a1", date: "2026-08-01", name: "KROGER 941", merchant_name: null, amount: 30, pending: false },
+  ] }]);
+  importPlaidTransactions([{ accounts: [{ account_id: "a3", name: "Gold" }], transactions: [
+    { transaction_id: "k-new", account_id: "a3", date: "2026-08-01", name: "KROGER 941", merchant_name: "Kroger", amount: 30, pending: false },
+  ] }]);
+  assert.equal(db.prepare("SELECT 1 FROM merchant_links WHERE alias = 'Kroger'").get(), undefined, "Kroger stays its own vendor");
+});

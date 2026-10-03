@@ -99,6 +99,7 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   updated: number;
   reconciled: number;
   relinked: number;
+  aliased: number;
 } {
   const db = getDb();
   type Held = { hash: string; date: string; merchant: string; rawMerchant: string | null; amount: number; account: string; pending: number };
@@ -124,13 +125,17 @@ export function importPlaidTransactions(items: PlaidItem[]): {
         effectiveDate: r.effectiveDate,
       });
   }
+  // A charge keeps the name it was first stored under: combines, name
+  // cleanups and vendor shelves key on it, and a later pull (a relinked bank
+  // especially) can name the same charge differently. The 2026-10-02 relink
+  // renamed 96 held charges, and 69 fell out of the vendor they'd been
+  // combined into ("Southern Ridge Landscaindianapolis" became "Southern
+  // Ridge"). So an update never touches merchant or rawMerchant.
   const upsert = db.prepare(
     `INSERT INTO transactions (date, merchant, rawMerchant, amount, categoryId, account, pending, source, hash)
      VALUES (@date, @merchant, @rawMerchant, @amount, @categoryId, @account, @pending, 'plaid', @hash)
      ON CONFLICT(hash) DO UPDATE SET
        date = excluded.date,
-       merchant = excluded.merchant,
-       rawMerchant = excluded.rawMerchant,
        amount = excluded.amount,
        account = excluded.account,
        pending = excluded.pending`
@@ -181,6 +186,19 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   const rekeyRefs = ["recurring_tx_exclusions", "recurring_tx_inclusions", "plan_charges"].map((t) =>
     db.prepare(`UPDATE ${t} SET hash = @to || substr(hash, length(@from) + 1) WHERE hash = @from OR hash LIKE @from || ':s%'`)
   );
+  // Names in use before this pull: on a charge, or in a combine.
+  const known = new Set(
+    (db.prepare(
+      "SELECT merchant AS m FROM transactions UNION SELECT alias FROM merchant_links UNION SELECT primaryMerchant FROM merchant_links"
+    ).all() as { m: string }[]).map((r) => r.m)
+  );
+  // A relinked charge that comes back under a name never seen before teaches
+  // that name: it becomes an alias of the name the charge is stored under, so
+  // the vendor's next charges under it join the same vendor and its combines
+  // ("Southern Ridge" for "Southern Ridge Landscaindianapolis"). Undone, like
+  // any combine, with Separate.
+  const learn = db.prepare("INSERT OR IGNORE INTO merchant_links (alias, primaryMerchant) VALUES (?, ?)");
+  let aliased = 0;
   const rekey = (from: string, to: string) => {
     rekeyRow.run({ from, to });
     rekeyParts.run({ from, to });
@@ -267,6 +285,11 @@ export function importPlaidTransactions(items: PlaidItem[]): {
         }
         if (i >= 0) {
           rekey(orphans[i].hash, r.hash);
+          const stored = orphans[i].merchant;
+          if (r.merchant !== stored && !known.has(r.merchant)) {
+            aliased += learn.run(r.merchant, stored).changes;
+            known.add(r.merchant);
+          }
           orphans.splice(i, 1);
           relinked++;
         }
@@ -299,13 +322,13 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   // writes. Deferred, a commit from another process in between fails it at once
   // with SQLITE_BUSY_SNAPSHOT, which no busy timeout retries.
   tx.immediate(items);
-  return { inserted, updated, reconciled, relinked };
+  return { inserted, updated, reconciled, relinked, aliased };
 }
 
 // A whole sync, callable from anywhere (the route, the digest job): pull from
 // the bank since the last imported day, import, apply the split rules, and
 // rebuild the plans when anything changed.
-export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; split: number; total: number }> {
+export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; total: number }> {
   const end = new Date().toISOString().slice(0, 10);
   // Start after existing history so Plaid doesn't duplicate the back-import.
   // Clamp to `end` in case prior data is future-dated (nothing to pull then).
