@@ -771,6 +771,11 @@ async function queueButtons(browser) {
       };
     });
     record("queue buttons", "with several queue rows on the page, accept is secondary, Dismiss is quiet, and no row adds a primary", r.accepts >= 2 && r.filled === 0 && r.bordered === r.accepts && r.dismissQuiet && r.primaries <= 1, `${r.accepts} accept buttons (${r.labels}), ${r.filled} filled, ${r.bordered} bordered; dismiss quiet=${r.dismissQuiet}; ${r.primaries} primaries on the page`);
+    // A merge card says its direction: which names fold into which vendor.
+    // The title alone, with the target listed among the names, read as a
+    // choice between equals.
+    const dir = await page.$$eval("[data-merge-direction]", (els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
+    record("queue buttons", "every merge card says which names it combines into which vendor", dir.length > 0 && dir.every((t) => /^Combine .+ \(\d+\)( · .+ \(\d+\))* into \S.*$/.test(t)), dir[0] ?? "no merge cards");
   });
 }
 
