@@ -3494,3 +3494,23 @@ test("a relinked charge's new name becomes an alias, so the vendor's next charge
   ] }]);
   assert.equal(db.prepare("SELECT 1 FROM merchant_links WHERE alias = 'Kroger'").get(), undefined, "Kroger stays its own vendor");
 });
+
+test("a name already combined into a vendor is never offered to another vendor's bill", () => {
+  // "Southern Ridge" (an alias of the user's combined vendor Southern) was
+  // offered to the monthly "South Central Inmartinsville In" bill on a shared
+  // "South", the same day and a similar amount. Combining it would have
+  // folded a landscaper into the electric co-op.
+  const last = daysAgo(28);
+  const rid = Number(
+    getDb()
+      .prepare(`INSERT INTO recurrings (merchant, categoryId, avgAmount, cadence, lastDate, nextDate, count) VALUES (?,?,?,?,?,?,?)`)
+      .run("South Central Inmartinsville In", CAT, -400, "monthly", last, daysAgo(-2), 3).lastInsertRowid
+  );
+  tx("South Central Inmartinsville In", { amount: -390, date: daysAgo(58), categoryId: CAT, recurringId: rid });
+  tx("South Central Inmartinsville In", { amount: -400, date: last, categoryId: CAT, recurringId: rid });
+  tx("Southern Ridge", { amount: -412.26, date: daysAgo(0), categoryId: CAT });
+  const offered = () => recurringMatchSuggestions(new Set()).some((g) => g.variants.some((v) => v.merchant === "Southern Ridge"));
+  assert.equal(offered(), true, "uncombined, the shared 'South' still surfaces it, low-confidence");
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge', 'Southern')").run();
+  assert.equal(offered(), false, "combined into Southern, it isn't offered elsewhere");
+});

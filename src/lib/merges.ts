@@ -173,6 +173,10 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
   for (const [merchant, cs] of Object.entries(byMerchant)) {
     if (exclude.has(merchant) || dismissed.has("rec:" + merchant)) continue;
     const cm = canonicalMerchant(merchant, links);
+    // A name already combined into a vendor has had its decision (DESIGN.md
+    // §2: one decision per vendor). "Southern Ridge", an alias of Southern,
+    // was offered to "South Central Inmartinsville In" on a shared "South".
+    if (cm !== merchant) continue;
 
     // Best recurring by name affinity (the disambiguator), confirmed by a
     // plausible amount and a charge that posts around the bill's cadence. The
