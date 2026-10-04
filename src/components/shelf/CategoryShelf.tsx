@@ -46,7 +46,7 @@ export function CategoryHeader({
         <CategoryName name={data.name} onRename={fixed ? undefined : onRename} textClassName="text-[15px] font-semibold" />
         <div className="text-xs text-[var(--muted)]">
           {data.upcoming.length > 0
-            ? `${data.txCount} posted`
+            ? `${data.txCount - data.pendingCount} posted${data.pendingCount ? ` · ${data.pendingCount} pending` : ""}`
             : `${data.txCount} transaction${data.txCount === 1 ? "" : "s"}`}{" "}
           · {label}
         </div>

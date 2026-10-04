@@ -2276,6 +2276,7 @@ export type CategorySummary = {
   month: string;
   spent: number; // magnitude this month (outflow for expense, inflow for income)
   txCount: number;
+  pendingCount: number; // of txCount, the charges still pending (not "posted")
   prevSpent: number; // same, prior month (for the MoM card), through prevThrough
   prevThrough: number | null; // mid-month: the day last month is summed through
   history: { month: string; spent: number }[]; // the 12 months ending with this one, oldest first
@@ -2333,13 +2334,13 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   const monthAgg = (m: string, throughDay = 31) =>
     db
       .prepare(
-        `SELECT COALESCE(SUM(${magExpr}), 0) AS s, COUNT(*) AS n
+        `SELECT COALESCE(SUM(${magExpr}), 0) AS s, COUNT(*) AS n, COALESCE(SUM(pending), 0) AS p
          FROM transactions
          WHERE categoryId = ? AND excluded = 0
            AND substr(COALESCE(effectiveDate, date),1,7) = ?
            AND CAST(substr(COALESCE(effectiveDate, date),9,2) AS INTEGER) <= ?`
       )
-      .get(categoryId, m, throughDay) as { s: number; n: number };
+      .get(categoryId, m, throughDay) as { s: number; n: number; p: number };
 
   // Mid-month, last month is summed over the same days (Aug 1–27 against
   // Sep 1–27): a partial month against a whole one showed a fall early in
@@ -2447,6 +2448,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     month,
     spent: Number(cur.s.toFixed(2)),
     txCount: cur.n,
+    pendingCount: cur.p,
     prevSpent: Number(prev.s.toFixed(2)),
     prevThrough,
     history,
