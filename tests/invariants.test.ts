@@ -1297,6 +1297,17 @@ test("a split pending charge that posts in place keeps its parts only while they
   assert.deepEqual(state(), { parent: 0, parts: [] }, "new amount: no rule fits, so the charge counts whole");
 });
 
+test("the category shelf counts a pending charge as pending, not posted", () => {
+  // WHY: the header said "4 posted" over a list holding a pending charge.
+  // Beside the upcoming bills, "posted" claims the bank has settled every
+  // charge counted; one still pending can change or vanish.
+  tx("Water", { amount: -40, date: "2025-06-02", categoryId: CAT });
+  tx("Power", { amount: -90, date: "2025-06-03", categoryId: CAT });
+  getDb().prepare("UPDATE transactions SET pending = 1 WHERE merchant = 'Power'").run();
+  const c = categorySummary(CAT, "2025-06")!;
+  assert.deepEqual([c.txCount, c.pendingCount], [2, 1], "two counted, one of them pending");
+});
+
 test("undo split removes the children, restores the parent, and deletes the rule", () => {
   // WHY: a split persists a rule that re-splits every future matching charge.
   // Without an inverse, one mistaken split is permanent. Undo must reverse all
