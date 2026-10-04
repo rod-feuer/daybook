@@ -577,7 +577,7 @@ async function partialMonthQualifiers(browser) {
       await page.waitForFunction(() => /\b1(–\d+)?$/.test(document.querySelector("header p, main p")?.textContent ?? "") || true, { timeout: 3000 }).catch(() => {});
       await sleep(400);
       return page.evaluate(() => {
-        const sub = [...document.querySelectorAll("header p, header span")].map((e) => e.textContent.trim().match(/[A-Z][a-z]{2} (1(–\d+)?|· nothing yet)$/)?.[0]).find(Boolean) ?? null;
+        const sub = [...document.querySelectorAll("header p, header span")].map((e) => e.textContent.trim().match(/([A-Z][a-z]{2} (?:1(?:–\d+)?|· nothing yet))(?: · vs [^·]+)?$/)?.[1]).find(Boolean) ?? null;
         const card = (document.querySelector("[data-summary]")?.innerText ?? "").toLowerCase();
         return { sub, card };
       });
