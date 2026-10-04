@@ -412,7 +412,7 @@ second ledger.
 
 | Layer | What Daybook shows | Where the numbers come from |
 |---|---|---|
-| **Net worth** | What the household owns (homes, vehicles, cash, investments) and owes (mortgages, loans, card balances), dated, as a trend | Account balances from statements or imports; property and vehicle values the owner sets |
+| **Net worth** | What the household owns (homes, vehicles, cash, investments) and owes (mortgages, loans, card balances), dated, as a trend | Linked accounts' balances from the bank, daily; property and vehicle values, and anything not linked, the owner sets |
 | **Investments** | Brokerage, retirement and education-savings balances; contributions in; growth | Balances and contributions only. Holdings and analytics stay in the owner's separate local portfolio project |
 | **Income and taxes** | Income by source (wages, business, investment income); tax paid so far against the year's projected liability | Paid so far from the ledger; the projection from the owner's separate local tax-projection project |
 
@@ -420,8 +420,8 @@ second ledger.
 - *Honest (§1, and DESIGN.md §1.5).* Every balance says the date it's as of. A value the
   owner sets (a home's worth) is marked as an estimate. A tax projection is labelled as a
   projection, never shown as what's owed.
-- *Transparent, not automatic.* Each figure shows its source: from a statement, imported,
-  or set by the owner (the auto vs. edited rule, DESIGN.md §2).
+- *Transparent, not automatic.* Each figure shows its source: from the bank, or set by
+  the owner (the auto vs. edited rule, DESIGN.md §2).
 - *Annotate truth.* Statement balances are facts, and the owner's valuations are overlays
   on them, the same rule as transactions.
 - *Owned.* Local only. Sensitive figures never enter the repo, which is public: docs,
@@ -440,17 +440,21 @@ multi-currency, multi-user.
 
 **Order.** Each layer is useful alone and builds on the one before.
 1. **Accounts and balances**, ending in net worth: every account and asset with a dated
-   balance, manual first.
+   balance, from the bank where it's linked and set by the owner where it isn't.
 2. **Investments**: balances and contributions, read from the portfolio project.
 3. **Income and taxes**: income by source and tax paid against the projection, read from
    the tax project.
 
-**Open questions, for the owner to decide before building.**
-- How balances arrive: a manual month-end entry, a statement import, or both.
-- How often property and vehicle values are revisited, and whether they appear in net
-  worth by default or only on request.
-- Whether the two local projects write a file that Daybook reads, or Daybook stays
-  unaware of them and the owner enters the totals.
+**Decided 2026-10-04, before building layer 1.**
+- *How balances arrive.* A linked account records its balance once a day, from the bank
+  data the sync already pulls; nothing new is linked or bought for it. What isn't linked
+  (a home, a vehicle, an account at an unlinked institution) takes a value the owner
+  enters with its date. No statement import: the links cover what it would add.
+- *Property and vehicle values* count in net worth by default, each tagged as an
+  estimate with its date; one more than a year old says so.
+- *Where it lives.* Net worth has its own page; the dashboard stays about the month.
+- *The two local projects* are layers 2 and 3, so how they feed Daybook is decided when
+  those layers are planned.
 
 ---
 
