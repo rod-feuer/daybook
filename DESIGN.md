@@ -142,9 +142,10 @@ and §3 carry over unchanged.
   variables. New surfaces use the tokens and the scales below — never a
   hard-coded color, never a size off the scale. *(One-pattern)*
 - **Touch is in scope; hover only enhances.** The app ships a mobile bottom nav
-  and a bottom-sheet shelf, so every action has a resting state. The four pages
+  and a bottom-sheet shelf, so every action has a resting state. The five pages
   are the tabs; Sign out and the theme control sit past a hairline in narrow
-  labelled cells, not as another tab. Secondary controls sit at `opacity-60` and strengthen on hover/focus (the dashboard's
+  icon cells, each named for a screen reader and on hover, not as another tab
+  (with five tabs, their words crowded the tabs' labels). Secondary controls sit at `opacity-60` and strengthen on hover/focus (the dashboard's
   drill chevron is the reference). `opacity-0 group-hover` gating is a defect,
   not a scope decision. List rows that open the shelf are keyboard rows
   (`rowButtonProps` — role, tabIndex, Enter/Space) since they hold nested
@@ -240,6 +241,10 @@ and the picker hold one row and the subtitle, or the transactions figure, sits b
 the title's line at the card-title size with its count and the period beside it
 ("217 shown · Oct 1–4"), because a second card above a day-by-day list would bury the
 statement; every header is the same height, so switching tabs doesn't jump.
+Accounts is the other exception: a position, not a month, so it has no
+picker, its header says the day its balances are as of ("As of Oct 4") where
+other pages say the period, and its summary card has the figures (Net worth,
+Owned, Owed) and no bar.
 The month picker steps with ‹ › and reads the month in full. Then the toolbar — search, filters, sort — sitting directly
 above the list it acts on, never in the header and never above the summary.
 Then the list, in one of two patterns: **sections** for a handful of groups

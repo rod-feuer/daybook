@@ -94,14 +94,14 @@ export type NetWorth = {
   owned: number;
   owed: number;
   net: number;
-  accounts: { id: number; name: string; side: Side; kind: Kind; amount: number; asOf: string; source: string }[];
+  accounts: { id: number; name: string; side: Side; kind: Kind; subtype: string | null; mask: string | null; amount: number; asOf: string; source: string }[];
 };
 export function netWorth(asOf: string): NetWorth {
   const db = getDb();
   ensureAccounts(db);
   const accounts = db
     .prepare(
-      `SELECT a.id, a.name, a.side, a.kind, b.amount, b.asOf, b.source
+      `SELECT a.id, a.name, a.side, a.kind, a.subtype, a.mask, b.amount, b.asOf, b.source
        FROM accounts a
        JOIN balances b ON b.accountId = a.id
         AND b.asOf = (SELECT MAX(asOf) FROM balances WHERE accountId = a.id AND asOf <= @asOf)

@@ -11,7 +11,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 // `sm`+. The layout pads `main` so content clears this bar.
 // `signOut`: the layout passes whether the password gate is on. The tab bar
 // stays on screen while the header scrolls away, so Sign out lives here —
-// past a hairline, with the theme control, not as a fifth tab.
+// past a hairline, with the theme control, not as another tab.
 export default function BottomNav({ signOut = false }: { signOut?: boolean }) {
   const pathname = usePathname();
   return (
@@ -26,7 +26,9 @@ export default function BottomNav({ signOut = false }: { signOut?: boolean }) {
             key={n.href}
             href={n.href}
             aria-current={active ? "page" : undefined}
-            className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors ${
+            // Each tab is its label's width plus an equal share of the rest:
+            // at equal widths "Transactions" ran into its neighbours.
+            className={`flex flex-auto flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors ${
               active ? "bg-[var(--hover)] text-[var(--foreground)]" : "text-[var(--muted)]"
             }`}
           >
@@ -36,7 +38,7 @@ export default function BottomNav({ signOut = false }: { signOut?: boolean }) {
         );
       })}
       {/* Sign out and the theme control are utilities, not a fifth page.
-          They sit past a hairline so the four destinations stay the tabs.
+          They sit past a hairline so the five destinations stay the tabs.
           The bar is the chrome that stays on screen while the header scrolls
           away, which is why Sign out lives here rather than in that header. */}
       <div data-nav-utilities className="flex shrink-0 items-stretch border-l border-[var(--border)]">

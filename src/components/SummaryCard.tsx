@@ -54,8 +54,10 @@ export function SummaryCard({
 }: {
   primary: Figure;
   secondary?: Figure | Figure[];
-  progress: number; // 0..1
-  barLabel: string; // what the bar measures, for assistive tech ("70% of expected bills paid")
+  // 0..1. Omitted, the panel has no bar (Accounts: net worth is a position,
+  // not progress through a month), and holds only the status line.
+  progress?: number;
+  barLabel?: string; // what the bar measures, for assistive tech ("70% of expected bills paid")
   barCaption?: ReactNode; // the same, in sight — where the figures above don't already say it
   barTitle?: string; // the budget panel's label ("Budget", "Bills")
   alarm?: boolean; // the bar turns red (over budget)
@@ -70,7 +72,7 @@ export function SummaryCard({
   note?: string; // a caveat on what the bar measures: a "?" beside the caption, so it costs no line
   className?: string;
 }) {
-  const pct = Math.max(0, Math.min(progress, 1)) * 100;
+  const pct = Math.max(0, Math.min(progress ?? 0, 1)) * 100;
   const secondaries = secondary == null ? [] : Array.isArray(secondary) ? secondary : [secondary];
   // Every figure at the summary size, the result (net, spent so far, paid so
   // far) first. They sit as peers in equal columns, and the result was 24px
@@ -140,7 +142,7 @@ export function SummaryCard({
               )}
             </div>
           )}
-          <div className="relative">
+          {progress != null && <div className="relative">
             <div
               className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--background)]"
               role="progressbar"
@@ -161,14 +163,14 @@ export function SummaryCard({
                 </Tooltip>
               </div>
             )}
-          </div>
+          </div>}
           {/* The verdict describes the bar — "on pace to finish under
               budget", "2 overdue · 20 upcoming · 60 paid", "Lake Home over
               budget" — so it sits under it, the panel's conclusion. Above the
               figures it claimed a headline role it didn't have, and on
               Recurrings read as a stray line of counts over the money. */}
           {status && (
-            <div data-status className="mt-3 flex flex-wrap items-baseline gap-x-2 text-[15px] font-semibold">
+            <div data-status className={`${progress != null ? "mt-3 " : ""}flex flex-wrap items-baseline gap-x-2 text-[15px] font-semibold`}>
               {status}
               {statusDetail && <span data-status-detail className="flex flex-wrap items-baseline gap-x-2 text-xs font-normal">{statusDetail}</span>}
             </div>
