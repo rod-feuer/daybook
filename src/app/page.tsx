@@ -298,6 +298,12 @@ export default function DashboardPage() {
                 // outside the budget: the curve counts it, the budget doesn't.
                 const b = data.budget;
                 const budgetLine = b && b.total > 0 && !outsideBudget(data).material ? b.total : null;
+                // The axis fits the spending (this month, its projection, last
+                // month), in round steps. Forced up to the budget, three days
+                // of spending hugged the floor under a $49k top that sat beside
+                // a $45k tick. A budget within reach is on the chart; one well
+                // above it is said at the top edge.
+                const { top, ticks, budgetOnChart } = chartScale(data.pace.series, budgetLine);
                 return (
                   <>
                     <ChartLegend
@@ -305,7 +311,12 @@ export default function DashboardPage() {
                       showPrev={data.prev != null}
                       showBudget={budgetLine != null}
                     />
-                    <div className="min-h-[14rem] flex-1" role="img" aria-label={chartSummary(data, budgetLine)} data-pace-chart>
+                    <div className="relative min-h-[14rem] flex-1" role="img" aria-label={chartSummary(data, budgetLine)} data-pace-chart>
+                      {budgetLine != null && !budgetOnChart && (
+                        <span className="absolute right-2 top-0 z-10 text-[11px] text-[var(--muted)]" data-budget-above>
+                          Budget {usd(budgetLine, { cents: false })} ↑
+                        </span>
+                      )}
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={data.pace.series} margin={{ left: -8, right: 8, top: 4 }}>
                           <defs>
@@ -323,11 +334,12 @@ export default function DashboardPage() {
                             minTickGap={28}
                           />
                           <YAxis
-                            domain={[0, (max: number) => Math.max(max, (budgetLine ?? 0) * 1.05)]}
+                            domain={[0, top]}
+                            ticks={ticks}
                             tick={{ fontSize: 11, fill: "var(--muted)" }}
                             axisLine={false}
                             tickLine={false}
-                            tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+                            tickFormatter={(v) => (v >= 1000 ? `$${(v / 1000).toFixed(v % 1000 ? 1 : 0)}k` : `$${v}`)}
                             width={44}
                           />
                           <Tooltip
@@ -350,12 +362,11 @@ export default function DashboardPage() {
                             }}
                             labelStyle={{ color: "var(--foreground)" }}
                           />
-                          {budgetLine != null && (
+                          {budgetLine != null && budgetOnChart && (
                             <ReferenceLine
                               y={budgetLine}
                               stroke="var(--muted)"
                               strokeDasharray="2 3"
-                              ifOverflow="extendDomain"
                               label={{ value: `Budget ${usd(budgetLine, { cents: false })}`, position: "insideTopRight", fontSize: 11, fill: "var(--muted)" }}
                             />
                           )}
@@ -594,6 +605,23 @@ function prevPeriodLabel(prev: Dash["prev"]): string | null {
   if (!prev) return null;
   const m = shortMonth(prev.month);
   return prev.throughDay != null ? `${m} 1–${prev.throughDay}` : m;
+}
+
+// The spending chart's y-axis: round steps (1, 2 or 5 × 10ⁿ) to just above
+// the largest spending point, at most six ticks. The budget joins the scale
+// when it sits within a fifth of that top; further up, it is said in words.
+function chartScale(
+  series: { actual: number | null; projected: number | null; prev: number | null }[],
+  budget: number | null
+): { top: number; ticks: number[]; budgetOnChart: boolean } {
+  const spend = Math.max(1, ...series.flatMap((p) => [p.actual ?? 0, p.projected ?? 0, p.prev ?? 0]));
+  const budgetOnChart = budget != null && budget <= spend * 1.2;
+  const reach = budgetOnChart ? Math.max(spend, budget as number) : spend;
+  const raw = reach / 5;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((x) => x >= raw) as number;
+  const top = Math.ceil(reach / step) * step;
+  return { top, ticks: Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step), budgetOnChart };
 }
 
 // Month-over-month delta shown under a stat, as "$abs (%)" — dollars answer
@@ -926,19 +954,15 @@ function CategoryBars({
                 <span className="font-medium">{r.name}</span>
               </span>
               <span className="flex items-center gap-2">
-                {/* The whole spent/budget pair right-aligns to one clean edge before
-                    the chevron (matching the aligned chevron column), with the slash
-                    snug between. Spent is ranked foreground; the budget reference is
-                    muted — the bar below already encodes the ratio, so these are a
-                    per-row readout, not a column to scan. Spent's left edge goes
-                    ragged, but that's hidden in the gap after the category name. */}
-                <span className="whitespace-nowrap text-right tabular-nums">
+                {/* What was spent; what's left is said under the bar, so the
+                    budget isn't here too: "$6,593 / $7,100" over "$507 left"
+                    said the budget twice and made you subtract (DESIGN.md §2).
+                    The budget itself is on the Categories page and the shelf. */}
+                <span className="whitespace-nowrap text-right tabular-nums" data-row-spent>
                   <span className={over ? "font-semibold text-[var(--bad)]" : "font-medium"}>
                     {fmt(r.total)}
                   </span>
-                  {r.budget != null && (
-                    <span className="font-normal text-[var(--muted)]"> / {fmt(r.budget)}</span>
-                  )}
+                  <span className="font-normal text-[var(--muted)]"> spent</span>
                 </span>
                 <DrillChevron className="-mr-1 h-3.5 w-3.5" />
               </span>

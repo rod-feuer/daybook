@@ -169,6 +169,24 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
     (byMerchant[c.merchant] ??= []).push(c);
   }
 
+  // Every name a vendor goes by (its plan's key and the names combined into
+  // it): a stray is compared with all of them. "Every Media" scored 0.796
+  // against the plan's key "Every Every.to-chargbrooklyn" and 0.82 against the
+  // same vendor's "Every Every.to Charg", and was offered nowhere.
+  const namesOf = new Map<string, Set<string>>();
+  for (const name of [...merchants.map((m) => m.merchant), ...Object.keys(links), ...Object.values(links)]) {
+    const c = canonicalMerchant(name, links);
+    (namesOf.get(c) ?? namesOf.set(c, new Set()).get(c)!).add(name);
+  }
+  // A short name matches anything that contains its letters ("Adt", ADT's
+  // other name, is in "pADThai": 0.81), so other names count from five letters.
+  const letters = (n: string) => n.replace(/[^a-z]/gi, "").length;
+  const affinityTo = (stray: string, recMerchant: string) =>
+    Math.max(
+      nameAffinity(stray, recMerchant),
+      ...[...(namesOf.get(canonicalMerchant(recMerchant, links)) ?? [])].filter((n) => letters(n) >= 5).map((n) => nameAffinity(stray, n))
+    );
+
   // Match each orphan merchant to its best recurring, then GROUP orphans by that
   // recurring so several stray descriptors of one vendor become a single card.
   const groups = new Map<
@@ -191,7 +209,7 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
       const mag = Math.abs(c.amount);
       for (const r of recs) {
         if (canonicalMerchant(r.merchant, links) === cm) continue; // already same vendor
-        const affinity = nameAffinity(merchant, r.merchant);
+        const affinity = affinityTo(merchant, r.merchant);
         if (affinity < LOW_MATCH) continue; // names must at least echo each other
         if (mag < r.lo * 0.5 || mag > r.hi * 1.5) continue; // amount implausible
         const period = PERIOD[r.cadence] ?? 30;
