@@ -1230,20 +1230,71 @@ test("auto-split children carry the rule's exact signed amounts and categories; 
   assert.equal(parent.excluded, 1);
 });
 
-test("a pending charge is not split until it posts", () => {
-  // WHY: a sync replaces a pending row (remove + add). If the pending row had
-  // been split, it comes back un-excluded while its child rows survive, and
-  // the charge counts twice. Found by splitting the newest row in a real DB
-  // copy and letting the launch sync run. Rules wait for the posted row.
+test("a pending charge is split while it waits, and its parts follow it through the sync", () => {
+  // WHY: a combined bill (one insurer, a home and a car) that is pending sat
+  // whole in one category until it posted, overstating that category and
+  // understating the others for days. Split it now; but a sync replaces a
+  // pending row (drop + add under a new id), and parts that outlived their
+  // parent would count the charge twice. So: the posted row ends up split
+  // exactly once, and what counts is the charge's amount, never more.
   createSplitRule("chubb", 1115.55, [
     { categoryId: CAT_X, amount: 847.75, label: "Home" },
-    { categoryId: CAT, amount: 267.8, label: "Other" },
+    { categoryId: CAT, amount: 267.8, label: "Car" },
   ]);
-  tx("Chubb Insurance", { amount: -1115.55, categoryId: CAT_X });
-  getDb().prepare("UPDATE transactions SET pending = 1 WHERE merchant = 'Chubb Insurance'").run();
-  assert.equal(applySplitRules(), 0, "pending: left alone");
-  getDb().prepare("UPDATE transactions SET pending = 0 WHERE merchant = 'Chubb Insurance'").run();
-  assert.equal(applySplitRules(), 1, "posted: split");
+  const acct = [{ account_id: "a1", name: "Checking" }];
+  const charge = (id: string, date: string, amount: number, pending: boolean) => ({
+    accounts: acct,
+    transactions: [{ transaction_id: id, account_id: "a1", date, name: "Chubb", merchant_name: "Chubb", amount, pending }],
+  });
+  const counted = () =>
+    (getDb().prepare("SELECT ROUND(SUM(amount), 2) AS s FROM transactions WHERE excluded = 0").get() as { s: number }).s;
+  const parts = () =>
+    getDb().prepare("SELECT hash, amount, categoryId, pending FROM transactions WHERE hash LIKE '%:s%' ORDER BY hash").all() as {
+      hash: string; amount: number; categoryId: number; pending: number;
+    }[];
+
+  importPlaidTransactions([charge("p1", "2026-10-03", 1115.55, true)]);
+  assert.equal(applySplitRules(), 1, "pending: split now");
+  assert.deepEqual(
+    parts().map((c) => [c.amount, c.categoryId, c.pending]),
+    [[-847.75, CAT_X, 1], [-267.8, CAT, 1]],
+    "the parts carry the rule's categories, pending like their parent"
+  );
+  assert.equal(counted(), -1115.55, "counted once, in its parts");
+
+  // It posts under a new id: the pending row and its parts go, the posted row splits.
+  importPlaidTransactions([charge("q1", "2026-10-05", 1115.55, false)]);
+  assert.equal(counted(), -1115.55, "between the import and the split, the posted row counts whole, not on top of stale parts");
+  assert.equal(applySplitRules(), 1);
+  assert.deepEqual(parts().map((c) => [c.hash, c.pending]), [["q1:s0", 0], ["q1:s1", 0]], "only the posted row's parts, posted");
+  assert.equal(counted(), -1115.55);
+});
+
+test("a split pending charge that posts in place keeps its parts only while they still add up", () => {
+  // WHY: Plaid can flip a pending row to posted under the same id, sometimes
+  // at a different amount. Parts at the old amount would misstate the bill,
+  // and parts left pending would read as provisional forever.
+  createSplitRule("chubb", 1115.55, [
+    { categoryId: CAT_X, amount: 847.75, label: "Home" },
+    { categoryId: CAT, amount: 267.8, label: "Car" },
+  ]);
+  const pull = (amount: number, pending: boolean) => ({
+    accounts: [{ account_id: "a1", name: "Checking" }],
+    transactions: [{ transaction_id: "p1", account_id: "a1", date: "2026-10-03", name: "Chubb", merchant_name: "Chubb", amount, pending }],
+  });
+  const state = () => ({
+    parent: (getDb().prepare("SELECT excluded FROM transactions WHERE hash = 'p1'").get() as { excluded: number }).excluded,
+    parts: (getDb().prepare("SELECT pending FROM transactions WHERE hash LIKE 'p1:s%'").all() as { pending: number }[]).map((r) => r.pending),
+  });
+  importPlaidTransactions([pull(1115.55, true)]);
+  applySplitRules();
+  importPlaidTransactions([pull(1115.55, false)]);
+  assert.equal(applySplitRules(), 0, "already split");
+  assert.deepEqual(state(), { parent: 1, parts: [0, 0] }, "same amount: the parts post with it");
+
+  importPlaidTransactions([pull(1120.0, false)]);
+  applySplitRules();
+  assert.deepEqual(state(), { parent: 0, parts: [] }, "new amount: no rule fits, so the charge counts whole");
 });
 
 test("undo split removes the children, restores the parent, and deletes the rule", () => {

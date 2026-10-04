@@ -144,7 +144,9 @@ export function importPlaidTransactions(items: PlaidItem[]): {
        account = excluded.account,
        pending = excluded.pending`
   );
-  const drop = db.prepare("DELETE FROM transactions WHERE hash = ?");
+  // A dropped row takes its split parts with it: a pending charge is split
+  // while it waits, and its posted row splits afresh.
+  const drop = db.prepare("DELETE FROM transactions WHERE hash = @h OR hash LIKE @h || ':s%'");
   // A posted twin for a pending charge: same account + amount, within 3 days.
   // Name affinity (checked in JS) then confirms it's the same vendor.
   const findPosted = db.prepare(
@@ -315,11 +317,12 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     // Pending rows this pull no longer carries have posted under a new id (or
     // reconciled above): drop them, edits carried to the posted twin if one is
     // in the table now.
+    // Split parts aren't Plaid's rows: they go only with their parent.
     for (const was of held.values()) {
-      if (!was.pending || pulled.has(was.hash)) continue;
+      if (!was.pending || pulled.has(was.hash) || was.hash.includes(":s")) continue;
       const twin = postedTwin(was);
       if (twin) carryEdits(was.hash, twin.hash);
-      drop.run(was.hash);
+      drop.run({ h: was.hash });
     }
   });
   // Immediate: this transaction reads (is the posted twin here?) before it
