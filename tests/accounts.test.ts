@@ -1,4 +1,4 @@
-import { cleanDbBeforeEach } from "./helpers"; // first: points the DB at a throwaway file
+import { cleanDbBeforeEach, tx } from "./helpers"; // first: points the DB at a throwaway file
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getDb } from "../src/lib/db";
@@ -227,4 +227,72 @@ test("adding an account later is neither drawn as a rise nor reported as a chang
   const house = (getDb().prepare("SELECT id FROM accounts WHERE name = 'Sample house'").get() as { id: number }).id;
   setValue(house, { asOf: today, amount: 85000, estimate: true });
   assert.equal(netWorth(today).net - netWorthTrend(today).prev!.net, 5000, "a revaluation after it was added is change");
+});
+
+import { setPaidBy, projectLoanPayments } from "../src/lib/accounts";
+
+const history = (id: number) => accountDetail(id)!.history.map((h) => [h.asOf, h.amount, h.source]);
+
+test("each payment to a hand-kept loan lowers it, after interest at the rate for the days since", () => {
+  // WHY: a car loan the bank link can't see would sit at its statement
+  // balance for months, overstating what's owed. Its payments do show, in
+  // checking; a simple-interest loan's balance after one is the last balance
+  // plus daily interest, less the payment.
+  const loan = createManualAccount("Sample car loan", "loan", { asOf: "2026-01-01", amount: 10000, estimate: false });
+  setTerms(loan, { rate: 6, payment: 500 });
+  tx("Car Finance Co", { amount: -500, date: "2026-01-31" });
+  tx("Car Finance Co", { amount: -500, date: "2026-03-02" });
+  tx("Someone Else", { amount: -500, date: "2026-02-15" });
+  setPaidBy(loan, "Car Finance Co");
+  assert.deepEqual(history(loan), [
+    ["2026-03-02", 9096.41, "estimate"],
+    ["2026-01-31", 9549.32, "estimate"],
+    ["2026-01-01", 10000, "owner"],
+  ]);
+  assert.equal(netWorth("2026-03-02").owed, 9096.41, "net worth owes the estimate");
+});
+
+test("a statement balance resets the estimates; a missed or pending payment lowers nothing", () => {
+  // WHY: the estimate drifts by cents (the lender's day count, a late fee);
+  // the owner's next statement figure must win, and the payments after it
+  // count from it. A month with no payment must not be assumed paid.
+  const loan = createManualAccount("Sample car loan", "loan", { asOf: "2026-01-01", amount: 10000, estimate: false });
+  setTerms(loan, { rate: 6 });
+  tx("Car Finance Co", { amount: -500, date: "2026-01-31" });
+  setPaidBy(loan, "Car Finance Co");
+  setValue(loan, { asOf: "2026-02-15", amount: 9600, estimate: true }); // a loan's figure is a statement's, never an estimate
+  tx("Car Finance Co", { amount: -500, date: "2026-04-01" });
+  tx("Car Finance Co", { amount: -500, date: "2026-05-01" });
+  getDb().prepare("UPDATE transactions SET pending = 1 WHERE date = '2026-05-01'").run();
+  projectLoanPayments(loan);
+  const h = history(loan);
+  assert.deepEqual(h[h.length - 1], ["2026-01-01", 10000, "owner"]);
+  assert.deepEqual(h.find((r) => r[0] === "2026-02-15"), ["2026-02-15", 9600, "owner"], "stored as the owner's");
+  assert.ok(!h.some((r) => r[0] === "2026-01-31"), "the estimate before the statement is superseded");
+  // Feb 15 → Apr 1 is 45 days: no March payment, so interest runs on.
+  assert.deepEqual(h[0], ["2026-04-01", Number((9600 * (1 + 0.06 * 45 / 365) - 500).toFixed(2)), "estimate"]);
+  assert.ok(!h.some((r) => r[0] === "2026-05-01"), "a pending payment isn't counted yet");
+});
+
+test("only a hand-kept loan is lowered by payments", () => {
+  // WHY: a linked loan's balance is the bank's own; estimating over it would
+  // put a guess where a fact is.
+  recordBalances(bank(), "2026-10-04");
+  const linked = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'home'").get() as { id: number }).id;
+  const car = createManualAccount("Sample car", "vehicle", { asOf: "2026-10-04", amount: 20000, estimate: true });
+  assert.equal(setPaidBy(linked, "Mortgage Co"), false);
+  assert.equal(setPaidBy(car, "Car Finance Co"), false);
+});
+
+test("a loan's payments under a second, combined name count too", () => {
+  // WHY: the Hyundai loan's first payments posted as "Hmf Hmfusa.com" and
+  // later ones as "Hyundai Motor Finance". Once the names are combined into
+  // one vendor, every payment must lower the loan, not only one name's.
+  const loan = createManualAccount("Sample car loan", "loan", { asOf: "2026-01-01", amount: 10000, estimate: false });
+  setTerms(loan, { rate: 0 });
+  tx("Lender Online", { amount: -500, date: "2026-01-31" });
+  tx("Lender Finance", { amount: -500, date: "2026-03-02" });
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Lender Online', 'Lender Finance')").run();
+  setPaidBy(loan, "Lender Finance");
+  assert.equal(accountDetail(loan)!.history[0].amount, 9000, "both payments, at 0%");
 });

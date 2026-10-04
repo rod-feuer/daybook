@@ -16,7 +16,8 @@ export const olderThanAYear = (asOf: string, today: string) =>
 
 // "IRA ··1234" for a linked account; "Home · estimate" for one kept by hand.
 export function accountKind(a: Account): string {
-  if (a.origin === "manual") return [KIND_LABEL[a.kind] ?? a.kind, a.source === "estimate" ? "estimate" : "set by you"].join(" · ");
+  if (a.origin === "manual")
+    return [KIND_LABEL[a.kind] ?? a.kind, a.source === "estimate" ? (a.kind === "loan" ? "from payments" : "estimate") : "set by you"].join(" · ");
   const sub = a.subtype ? (SUBTYPE[a.subtype] ?? a.subtype.charAt(0).toUpperCase() + a.subtype.slice(1)) : null;
   return sub && a.mask ? `${sub} ··${a.mask}` : (sub ?? "");
 }

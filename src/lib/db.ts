@@ -276,6 +276,9 @@ export function ensureAccounts(db: Database.Database) {
   // A loan's asset (a mortgage's home, a boat loan's boat), for equity.
   const cols = db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "securedBy")) db.exec("ALTER TABLE accounts ADD COLUMN securedBy INTEGER REFERENCES accounts(id)");
+  // A loan kept by hand, paid from a linked account: the vendor its payments
+  // post under ("Hyundai Motor Finance"), so each one lowers the balance.
+  if (!cols.some((c) => c.name === "paidBy")) db.exec("ALTER TABLE accounts ADD COLUMN paidBy TEXT");
 }
 
 // Merge suggestions the user rejected, keyed by the proposed canonical name, so

@@ -35,6 +35,7 @@ export function AccountBody({
   onSetCounted,
   onSetTerms,
   onSetSecuredBy,
+  onSetPaidBy,
   onDelete,
   confirmingDelete,
 }: {
@@ -44,6 +45,7 @@ export function AccountBody({
   onSetCounted: (counted: boolean) => void;
   onSetTerms: (patch: Partial<Record<TermField, number | string | null>>) => void;
   onSetSecuredBy: (assetId: number | null) => void;
+  onSetPaidBy: (vendor: string | null) => void;
   onDelete: () => void;
   confirmingDelete: boolean;
 }) {
@@ -53,7 +55,10 @@ export function AccountBody({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2">
-        <PropertyCard label={owed ? "owed" : manual ? "value" : "balance"} detail={latest?.source === "estimate" ? "an estimate" : manual ? "set by you" : "from the bank"}>
+        <PropertyCard
+          label={owed ? "owed" : manual ? "value" : "balance"}
+          detail={latest?.source === "estimate" ? (owed ? "estimated from payments" : "an estimate") : manual ? "set by you" : "from the bank"}
+        >
           <div className="text-[15px] font-semibold tabular-nums">{latest ? usd(latest.amount, { cents: false }) : "—"}</div>
         </PropertyCard>
         <PropertyCard label="as of">
@@ -73,10 +78,18 @@ export function AccountBody({
       </p>
 
       {data.terms && (data.kind === "loan" || data.kind === "mortgage") && (
-        <LoanTermsPanel data={data} onSetTerms={onSetTerms} onSetSecuredBy={onSetSecuredBy} />
+        <LoanTermsPanel data={data} onSetTerms={onSetTerms} onSetSecuredBy={onSetSecuredBy} onSetPaidBy={onSetPaidBy} />
       )}
 
-      {manual && <ValueForm key={latest?.asOf ?? "new"} estimate={latest?.source === "estimate"} onSave={onSetValue} />}
+      {manual && (
+        <ValueForm
+          key={latest?.asOf ?? "new"}
+          estimate={!owed && latest?.source === "estimate"}
+          estimateOption={!owed}
+          title={owed ? "New balance (from a statement)" : "New value"}
+          onSave={onSetValue}
+        />
+      )}
 
       <div>
         <div className="stat-label mb-2">History</div>
@@ -84,8 +97,11 @@ export function AccountBody({
           {data.history.map((h) => (
             <li key={h.asOf} className="flex items-center gap-2 py-2 text-xs" data-account-value>
               <span className="w-14 shrink-0 tabular-nums text-[var(--muted)]">{shortDate(h.asOf)}</span>
-              <span className="flex-1 text-[11px] text-[var(--muted)]">{h.source === "estimate" ? "estimate" : h.source === "owner" ? "set by you" : ""}</span>
-              {manual && data.history.length > 1 && (
+              <span className="flex-1 text-[11px] text-[var(--muted)]">
+                {h.source === "estimate" ? (owed ? "after a payment" : "estimate") : h.source === "owner" ? "set by you" : ""}
+              </span>
+              {/* A loan's payment estimates are computed, not removable; the owner's figures are. */}
+              {manual && data.history.filter((x) => !(owed && x.source === "estimate")).length > 1 && !(owed && h.source === "estimate") && (
                 <button type="button" className="btn-link tap text-[11px]" onClick={() => onRemoveValue(h.asOf)} aria-label={`Remove the ${shortDate(h.asOf)} value`}>
                   Remove
                 </button>
@@ -123,10 +139,14 @@ export function ValueForm({
   onSave,
   submitLabel = "Save value",
   ready = true,
+  estimateOption = true,
+  title = "New value",
 }: {
   estimate: boolean;
   onSave: (v: OwnerValue) => void;
   submitLabel?: string;
+  estimateOption?: boolean; // a loan's figure is a statement's: no estimate box
+  title?: string;
   ready?: boolean; // the rest of the form around it is filled in (Add account's name)
 }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -146,7 +166,7 @@ export function ValueForm({
         setAmount("");
       }}
     >
-      <div className="stat-label">New value</div>
+      <div className="stat-label">{title}</div>
       <div className="flex gap-2">
         <label className="flex min-w-0 flex-1 items-center rounded-lg border border-[var(--border)] bg-card px-3 focus-within:ring-2 focus-within:ring-[var(--accent)]/30">
           <span className="text-[13px] text-[var(--muted)]">$</span>
@@ -169,10 +189,14 @@ export function ValueForm({
         />
       </div>
       <div className="flex items-center justify-between gap-2">
-        <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
-          <input type="checkbox" className="tap" checked={estimate} onChange={(e) => setEstimate(e.target.checked)} />
-          An estimate (what it would sell for)
-        </label>
+        {estimateOption ? (
+          <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+            <input type="checkbox" className="tap" checked={estimate} onChange={(e) => setEstimate(e.target.checked)} />
+            An estimate (what it would sell for)
+          </label>
+        ) : (
+          <span />
+        )}
         <button type="submit" disabled={!valid} className="btn-ghost text-xs disabled:opacity-50">
           {submitLabel}
         </button>
@@ -189,11 +213,14 @@ function LoanTermsPanel({
   data,
   onSetTerms,
   onSetSecuredBy,
+  onSetPaidBy,
 }: {
   data: AccountDetail;
   onSetTerms: (patch: Partial<Record<TermField, number | string | null>>) => void;
   onSetSecuredBy: (assetId: number | null) => void;
+  onSetPaidBy: (vendor: string | null) => void;
 }) {
+  const payers = data.paidBy && !data.payers.includes(data.paidBy) ? [data.paidBy, ...data.payers] : data.payers;
   const t = data.terms!;
   const tag = (f: TermField) => (t.edited.includes(f) ? true : t[f] != null ? false : undefined);
   const num = (f: TermField) => (raw: string) => {
@@ -245,6 +272,37 @@ function LoanTermsPanel({
           ))}
         </select>
       </label>
+      {/* A loan the bank link can't see: its payments, seen leaving a linked
+          account, lower its balance between statements. */}
+      {data.origin === "manual" && (
+        <div className="flex flex-col gap-1">
+          <label className="flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
+            <span>Paid by</span>
+            <select
+              aria-label="Payments to this loan"
+              value={data.paidBy ?? ""}
+              onChange={(e) => onSetPaidBy(e.target.value || null)}
+              className="select-caret tap-native cursor-pointer appearance-none rounded-lg border border-[var(--border)] bg-card py-2 pl-3 pr-8 text-[13px] text-[var(--foreground)]"
+            >
+              <option value="">Nothing</option>
+              {payers.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          <p className="text-[11px] text-[var(--muted)]" data-paid-by-caption>
+            {data.paidBy
+              ? t.rate == null
+                ? "Add the rate, and each payment will lower the balance."
+                : `Each payment to ${data.paidBy} lowers the balance, with interest at the rate. A statement balance you enter resets it.`
+              : payers.length
+                ? "Pick the charge that pays this loan, and each payment will lower the balance."
+                : t.payment == null
+                  ? "Add the payment to find the charge that pays this loan."
+                  : "No charge near the payment in the last six months."}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -172,12 +172,16 @@ export function createManualAccount(name: string, kind: ManualKind, value: Owner
 export function setValue(id: number, v: OwnerValue): boolean {
   const a = account(id);
   if (!a || a.source !== "manual") return false;
+  // A loan's figure is a statement balance, never an estimate: its estimates
+  // are the payments' (projectLoanPayments), recomputed from this anchor.
+  const loan = a.side === "liability";
   getDb()
     .prepare(
       `INSERT INTO balances (accountId, asOf, amount, source) VALUES (?, ?, ?, ?)
        ON CONFLICT(accountId, asOf) DO UPDATE SET amount = excluded.amount, source = excluded.source`
     )
-    .run(id, v.asOf, v.amount, v.estimate ? "estimate" : "owner");
+    .run(id, v.asOf, v.amount, v.estimate && !loan ? "estimate" : "owner");
+  if (loan) projectLoanPayments(id);
   return true;
 }
 
@@ -187,9 +191,14 @@ export function removeValue(id: number, asOf: string): boolean {
   const a = account(id);
   if (!a || a.source !== "manual") return false;
   const db = getDb();
-  const n = (db.prepare("SELECT COUNT(*) AS n FROM balances WHERE accountId = ?").get(id) as { n: number }).n;
+  const loan = a.side === "liability";
+  // On a loan, the figures that count are the owner's; its estimates are
+  // computed from them and can't be removed one by one.
+  const n = (db.prepare(`SELECT COUNT(*) AS n FROM balances WHERE accountId = ?${loan ? " AND source != 'estimate'" : ""}`).get(id) as { n: number }).n;
   if (n <= 1) return false;
-  return db.prepare("DELETE FROM balances WHERE accountId = ? AND asOf = ?").run(id, asOf).changes > 0;
+  const gone = db.prepare(`DELETE FROM balances WHERE accountId = ? AND asOf = ?${loan ? " AND source != 'estimate'" : ""}`).run(id, asOf).changes > 0;
+  if (gone && loan) projectLoanPayments(id);
+  return gone;
 }
 
 // Rename any account, or count it in net worth or not. A linked account
@@ -236,13 +245,17 @@ export type AccountDetail = {
   // An asset: the loans against it, and its equity (worth less what's owed on it).
   loans: { id: number; name: string; amount: number }[];
   equity: number | null;
+  // A hand-kept loan: the vendor its payments post under, and likely ones
+  // (vendors charged within 5% of its payment in the last six months).
+  paidBy: string | null;
+  payers: string[];
 };
 export function accountDetail(id: number): AccountDetail | null {
   const db = getDb();
   ensureAccounts(db);
   const a = db
-    .prepare("SELECT id, name, side, kind, source AS origin, subtype, mask, inNetWorth FROM accounts WHERE id = ?")
-    .get(id) as (Omit<AccountDetail, "counted" | "history"> & { inNetWorth: number }) | undefined;
+    .prepare("SELECT id, name, side, kind, source AS origin, subtype, mask, inNetWorth, paidBy FROM accounts WHERE id = ?")
+    .get(id) as (Omit<AccountDetail, "counted" | "history" | "terms" | "securedBy" | "assets" | "loans" | "equity" | "payers"> & { inNetWorth: number }) | undefined;
   if (!a) return null;
   const history = db
     .prepare("SELECT asOf, amount, source FROM balances WHERE accountId = ? ORDER BY asOf DESC")
@@ -270,6 +283,7 @@ export function accountDetail(id: number): AccountDetail | null {
       : [],
     loans,
     equity: loans.length ? Number((latest(id) - loans.reduce((t, l) => t + l.amount, 0)).toFixed(2)) : null,
+    payers: liability && a.origin === "manual" ? payersFor(readTerms(id)?.payment ?? null) : [],
   };
 }
 
@@ -343,6 +357,7 @@ export function setTerms(id: number, patch: Partial<Record<TermField, number | s
     else edited.add(f);
   }
   writeTerms(id, { ...t, edited: TERM_FIELDS.filter((f) => edited.has(f)) });
+  if (a.source === "manual") projectLoanPayments(id); // a new rate changes the estimates
   return true;
 }
 
@@ -414,4 +429,90 @@ export function netWorthTrend(today: string): NetWorthTrend {
   }
   const back = addDays(today, -CHANGE_DAYS);
   return { start, series, prev: start <= back ? { date: back, ...at(back) } : null };
+}
+
+// ---- Loans kept by hand, lowered by their payments ---------------------------
+
+// A loan the bank link can't see (a car loan) has its balance from the owner.
+// Between statements, each payment Daybook sees going to it lowers the
+// balance: interest at the loan's rate for the days since the last balance
+// (simple daily interest, as car loans accrue), then the payment. These are
+// recorded as estimates, dated the payment's day. The owner's latest
+// statement balance is the anchor: everything after it is recomputed on
+// every run, so typing a new statement figure resets the estimates from it,
+// and a missed payment simply lowers nothing.
+export function projectLoanPayments(id: number): number {
+  const db = getDb();
+  ensureAccounts(db);
+  const a = db.prepare("SELECT id, source, side, paidBy FROM accounts WHERE id = ?").get(id) as
+    | { id: number; source: string; side: Side; paidBy: string | null }
+    | undefined;
+  if (!a || a.source !== "manual" || a.side !== "liability") return 0;
+  const anchor = db
+    .prepare("SELECT asOf, amount FROM balances WHERE accountId = ? AND source != 'estimate' ORDER BY asOf DESC LIMIT 1")
+    .get(id) as { asOf: string; amount: number } | undefined;
+  const rate = readTerms(id)?.rate;
+  return db.transaction(() => {
+    // Estimates are this function's own output: clear them, then rebuild.
+    db.prepare("DELETE FROM balances WHERE accountId = ? AND source = 'estimate'").run(id);
+    if (!anchor || !a.paidBy || rate == null) return 0;
+    // The vendor and every name combined with it: a lender's payments can post
+    // under two descriptors ("Hmf Hmfusa.com", "Hyundai Motor Finance").
+    const payments = db
+      .prepare(
+        `WITH v(name) AS (
+           SELECT @vendor
+           UNION SELECT primaryMerchant FROM merchant_links WHERE alias = @vendor COLLATE NOCASE
+         ), names(name) AS (
+           SELECT name FROM v
+           UNION SELECT alias FROM merchant_links WHERE primaryMerchant IN (SELECT name FROM v)
+         )
+         SELECT COALESCE(effectiveDate, date) AS day, SUM(-amount) AS paid FROM transactions
+         WHERE merchant COLLATE NOCASE IN (SELECT name FROM names) AND amount < 0 AND pending = 0 AND hash NOT LIKE '%:s%'
+           AND COALESCE(effectiveDate, date) > @after
+         GROUP BY day ORDER BY day`
+      )
+      .all({ vendor: a.paidBy, after: anchor.asOf }) as { day: string; paid: number }[];
+    const write = db.prepare("INSERT OR REPLACE INTO balances (accountId, asOf, amount, source) VALUES (?, ?, ?, 'estimate')");
+    let balance = anchor.amount;
+    let since = anchor.asOf;
+    for (const p of payments) {
+      const days = (Date.parse(p.day + "T00:00:00Z") - Date.parse(since + "T00:00:00Z")) / 86400000;
+      balance = Math.max(0, balance * (1 + (rate / 100) * (days / 365)) - p.paid);
+      balance = Number(balance.toFixed(2));
+      write.run(id, p.day, balance);
+      since = p.day;
+    }
+    return payments.length;
+  })();
+}
+
+// Every hand-kept loan with a payer: after a sync brings new payments.
+export function projectAllLoanPayments(): number {
+  const db = getDb();
+  ensureAccounts(db);
+  const ids = db.prepare("SELECT id FROM accounts WHERE source = 'manual' AND side = 'liability' AND paidBy IS NOT NULL").all() as { id: number }[];
+  return ids.reduce((n, r) => n + projectLoanPayments(r.id), 0);
+}
+
+// Name the vendor a hand-kept loan's payments post under, or none.
+export function setPaidBy(id: number, vendor: string | null): boolean {
+  const a = account(id);
+  if (!a || a.source !== "manual" || a.side !== "liability") return false;
+  getDb().prepare("UPDATE accounts SET paidBy = ? WHERE id = ?").run(vendor?.trim() || null, id);
+  projectLoanPayments(id);
+  return true;
+}
+
+function payersFor(payment: number | null): string[] {
+  if (payment == null) return [];
+  const since = new Date(Date.now() - 183 * 86400000).toISOString().slice(0, 10);
+  return (
+    getDb()
+      .prepare(
+        `SELECT merchant FROM transactions WHERE amount BETWEEN ? AND ? AND date >= ?
+         GROUP BY merchant ORDER BY COUNT(*) DESC LIMIT 5`
+      )
+      .all(-payment * 1.05, -payment * 0.95, since) as { merchant: string }[]
+  ).map((r) => r.merchant);
 }
