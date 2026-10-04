@@ -160,14 +160,20 @@ export function monthsSince(firstSeen: string | null): number {
 // share a first word can be different places (Chatham Bars Inn, Chatham
 // Crew), so each carries its count and category as the evidence, and Select
 // all is one click when they are one place. Separate undoes any of them.
+// Names that are different places but belong together (the Chatham shops,
+// all Vacations) take one category without being combined: Set category.
 function SimilarNames({
   similar,
   into,
+  cats,
   onCombine,
+  onCategorize,
 }: {
   similar: Summary["similar"];
   into: string;
+  cats: Cat[];
   onCombine: (merchants: string[]) => void;
+  onCategorize: (merchants: string[], categoryId: number) => void;
 }) {
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const all = ticked.size === similar.length;
@@ -209,18 +215,46 @@ function SimilarNames({
           </li>
         ))}
       </ul>
-      <button
-        type="button"
-        disabled={ticked.size === 0}
-        onClick={() => {
-          onCombine([...ticked]);
-          setTicked(new Set());
-        }}
-        className="btn-ghost mt-2 w-full text-xs disabled:opacity-50"
-        data-combine-similar
-      >
-        {ticked.size === 0 ? `Tick the ones that are ${into}` : `Combine ${ticked.size} into ${into}`}
-      </button>
+      {ticked.size === 0 ? (
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          Tick the ones that are {into} to combine them, or any to give them one category.
+        </p>
+      ) : (
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              onCombine([...ticked]);
+              setTicked(new Set());
+            }}
+            className="btn-ghost flex-1 text-xs"
+            data-combine-similar
+          >
+            Combine {ticked.size} into {into}
+          </button>
+          {/* A native select (DESIGN.md §2): choosing a category is the
+              action, for the ticked names only; each stays its own vendor. */}
+          <select
+            value=""
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              if (!id) return;
+              onCategorize([...ticked], id);
+              setTicked(new Set());
+            }}
+            aria-label={`Set a category for the ${ticked.size} ticked`}
+            className="btn-ghost select-caret min-w-0 flex-1 cursor-pointer appearance-none pr-8 text-left text-xs"
+            data-categorize-similar
+          >
+            <option value="">Set category for {ticked.size}…</option>
+            {cats.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.icon} {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
     </div>
   );
 }
@@ -572,6 +606,7 @@ export function MerchantBody({
   vendors,
   onCombine,
   onCombineMany,
+  onCategorizeMany,
   onRemoveSplit,
 }: {
   data: Summary;
@@ -586,6 +621,7 @@ export function MerchantBody({
   vendors: Vendor[];
   onCombine: (loser: string, primary: string, alias?: string, categoryId?: number | null) => void;
   onCombineMany: (losers: string[]) => void; // several similar names into this vendor
+  onCategorizeMany: (merchants: string[], categoryId: number) => void; // one category for several similar names, kept apart
   onRemoveSplit: (id: number, applied: number) => void;
   onOpenPlan: (series: string) => void; // one of this vendor's plans, with Back
 }) {
@@ -956,7 +992,7 @@ export function MerchantBody({
           </p>
         )}
         {data.similar.length > 0 && (
-          <SimilarNames similar={data.similar} into={data.displayName} onCombine={onCombineMany} />
+          <SimilarNames similar={data.similar} into={data.displayName} cats={cats} onCombine={onCombineMany} onCategorize={onCategorizeMany} />
         )}
         {/* One actions row, one style: the §2 verbs. Combine is a disclosure —
             its panel drops below the row only while in use. */}

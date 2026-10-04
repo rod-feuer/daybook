@@ -328,6 +328,17 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
       { success: `Combined ${losers.length} name${losers.length === 1 ? "" : "s"} into ${mData.displayName}`, error: "Couldn't combine — please try again" }
     );
   }
+  // One category for several similar names that stay separate vendors (the
+  // shelf's Similar names): each vendor moves as a whole, as on its own shelf.
+  function categorizeMany(merchants: string[], categoryId: number) {
+    const name = cats.find((c) => c.id === categoryId)?.name ?? "the category";
+    return write(
+      async () => {
+        for (const merchant of merchants) await postJson("/api/recurrings/recategorize", { merchant, categoryId });
+      },
+      { success: `Set ${merchants.length} vendor${merchants.length === 1 ? "" : "s"} to ${name}`, error: "Couldn't set the category — please try again" }
+    );
+  }
   function unlinkName(alias: string) {
     if (target?.kind !== "merchant") return;
     return write(
@@ -522,6 +533,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 vendors={vendors}
                 onCombine={combineMerchant}
                 onCombineMany={combineMany}
+                onCategorizeMany={categorizeMany}
                 onRemoveSplit={(id, applied) =>
                   write(() => deleteJson(`/api/split-rules/${id}`), {
                     success: applied ? `Split removed · ${applied} charge${applied === 1 ? "" : "s"} restored` : "Split removed",

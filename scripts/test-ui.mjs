@@ -832,10 +832,29 @@ async function similarNames(browser) {
     const shown = await page.waitForSelector(`${shelfSel} [data-similar-names]`, { timeout: 8000 }).then(() => true, () => false);
     const before = await page.evaluate((sel) => {
       const box = document.querySelector(`${sel} [data-similar-names]`);
-      return box ? { names: [...box.querySelectorAll("li")].map((li) => li.innerText.replace(/\s+/g, " ").trim()), ticked: box.querySelectorAll("input:checked").length, button: box.querySelector("[data-combine-similar]").disabled } : null;
+      return box ? { names: [...box.querySelectorAll("li")].map((li) => li.innerText.replace(/\s+/g, " ").trim()), ticked: box.querySelectorAll("input:checked").length, actions: !!box.querySelector("[data-combine-similar], [data-categorize-similar]") } : null;
     }, shelfSel);
-    record("similar names", "a vendor's shelf lists its other spellings, none ticked, with Combine waiting for a tick", shown && before && before.names.some((t) => /Jimmy John's/.test(t)) && before.ticked === 0 && before.button, JSON.stringify(before));
+    record("similar names", "a vendor's shelf lists its other spellings, none ticked, its actions waiting for a tick", shown && before && before.names.some((t) => /Jimmy John's/.test(t)) && before.ticked === 0 && !before.actions, JSON.stringify(before));
     if (!shown) return;
+
+    // Set category: the ticked names take one category and stay their own vendors.
+    const catOf = async () => page.evaluate(async () => {
+      const r = await fetch("/api/transactions?q=" + encodeURIComponent("Jimmy John's") + "&limit=5").then((x) => x.json());
+      return (r.rows ?? []).filter((t) => /Jimmy John's/.test(t.merchant)).map((t) => t.categoryId);
+    });
+    const was = await catOf();
+    await page.click(`${shelfSel} [data-similar-names] li input`);
+    await page.waitForSelector(`${shelfSel} [data-categorize-similar]`);
+    const target = await page.$eval(`${shelfSel} [data-categorize-similar]`, (s) => [...s.options].find((o) => o.value)?.value);
+    await page.select(`${shelfSel} [data-categorize-similar]`, target);
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/transactions?q=" + encodeURIComponent("Jimmy John's") + "&limit=5").then((x) => x.json());
+      const ids = (r.rows ?? []).filter((x) => /Jimmy John's/.test(x.merchant)).map((x) => String(x.categoryId));
+      return ids.length > 0 && ids.every((id) => id === t);
+    }, { timeout: 8000 }, target).then(() => true, () => false).then((ok) => record("similar names", "Set category gives the ticked names one category, and they stay listed as their own vendors", ok, `→ category ${target}`));
+    await page.waitForSelector(`${shelfSel} [data-similar-names] li`, { timeout: 8000 }).catch(() => {});
+    // restore the fixture's category
+    await page.evaluate(async (c) => fetch("/api/recurrings/recategorize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: "Jimmy John's", categoryId: c }) }), was[0] ?? null);
     await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-similar-names] button`)].find((b) => /Select all/.test(b.textContent)).click(), shelfSel);
     const label = await page.$eval(`${shelfSel} [data-combine-similar]`, (b) => b.textContent.trim());
     await page.click(`${shelfSel} [data-combine-similar]`);
