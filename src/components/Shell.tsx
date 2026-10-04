@@ -65,7 +65,10 @@ export default function Shell({
             actions it pushed them under the title, to the left. A figure
             (the transactions net) does the same, under the title, so the
             picker stays on the title's row instead of centering on the number. */}
-        <div className={figure ? "contents sm:flex sm:items-baseline sm:gap-3" : "contents sm:block"}>
+        {/* On a desktop the subtitle (the period, "Oct 1–4") sits on the
+            title's line, as the transactions net does, so every header is one
+            line and one height; on a phone it takes its own line beneath. */}
+        <div className={figure || subtitle ? "contents sm:flex sm:items-baseline sm:gap-3" : "contents sm:block"}>
           <h1 className="min-w-0 flex-1 text-lg font-semibold tracking-tight sm:flex-none">{title}</h1>
           {figure && (
             <p className="order-last w-full sm:order-none sm:w-auto" data-header-figure>
@@ -73,7 +76,7 @@ export default function Shell({
               <span className="text-xs text-[var(--muted)]" data-header-caption>{figure.caption}</span>
             </p>
           )}
-          {subtitle && <p className="order-last w-full text-xs text-[var(--muted)] sm:order-none">{subtitle}</p>}
+          {subtitle && <p className="order-last w-full text-xs text-[var(--muted)] sm:order-none sm:w-auto">{subtitle}</p>}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {month}

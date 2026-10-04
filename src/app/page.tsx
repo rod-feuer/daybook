@@ -1,7 +1,6 @@
 "use client";
 
 import { buildVerdict } from "@/lib/verdict";
-import { MIN_ELAPSED_DAYS } from "@/lib/budgetOutlook";
 import { withoutAmountQualifier } from "@/lib/series";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
@@ -29,6 +28,7 @@ import { AmountCell, CategoryProperty } from "@/components/RowCells";
 import type { Category } from "@/lib/types";
 import { LoadError, LoadingRows } from "@/components/LoadState";
 import Shell from "@/components/Shell";
+import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { HeaderMenu } from "@/components/HeaderMenu";
 import { useTxDrawer, useCategoryShelf, useShelfActive } from "@/components/TransactionDrawer";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
@@ -86,6 +86,7 @@ type Tx = TransactionRow;
 export default function DashboardPage() {
   const { months, setMonths, month, setMonth, status, setStatus, boot } = useMonthBoot();
   const [data, setData] = useState<Dash | null>(null);
+  const period = usePeriodLabel(month, data);
   const still = useReducedMotion();
   const [recent, setRecent] = useState<Tx[]>([]);
   const openTx = useTxDrawer();
@@ -160,8 +161,8 @@ export default function DashboardPage() {
   return (
     <Shell
       title="Dashboard"
-      // No subtitle: the month picker already shows the month (it was duplicated
-      // as "June 2026" both here and in the picker below).
+      // The period the figures cover ("Oct 1–4"), said once for the page.
+      subtitle={period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
         <HeaderMenu>
@@ -183,14 +184,12 @@ export default function DashboardPage() {
             const current = isCurrentMonth(month);
             const b = data.budget;
             const v = buildVerdict(data, current);
-            // One frame. While the month is being projected, all three big
-            // figures are the month-end view and each carries its actual "so far"
-            // beneath — so the headline can be checked on the card itself:
-            // expected income − projected expenses = projected net. Before, the
-            // headline was projected and the two beside it were actuals, and the
-            // projected spend it was built from appeared only under the chart.
-            const projecting = data.projectedNet != null && data.projectedIncome != null && data.pace.projectedMonthEnd != null;
-            const net = projecting ? (data.projectedNet as number) : data.net;
+            // The figures are the month's actuals, over the period the header
+            // states ("Oct 1–4"), each against the same days of last month. The
+            // projection is the verdict's and the chart's dashed line: as big
+            // figures it made each one carry its actual "so far" beneath, and
+            // the card said "so far" in every corner.
+            const net = data.net;
             const { amount: unbudgeted, material: unbudgetedMaterial } = outsideBudget(data);
             const progress = b && b.total > 0 ? b.spent / b.total : data.income > 0 ? data.expenses / data.income : 0;
             const barLabel =
@@ -206,51 +205,25 @@ export default function DashboardPage() {
                 // "so far"; with a projection, the line under each figure does.
                 primary={{
                   value: usd(net, { sign: true, cents: false }),
-                  // In progress but too early to project, the figures are the
-                  // month so far and the label says so (with a projection, the
-                  // "$X so far" beneath each figure carries it).
-                  label: current && !projecting ? "net so far" : "net",
-                  // One colour signal per card, and it is the verdict's. A red
-                  // net beside a green "under budget" argued with it. Only a
-                  // finished month's net is a fact, and only then does it take
-                  // its colour.
-                  tone: current ? undefined : net >= 0 ? "good" : "bad",
+                  label: "net",
+                  // One colour signal per card, and it is the verdict's: a red
+                  // net beside a green "under budget" argued with it, so the
+                  // net stays neutral, finished month or not.
                   href: `/transactions?month=${month}`,
-                  sub:
-                    projecting ? (
-                      // Mid-month net is misleading (income hasn't posted) — lead
-                      // with the projected month-end figure, keep the actual as context.
-                      <span>{usd(data.net, { sign: true, cents: false })} so far</span>
-                    ) : (
-                      <DeltaLine cur={data.net} prev={data.prev?.net} prevLabel={prevLabel} throughDay={data.prev?.throughDay} />
-                    ),
+                  sub: <DeltaLine cur={data.net} prev={data.prev?.net} prevLabel={prevLabel} />,
                 }}
                 secondary={[
                   {
-                    value: usd(projecting ? (data.projectedIncome as number) : data.income, { cents: false }),
-                    label: current && !projecting ? "income so far" : "income",
+                    value: usd(data.income, { cents: false }),
+                    label: "income",
                     href: `/transactions?month=${month}&type=income`,
-                    sub:
-                      projecting ? (
-                        // Income posts late in the month, so a vs-prior delta on the
-                        // amount-so-far is noise — what has arrived is the context.
-                        <span>{usd(data.income, { cents: false })} so far</span>
-                      ) : (
-                        <DeltaLine cur={data.income} prev={data.prev?.income} prevLabel={prevLabel} throughDay={data.prev?.throughDay} />
-                      ),
+                    sub: <DeltaLine cur={data.income} prev={data.prev?.income} prevLabel={prevLabel} />,
                   },
                   {
-                    value: usd(projecting ? (data.pace.projectedMonthEnd as number) : data.expenses, { cents: false }),
-                    label: current && !projecting ? "expenses so far" : "expenses",
+                    value: usd(data.expenses, { cents: false }),
+                    label: "expenses",
                     href: `/transactions?month=${month}&type=expense`,
-                    sub: projecting ? (
-                      // One comparison while the month runs, and it is the chart's
-                      // (projected vs last month). A second one here, so far vs the
-                      // same days, gave a different number an inch away.
-                      <span>{usd(data.expenses, { cents: false })} so far</span>
-                    ) : (
-                      <DeltaLine cur={data.expenses} prev={data.prev?.expenses} prevLabel={prevLabel} throughDay={data.prev?.throughDay} />
-                    ),
+                    sub: <DeltaLine cur={data.expenses} prev={data.prev?.expenses} prevLabel={prevLabel} />,
                   },
                 ]}
                 progress={progress}
@@ -631,23 +604,16 @@ function prevPeriodLabel(prev: Dash["prev"]): string | null {
 // One colour signal per card, and it is the verdict's (DESIGN.md §2): the
 // deltas were red or green under every figure, three signals beside the
 // verdict. They read in the muted text; the arrow says the direction.
-// Compared over fewer than MIN_ELAPSED_DAYS of the month, a delta is when a
-// bill happened to post ("Income ▼ 67% vs Sep 1–3" on $82), so there is none:
-// the "so far" labels and the verdict already say the month is young, and a
-// "too early to compare" under each figure said it three more times.
 function DeltaLine({
   cur,
   prev,
   prevLabel,
-  throughDay,
 }: {
   cur: number;
   prev: number | undefined;
   prevLabel: string | null | undefined;
-  throughDay?: number | null;
 }) {
   if (prev === undefined || !prevLabel) return null;
-  if (throughDay != null && throughDay < MIN_ELAPSED_DAYS) return null;
   const change = cur - prev;
   if (Math.round(change) === 0) {
     return (
@@ -942,7 +908,6 @@ function CategoryBars({
   if (rows.length === 0)
     return <p className="text-[13px] text-[var(--muted)]">No spending this month.</p>;
   const pace = paceOf(month);
-  const current = isCurrentMonth(month);
   const fmt = (v: number) => usd(v, { cents: false });
   const shown = rows.slice(0, 7);
   return (
@@ -984,7 +949,7 @@ function CategoryBars({
                 Categories row's words, so the two pages agree. */}
             {r.budget != null && (
               <div className={`mt-1 text-right text-xs ${over ? "font-medium text-[var(--bad)]" : "text-[var(--muted)]"}`} data-row-left>
-                {over ? `${fmt(r.total - r.budget)} over` : `${fmt(r.budget - r.total)} left${current ? " so far" : ""}`}
+                {over ? `${fmt(r.total - r.budget)} over` : `${fmt(r.budget - r.total)} left`}
               </div>
             )}
           </>

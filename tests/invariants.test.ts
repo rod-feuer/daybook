@@ -36,6 +36,7 @@ import {
   getBudgetsFull,
   deleteBudget,
   setMonthBudget,
+  monthThroughDay,
   similarVendors,
   budgetPlan,
   setTransactionNote,
@@ -3603,4 +3604,20 @@ test("a charge keeps the bank's own text beside its name, so a guessed name can 
   db.prepare("UPDATE transactions SET source = 'copilot', rawMerchant = 'Aplpay In *southern' WHERE hash = 'csv-southern'").run();
   const csv = (db.prepare("SELECT id FROM transactions WHERE hash = 'csv-southern'").get() as { id: number }).id;
   assert.equal(transactionById(csv)!.bankText, "Aplpay In *southern");
+});
+
+test("the header's period runs to the month's last counted day; a finished month is all of it", () => {
+  // "Oct 1–4" is the one place the period is said, and the comparisons cover
+  // the same days, so it must end where the figures do: a charge left out of
+  // totals (excluded, or a Transfers category) doesn't move it.
+  const now = new Date();
+  const ym = now.toISOString().slice(0, 7);
+  const day = now.getUTCDate();
+  assert.equal(monthThroughDay(ym), 0, "nothing counted yet: the header says so");
+  if (day >= 3) {
+    tx("Kroger", { amount: -40, date: `${ym}-02`, categoryId: CAT });
+    tx("Kroger", { amount: -40, date: `${ym}-${String(day).padStart(2, "0")}`, categoryId: CAT, excluded: 1 });
+    assert.equal(monthThroughDay(ym), 2, "the excluded charge on a later day doesn't extend the period");
+  }
+  assert.equal(monthThroughDay("2025-02"), 28, "a finished month is the whole month");
 });

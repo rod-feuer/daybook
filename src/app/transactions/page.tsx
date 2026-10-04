@@ -15,6 +15,7 @@ import {
 } from "react";
 import { useSearchParams } from "next/navigation";
 import Shell, { Toolbar } from "@/components/Shell";
+import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { RecurringGlyph, RECURRING_LABEL, recurringState } from "@/components/RecurringGlyph";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { AmountCell, CategoryProperty } from "@/components/RowCells";
@@ -32,7 +33,7 @@ import { CategorizeQueue } from "@/components/CategorizeQueue";
 import { SearchBox } from "@/components/SearchBox";
 import { Tooltip } from "@/components/Tooltip";
 import { patchJson } from "@/lib/http";
-import { usd, longDate, shortDate, defaultMonth, isCurrentMonth } from "@/lib/format";
+import { usd, longDate, shortDate, defaultMonth } from "@/lib/format";
 import type { TransactionRow } from "@/lib/queries";
 import type { Category } from "@/lib/types";
 import { createLatestGuard } from "@/lib/latestGuard";
@@ -98,6 +99,7 @@ function TransactionsView() {
 
   // Filters
   const [month, setMonth] = useState("");
+  const period = usePeriodLabel(month); // "Oct 1–4"; none for All months
   const [catFilter, setCatFilter] = useState("");
   const [q, setQ] = useState("");
   // Search is otherwise scoped to the selected month, so a typed query would
@@ -541,7 +543,9 @@ function TransactionsView() {
         status === "ready" || totalCount > 0
           ? {
               value: usd(netTotal, { sign: true, cents: false }),
-              caption: `${totalCount} shown${isCurrentMonth(month) ? " · so far" : ""}`,
+              // The period joins the count ("9 shown · Oct 1–4"): the net's
+              // line is this header's one line.
+              caption: `${totalCount} shown${period ? ` · ${period}` : ""}`,
             }
           : undefined
       }

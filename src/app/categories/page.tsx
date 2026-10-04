@@ -8,7 +8,7 @@ import Shell from "@/components/Shell";
 import { MonthPicker } from "@/components/Actions";
 import { useToast } from "@/components/Toast";
 import { useMutation } from "@/components/useMutation";
-import { usd, isCurrentMonth } from "@/lib/format";
+import { usd } from "@/lib/format";
 import type { CategoryWithTotals } from "@/lib/queries";
 import { getJson, patchJson } from "@/lib/http";
 import { NewCategoryForm } from "@/components/NewCategoryForm";
@@ -17,6 +17,7 @@ import { Tooltip } from "@/components/Tooltip";
 import { LoadError, LoadingRows } from "@/components/LoadState";
 import { SummaryCard } from "@/components/SummaryCard";
 import { useMonthBoot } from "@/components/useMonthBoot";
+import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { budgetSpent, isOverBudget } from "@/lib/budgetOutlook";
 import { BudgetBar, paceOf } from "@/components/BudgetBar";
 
@@ -25,6 +26,7 @@ type Cat = CategoryWithTotals;
 
 export default function CategoriesPage() {
   const { months, month, setMonth, status, setStatus, boot } = useMonthBoot();
+  const period = usePeriodLabel(month); // the days the figures cover, said once
   const [cats, setCats] = useState<Cat[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   // Default to budget pressure so the categories nearest/over their budget rise
@@ -114,6 +116,7 @@ export default function CategoriesPage() {
   return (
     <Shell
       title="Categories"
+      subtitle={period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
         <button onClick={() => setShowAddForm((v) => !v)} className="btn-ghost">
@@ -123,7 +126,6 @@ export default function CategoriesPage() {
     >
       <BudgetSummary
         cats={cats}
-        month={month}
         filter={filter}
         onFilter={(f) => setFilter((cur) => (cur === f ? null : f))}
       />
@@ -211,18 +213,15 @@ export default function CategoriesPage() {
 // like-for-like; unbudgeted spend is surfaced separately rather than distorting it.
 function BudgetSummary({
   cats,
-  month,
   filter,
   onFilter,
 }: {
   cats: Cat[];
-  month: string;
   filter: "over" | "unbudgeted" | null;
   onFilter: (f: "over" | "unbudgeted") => void;
 }) {
   // Mid-month, "spent" and "left" are month-to-date against a whole-month
-  // budget; say so rather than stating "$X left" as settled.
-  const partial = isCurrentMonth(month);
+  // budget: the header's period ("Oct 1–4") says so, once, for the page.
   const expense = cats.filter((c) => c.kind === "expense" && !c.excludeFromTotals);
   if (expense.length === 0) return null;
   const budgeted = expense.filter((c) => c.budget != null);
@@ -242,7 +241,7 @@ function BudgetSummary({
         className="mb-6"
         primary={{
           value: usd(totalSpent, { cents: false }),
-          label: partial ? "spent so far" : "spent",
+          label: "spent",
         }}
         progress={0}
         barLabel="No budget set"
@@ -274,7 +273,7 @@ function BudgetSummary({
       // wrapped under its figure.
       primary={{
         value: usd(spent, { cents: false }),
-        label: partial ? "spent so far" : "spent",
+        label: "spent",
       }}
       secondary={{
         value: usd(Math.abs(remaining), { cents: false }),
@@ -468,13 +467,13 @@ function Group({
                         over ? "text-[var(--bad)]" : "text-[var(--foreground)]"
                       }`}
                     >
-                      {/* Two units — "$1,344 left so far" and "· $6,683 recurring" —
+                      {/* Two units — "$1,344 left" and "· $6,683 recurring" —
                           so a narrow row breaks between them, never inside one. */}
                       <span className="whitespace-nowrap">
                         {remaining >= 0
                           ? `${usd(remaining, { cents: false })} left`
                           : `${usd(-remaining, { cents: false })} over`}
-                        {annual ? " this year" : isCurrentMonth(month) ? " so far" : ""}
+                        {annual ? " this year" : ""}
                       </span>
                       {recur > 0 && (
                         <Tooltip

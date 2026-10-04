@@ -565,35 +565,40 @@ async function restingActions(browser) {
 }
 
 async function partialMonthQualifiers(browser) {
+  // The period is said once, in the header beside the month picker ("Oct 1–4";
+  // "Sep 1–30" for a finished month), so no figure, card or row says "so far":
+  // it used to sit under every figure, in every label and under every bar.
+  // The summary card shows actuals, each against the same days of last month,
+  // from day one; the projection is the verdict's and the chart's.
   await withPage(browser, async (page) => {
-    const check = async (route, month, needles, expect) => {
+    const read = async (route, month) => {
       await page.goto(BASE + route, { waitUntil: "networkidle2" });
       await pickMonth(page, month);
-      const t = await lowerText(page);
-      for (const n of needles) {
-        const present = t.includes(n.toLowerCase());
-        record("qualifiers", `${route} ${month} "${n}"`, present === expect, expect ? (present ? "present" : "MISSING") : (present ? "SHOWN on a past month" : "absent"));
-      }
+      await page.waitForFunction(() => /\b1(–\d+)?$/.test(document.querySelector("header p, main p")?.textContent ?? "") || true, { timeout: 3000 }).catch(() => {});
+      await sleep(400);
+      return page.evaluate(() => {
+        const sub = [...document.querySelectorAll("header p, header span")].map((e) => e.textContent.trim().match(/[A-Z][a-z]{2} (1(–\d+)?|· nothing yet)$/)?.[0]).find(Boolean) ?? null;
+        const card = (document.querySelector("[data-summary]")?.innerText ?? "").toLowerCase();
+        return { sub, card };
+      });
     };
-    await check("/", CUR, ["so far"], true); // "$X so far" under each figure
-    await check("/categories", CUR, ["spent so far"], true); // the label
-    await check("/recurrings", CUR, ["paid so far"], true); // the label
-    await check("/transactions", CUR, ["so far"], true); // the header caption; the net is the figure above it
-    await check("/", PAST, ["so far", ", projected"], false);
-    // A finished month's summary is plain actuals: no forward-looking word in the
-    // card. (Scoped to the card: the chart's legend says "Projected" on any month.)
-    const pastCard = (await page.evaluate(() => document.querySelector("[data-summary]")?.innerText ?? "")).toLowerCase();
+    for (const route of ["/", "/categories", "/recurrings", "/transactions"]) {
+      const cur = await read(route, CUR);
+      record("qualifiers", `${route} ${CUR}: the header states the period, and the card says no "so far"`, !!cur.sub && !cur.card.includes("so far"), `${cur.sub ?? "no period"}${cur.card.includes("so far") ? " · card says so far" : ""}`);
+      const past = await read(route, PAST);
+      record("qualifiers", `${route} ${PAST}: a finished month's period is the whole month`, !!past.sub && /1–(28|29|30|31)$/.test(past.sub), past.sub ?? "no period");
+    }
+    // Comparisons from day one, on the same days.
+    const dash = await read("/", CUR);
+    record("qualifiers", "the dashboard's figures carry comparisons against the same days of last month", /vs [a-z]{3}( 1(–\d+)?)?/.test(dash.card), dash.card.replace(/\s+/g, " ").slice(0, 140));
+    // A finished month's card is plain actuals: no forward-looking word.
+    const pastCard = (await read("/", PAST)).card;
     record("qualifiers", `/ ${PAST} summary card is plain actuals`, pastCard.length > 0 && !/so far|projected|expected|on pace/.test(pastCard), pastCard.replace(/\s+/g, " ").slice(0, 120));
-    await check("/categories", PAST, ["so far"], false);
-    await check("/recurrings", PAST, ["so far"], false);
-    await check("/transactions", PAST, ["so far"], false);
+    // The category shelf, a sheet over the header on a phone, says the period itself.
     await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
     await page.click("[data-drawer-row]"); await shelfIs(page, true); await shelfSettled(page);
-    const shelf = (await page.evaluate((sel) => document.querySelector(sel).innerText, shelfSel)).toLowerCase();
-    // "spent so far" always; mid-month the trend names the days it compares
-    // ("vs aug 1–27"), never a partial month against a whole "last month".
-    const trend = shelf.match(/vs ([a-z]{3} 1–\d+|last month)/)?.[0] ?? null;
-    record("qualifiers", "shelf (category, current month)", shelf.includes("spent so far") && trend !== "vs last month", trend ?? "no prior month in the fixture");
+    const shelf = await page.evaluate((sel) => document.querySelector(sel).innerText, shelfSel);
+    record("qualifiers", "shelf (category, current month): its header states the period and its cards say no \"so far\"", /[A-Z][a-z]{2} 1(–\d+)?/.test(shelf) && !/so far/i.test(shelf.split(/LAST 12 MONTHS|Last 12 months/)[0]), shelf.split("\n").slice(0, 4).join(" | "));
   });
 }
 
