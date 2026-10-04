@@ -133,6 +133,7 @@ function init(db: Database.Database) {
   }
 
   ensureBudgetEntries(db);
+  ensureTxDescriptor(db);
   migrateMerchants(db);
   ensureRecurringSettings(db);
   ensureMerchantLinks(db);
@@ -178,6 +179,16 @@ export function ensureBudgetEntries(db: Database.Database) {
     ).run(BUDGET_ALWAYS);
     db.exec("DROP TABLE budgets");
   })();
+}
+
+// The bank's own text for a Plaid charge (Plaid's `name`), kept beside the
+// cleaned-up name the app files it under: "GP001 - CAPITOL COMMINDIANAPOLIS
+// IN" is what says where a "Commissary" charge was. Null where the bank text
+// is the stored name already (CSV imports) or unknown. Exported so the
+// importer and the charge shelf add it on a live connection.
+export function ensureTxDescriptor(db: Database.Database) {
+  const cols = db.prepare("PRAGMA table_info(transactions)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "descriptor")) db.exec("ALTER TABLE transactions ADD COLUMN descriptor TEXT");
 }
 
 export function ensureRecurringTxExclusions(db: Database.Database) {

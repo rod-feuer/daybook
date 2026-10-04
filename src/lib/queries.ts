@@ -8,6 +8,7 @@ import {
   ensureRecurringTxExclusions,
   ensureRecurringTxInclusions,
   ensureBudgetEntries,
+  ensureTxDescriptor,
   BUDGET_ALWAYS,
 } from "./db";
 import type { TransactionWithCategory, Recurring, Category } from "./types";
@@ -119,6 +120,26 @@ export function distinctMerchants(): { merchant: string; count: number }[] {
 // One entry per VENDOR (canonical merchant, descriptors folded together) with its
 // friendly display name — for the combine picker, so it lists "Central Indiana
 // Academy of Dance" once instead of every raw bank descriptor.
+// How far a month's figures run, for the header's period ("Oct 1–4") and so
+// the same days as the comparisons ("vs Sep 1–4"): in the month in progress,
+// the last day with a counted charge (the dashboard's own filter: not
+// excluded, not in a category left out of totals); a finished month, all of
+// it; 0 when the month has nothing counted yet.
+export function monthThroughDay(month: string): number {
+  const [y, m] = month.split("-").map(Number);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  if (month !== new Date().toISOString().slice(0, 7)) return days;
+  const row = getDb()
+    .prepare(
+      `SELECT MAX(CAST(substr(COALESCE(t.effectiveDate, t.date), 9, 2) AS INTEGER)) AS d
+       FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
+       WHERE substr(COALESCE(t.effectiveDate, t.date), 1, 7) = ? AND t.excluded = 0
+         AND COALESCE(c.excludeFromTotals, 0) = 0`
+    )
+    .get(month) as { d: number | null };
+  return row.d ?? 0;
+}
+
 export function distinctVendors(): { merchant: string; displayName: string; count: number }[] {
   const db = getDb();
   const links = getMerchantLinks();
@@ -138,6 +159,45 @@ export function distinctVendors(): { merchant: string; displayName: string; coun
       count,
     }))
     .sort((a, b) => b.count - a.count || a.displayName.localeCompare(b.displayName));
+}
+
+// Other vendors whose name begins like this one's: the bank's spellings of
+// one place (Puccini's, Puccini'spizzapacarmel In, Puccinis Smilcarmel In;
+// Charleston's, Charlestons Carmel, Charlestcarmel In), offered on the
+// vendor's shelf to combine in one step. The first words, letters only, share
+// their first seven letters (shorter words must match whole), so a short
+// common start ("Cha", "South") never pairs Chatham with Charleston's. The
+// user ticks off a wrong pair ("American Airlines" / "American Express")
+// before combining; nothing happens on its own. Keyed by canonical vendor.
+export function similarVendors(
+  merchant: string
+): { merchant: string; displayName: string; count: number; categoryName: string | null }[] {
+  const links = getMerchantLinks();
+  const me = canonicalMerchant(merchant, links);
+  const head = (name: string) => (name.toLowerCase().trim().split(/\s+/)[0] ?? "").replace(/[^a-z]/g, "");
+  const alike = (a: string, b: string) => {
+    if (!a || !b) return false;
+    if (a.length < 7 || b.length < 7) return a === b && a.length >= 4;
+    return a.slice(0, 7) === b.slice(0, 7);
+  };
+  const mine = new Set([head(me), head(merchantDisplayName(me, getRecurringSettings(), links))]);
+  const out = distinctVendors().filter(
+    (v) => v.merchant !== me && [head(v.merchant), head(v.displayName)].some((h) => [...mine].some((m) => alike(m, h)))
+  );
+  if (!out.length) return [];
+  // Each candidate's usual category, so a wrong pair is easy to spot.
+  const db = getDb();
+  const catOf = (vendor: string) => {
+    const names = Object.entries(links).filter(([, p]) => canonicalMerchant(p, links) === vendor).map(([a]) => a).concat(vendor);
+    const row = db
+      .prepare(
+        `SELECT c.name FROM transactions t JOIN categories c ON c.id = t.categoryId
+         WHERE t.merchant IN (${names.map(() => "?").join(",")}) GROUP BY c.id ORDER BY COUNT(*) DESC LIMIT 1`
+      )
+      .get(...names) as { name: string } | undefined;
+    return row?.name ?? null;
+  };
+  return out.map((v) => ({ ...v, categoryName: catOf(v.merchant) }));
 }
 
 export type MatchRule = {
@@ -498,6 +558,10 @@ function spendByYear(scope: string, args: (string | number)[]): { year: string; 
 // is linked to, else the vendor's most recently charged plan (the one "In
 // plan" would put it into) — and the plan's display name.
 export type ChargeDetail = TransactionRow & {
+  // The bank's own text for the charge, when it says more than the name it
+  // is filed under: Plaid's `name` for a Plaid charge, the original
+  // descriptor for an imported one. Null when unknown.
+  bankText: string | null;
   recurringIncluded: 0 | 1;
   planKey: string | null;
   planConfirmed: boolean;
@@ -517,6 +581,7 @@ export type ChargeDetail = TransactionRow & {
 };
 export function transactionById(id: number): ChargeDetail | null {
   const db = getDb();
+  ensureTxDescriptor(db);
   ensureRecurringTxExclusions(db);
   ensureRecurringTxInclusions(db);
   const row = db
@@ -570,9 +635,11 @@ export function transactionById(id: number): ChargeDetail | null {
   const vendorCount = (
     db.prepare(`SELECT COUNT(*) AS n FROM transactions t WHERE ${scopeSql} AND ${notParent}`).get(...scopeArgs) as { n: number }
   ).n;
+  const raw = row as unknown as { descriptor: string | null; source: string; rawMerchant: string | null };
   return {
     ...row,
     displayName: chargeDisplayName(row, settings, links, planNames(settings)),
+    bankText: raw.descriptor ?? (raw.source !== "plaid" ? raw.rawMerchant : null),
     planKey: plan?.merchant ?? null,
     planName: plan ? (settings[plan.merchant]?.alias ?? displayMerchant(plan.merchant)) : null,
     // A plan the detector found and nobody added doesn't count: its charge
@@ -1141,6 +1208,8 @@ export function merchantSummary(merchant: string, series?: string | null) {
     // Found by the detector, not added: it doesn't count yet (the shelf offers Add).
     planConfirmed: rec != null && !!db.prepare("SELECT 1 FROM plans WHERE key = ?").get(rec.merchant),
 
+    // Vendors named like this one, to combine in one step (the vendor shelf, not a plan's).
+    similar: seriesRow ? [] : similarVendors(merchant),
     settingsKey, // where alias / expected / cadence / ended / match live for this shelf
     plans,
     planList,
@@ -2207,6 +2276,7 @@ export type CategorySummary = {
   month: string;
   spent: number; // magnitude this month (outflow for expense, inflow for income)
   txCount: number;
+  pendingCount: number; // of txCount, the charges still pending (not "posted")
   prevSpent: number; // same, prior month (for the MoM card), through prevThrough
   prevThrough: number | null; // mid-month: the day last month is summed through
   history: { month: string; spent: number }[]; // the 12 months ending with this one, oldest first
@@ -2264,13 +2334,13 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   const monthAgg = (m: string, throughDay = 31) =>
     db
       .prepare(
-        `SELECT COALESCE(SUM(${magExpr}), 0) AS s, COUNT(*) AS n
+        `SELECT COALESCE(SUM(${magExpr}), 0) AS s, COUNT(*) AS n, COALESCE(SUM(pending), 0) AS p
          FROM transactions
          WHERE categoryId = ? AND excluded = 0
            AND substr(COALESCE(effectiveDate, date),1,7) = ?
            AND CAST(substr(COALESCE(effectiveDate, date),9,2) AS INTEGER) <= ?`
       )
-      .get(categoryId, m, throughDay) as { s: number; n: number };
+      .get(categoryId, m, throughDay) as { s: number; n: number; p: number };
 
   // Mid-month, last month is summed over the same days (Aug 1–27 against
   // Sep 1–27): a partial month against a whole one showed a fall early in
@@ -2378,6 +2448,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     month,
     spent: Number(cur.s.toFixed(2)),
     txCount: cur.n,
+    pendingCount: cur.p,
     prevSpent: Number(prev.s.toFixed(2)),
     prevThrough,
     history,

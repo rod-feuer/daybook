@@ -154,6 +154,111 @@ export function monthsSince(firstSeen: string | null): number {
 // The row's membership control: a labelled pill that says its state and
 // toggles it. "charge": this charge in or out of its plan (the vendor shelf).
 
+// Other vendors named like this one (Puccini's, Puccinis Smilcarmel In,
+// Puccini'spizzapacarmel In: one restaurant, three bank spellings), to combine
+// in one step instead of one Combine each. Nothing starts ticked: names that
+// share a first word can be different places (Chatham Bars Inn, Chatham
+// Crew), so each carries its count and category as the evidence, and Select
+// all is one click when they are one place. Separate undoes any of them.
+// Names that are different places but belong together (the Chatham shops,
+// all Vacations) take one category without being combined: Set category.
+function SimilarNames({
+  similar,
+  into,
+  cats,
+  onCombine,
+  onCategorize,
+}: {
+  similar: Summary["similar"];
+  into: string;
+  cats: Cat[];
+  onCombine: (merchants: string[]) => void;
+  onCategorize: (merchants: string[], categoryId: number) => void;
+}) {
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const all = ticked.size === similar.length;
+  const toggle = (m: string) =>
+    setTicked((t) => {
+      const n = new Set(t);
+      if (n.has(m)) n.delete(m);
+      else n.add(m);
+      return n;
+    });
+  return (
+    <div data-similar-names>
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="stat-label">Similar names</span>
+        <button
+          type="button"
+          className="tap text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+          onClick={() => setTicked(all ? new Set() : new Set(similar.map((v) => v.merchant)))}
+        >
+          {all ? "Clear" : "Select all"}
+        </button>
+      </div>
+      <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]" data-edge-list>
+        {similar.map((v) => (
+          <li key={v.merchant}>
+            <label className="tap flex cursor-pointer items-center gap-3 py-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={ticked.has(v.merchant)}
+                onChange={() => toggle(v.merchant)}
+                className="tap-native size-4 accent-[var(--accent)]"
+              />
+              <span className="min-w-0 flex-1 truncate font-medium">{v.displayName}</span>
+              <span className="shrink-0 text-xs text-[var(--muted)]">
+                {v.count} charge{v.count === 1 ? "" : "s"}
+                {v.categoryName ? ` · ${v.categoryName}` : ""}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {ticked.size === 0 ? (
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          Tick the ones that are {into} to combine them, or any to give them one category.
+        </p>
+      ) : (
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              onCombine([...ticked]);
+              setTicked(new Set());
+            }}
+            className="btn-ghost flex-1 text-xs"
+            data-combine-similar
+          >
+            Combine {ticked.size} into {into}
+          </button>
+          {/* A native select (DESIGN.md §2): choosing a category is the
+              action, for the ticked names only; each stays its own vendor. */}
+          <select
+            value=""
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              if (!id) return;
+              onCategorize([...ticked], id);
+              setTicked(new Set());
+            }}
+            aria-label={`Set a category for the ${ticked.size} ticked`}
+            className="btn-ghost select-caret min-w-0 flex-1 cursor-pointer appearance-none pr-8 text-left text-xs"
+            data-categorize-similar
+          >
+            <option value="">Set category for {ticked.size}…</option>
+            {cats.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.icon} {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Merge this vendor with another. The only decision surfaced is the resulting
 // NAME — which silently determines the survivor (canonical), so the user never
 // reasons about "primary". Defaults to the cleaner name; a preview shows the
@@ -500,6 +605,8 @@ export function MerchantBody({
   amountHint,
   vendors,
   onCombine,
+  onCombineMany,
+  onCategorizeMany,
   onRemoveSplit,
 }: {
   data: Summary;
@@ -513,6 +620,8 @@ export function MerchantBody({
   amountHint?: number | null;
   vendors: Vendor[];
   onCombine: (loser: string, primary: string, alias?: string, categoryId?: number | null) => void;
+  onCombineMany: (losers: string[]) => void; // several similar names into this vendor
+  onCategorizeMany: (merchants: string[], categoryId: number) => void; // one category for several similar names, kept apart
   onRemoveSplit: (id: number, applied: number) => void;
   onOpenPlan: (series: string) => void; // one of this vendor's plans, with Back
 }) {
@@ -881,6 +990,9 @@ export function MerchantBody({
           <p data-suggested-plan className="text-xs text-[var(--muted)]">
             Suggested plan, not counted yet. Add it to count it as a bill; Not recurring dismisses it.
           </p>
+        )}
+        {data.similar.length > 0 && (
+          <SimilarNames similar={data.similar} into={data.displayName} cats={cats} onCombine={onCombineMany} onCategorize={onCategorizeMany} />
         )}
         {/* One actions row, one style: the §2 verbs. Combine is a disclosure —
             its panel drops below the row only while in use. */}

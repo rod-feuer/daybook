@@ -36,6 +36,8 @@ import {
   getBudgetsFull,
   deleteBudget,
   setMonthBudget,
+  monthThroughDay,
+  similarVendors,
   budgetPlan,
   setTransactionNote,
   setTransactionExcluded,
@@ -80,6 +82,14 @@ before(() => {
   CAT_X = addCat("Home");
 });
 cleanDbBeforeEach(["categories"]); // categories are created once in before()
+
+// A plan the user added (durable plans): only these count as bills, and only
+// these anchor the merge queue's stray matching. Fixtures that insert a
+// detected plan as a user's bill mark it added with this.
+const added = (...keys: string[]) => {
+  for (const k of keys)
+    getDb().prepare("INSERT OR IGNORE INTO plans (key, vendor, amount, cadence, anchorDate) VALUES (?, ?, 0, 'monthly', '2026-01-01')").run(k, k);
+};
 
 test("merchantSummary carries next-due and match-rule overrides, and whether any override exists", () => {
   // WHY: the recurrings page's inline editor was the only place next-due and
@@ -829,6 +839,7 @@ test("recurring-match picks the renamed vendor by name, not a same-amount decoy"
   // The orphan: a new descriptor for Acme, uncategorized, posting ~1 month later.
   tx("Acme Power", { amount: -102, date: daysAgo(0), categoryId: null });
 
+  added("Acme Power Bill", "Zeta Water");
   const g = recurringMatchSuggestions(new Set()).find((x) =>
     x.variants.some((v) => v.merchant === "Acme Power")
   );
@@ -853,6 +864,7 @@ test("a borderline name match surfaces as a low-confidence suggestion", () => {
   // human, below the 0.9 auto-bar.
   tx("Metronet", { amount: -93, date: daysAgo(0), categoryId: null });
 
+  added("Metro Fibernet L Metfibenet");
   const g = recurringMatchSuggestions(new Set()).find((x) =>
     x.variants.some((v) => v.merchant === "Metronet")
   );
@@ -876,6 +888,7 @@ test("multiple stray descriptors of one vendor collapse into a single suggestion
   tx("Upgrade", { amount: -100, date: daysAgo(1), categoryId: null });
   tx("Upgrade, Inc. Co Entry Descr", { amount: -100, date: daysAgo(2), categoryId: null });
 
+  added("Upgrade, Inc. Payment");
   const s = recurringMatchSuggestions(new Set());
   const up = s.filter((g) => g.canonical === "Upgrade, Inc. Payment");
   assert.equal(up.length, 1, "the two strays form ONE card, not two");
@@ -1217,20 +1230,82 @@ test("auto-split children carry the rule's exact signed amounts and categories; 
   assert.equal(parent.excluded, 1);
 });
 
-test("a pending charge is not split until it posts", () => {
-  // WHY: a sync replaces a pending row (remove + add). If the pending row had
-  // been split, it comes back un-excluded while its child rows survive, and
-  // the charge counts twice. Found by splitting the newest row in a real DB
-  // copy and letting the launch sync run. Rules wait for the posted row.
+test("a pending charge is split while it waits, and its parts follow it through the sync", () => {
+  // WHY: a combined bill (one insurer, a home and a car) that is pending sat
+  // whole in one category until it posted, overstating that category and
+  // understating the others for days. Split it now; but a sync replaces a
+  // pending row (drop + add under a new id), and parts that outlived their
+  // parent would count the charge twice. So: the posted row ends up split
+  // exactly once, and what counts is the charge's amount, never more.
   createSplitRule("chubb", 1115.55, [
     { categoryId: CAT_X, amount: 847.75, label: "Home" },
-    { categoryId: CAT, amount: 267.8, label: "Other" },
+    { categoryId: CAT, amount: 267.8, label: "Car" },
   ]);
-  tx("Chubb Insurance", { amount: -1115.55, categoryId: CAT_X });
-  getDb().prepare("UPDATE transactions SET pending = 1 WHERE merchant = 'Chubb Insurance'").run();
-  assert.equal(applySplitRules(), 0, "pending: left alone");
-  getDb().prepare("UPDATE transactions SET pending = 0 WHERE merchant = 'Chubb Insurance'").run();
-  assert.equal(applySplitRules(), 1, "posted: split");
+  const acct = [{ account_id: "a1", name: "Checking" }];
+  const charge = (id: string, date: string, amount: number, pending: boolean) => ({
+    accounts: acct,
+    transactions: [{ transaction_id: id, account_id: "a1", date, name: "Chubb", merchant_name: "Chubb", amount, pending }],
+  });
+  const counted = () =>
+    (getDb().prepare("SELECT ROUND(SUM(amount), 2) AS s FROM transactions WHERE excluded = 0").get() as { s: number }).s;
+  const parts = () =>
+    getDb().prepare("SELECT hash, amount, categoryId, pending FROM transactions WHERE hash LIKE '%:s%' ORDER BY hash").all() as {
+      hash: string; amount: number; categoryId: number; pending: number;
+    }[];
+
+  importPlaidTransactions([charge("p1", "2026-10-03", 1115.55, true)]);
+  assert.equal(applySplitRules(), 1, "pending: split now");
+  assert.deepEqual(
+    parts().map((c) => [c.amount, c.categoryId, c.pending]),
+    [[-847.75, CAT_X, 1], [-267.8, CAT, 1]],
+    "the parts carry the rule's categories, pending like their parent"
+  );
+  assert.equal(counted(), -1115.55, "counted once, in its parts");
+
+  // It posts under a new id: the pending row and its parts go, the posted row splits.
+  importPlaidTransactions([charge("q1", "2026-10-05", 1115.55, false)]);
+  assert.equal(counted(), -1115.55, "between the import and the split, the posted row counts whole, not on top of stale parts");
+  assert.equal(applySplitRules(), 1);
+  assert.deepEqual(parts().map((c) => [c.hash, c.pending]), [["q1:s0", 0], ["q1:s1", 0]], "only the posted row's parts, posted");
+  assert.equal(counted(), -1115.55);
+});
+
+test("a split pending charge that posts in place keeps its parts only while they still add up", () => {
+  // WHY: Plaid can flip a pending row to posted under the same id, sometimes
+  // at a different amount. Parts at the old amount would misstate the bill,
+  // and parts left pending would read as provisional forever.
+  createSplitRule("chubb", 1115.55, [
+    { categoryId: CAT_X, amount: 847.75, label: "Home" },
+    { categoryId: CAT, amount: 267.8, label: "Car" },
+  ]);
+  const pull = (amount: number, pending: boolean) => ({
+    accounts: [{ account_id: "a1", name: "Checking" }],
+    transactions: [{ transaction_id: "p1", account_id: "a1", date: "2026-10-03", name: "Chubb", merchant_name: "Chubb", amount, pending }],
+  });
+  const state = () => ({
+    parent: (getDb().prepare("SELECT excluded FROM transactions WHERE hash = 'p1'").get() as { excluded: number }).excluded,
+    parts: (getDb().prepare("SELECT pending FROM transactions WHERE hash LIKE 'p1:s%'").all() as { pending: number }[]).map((r) => r.pending),
+  });
+  importPlaidTransactions([pull(1115.55, true)]);
+  applySplitRules();
+  importPlaidTransactions([pull(1115.55, false)]);
+  assert.equal(applySplitRules(), 0, "already split");
+  assert.deepEqual(state(), { parent: 1, parts: [0, 0] }, "same amount: the parts post with it");
+
+  importPlaidTransactions([pull(1120.0, false)]);
+  applySplitRules();
+  assert.deepEqual(state(), { parent: 0, parts: [] }, "new amount: no rule fits, so the charge counts whole");
+});
+
+test("the category shelf counts a pending charge as pending, not posted", () => {
+  // WHY: the header said "4 posted" over a list holding a pending charge.
+  // Beside the upcoming bills, "posted" claims the bank has settled every
+  // charge counted; one still pending can change or vanish.
+  tx("Water", { amount: -40, date: "2025-06-02", categoryId: CAT });
+  tx("Power", { amount: -90, date: "2025-06-03", categoryId: CAT });
+  getDb().prepare("UPDATE transactions SET pending = 1 WHERE merchant = 'Power'").run();
+  const c = categorySummary(CAT, "2025-06")!;
+  assert.deepEqual([c.txCount, c.pendingCount], [2, 1], "two counted, one of them pending");
 });
 
 test("undo split removes the children, restores the parent, and deletes the rule", () => {
@@ -2809,13 +2884,16 @@ test("an uncategorized duplicate candidate is deferred to the merge, which names
   for (const d of [daysAgo(88), daysAgo(58), last]) tx("Dgappcare Chicago", { amount: -29, date: d, categoryId: home, recurringId: rid });
   tx("Dga", { amount: -29.41, date: daysAgo(0), categoryId: null });
 
+  added("Dgappcare Chicago");
   const merge = allMergeSuggestions().find((g) => g.variants.some((v) => v.merchant === "Dga"));
   assert.ok(merge && merge.canonical === "Dgappcare Chicago", "the merge queue holds Dga as a candidate for the bill");
   assert.ok(merge!.lowConfidence, "a borderline name: the card is a possible match");
-  assert.match(merge!.note ?? "", /combining sets its category to Carmel Home \(defer\)/, "the possible-match card says what Combine sets");
+  assert.match(merge!.note ?? "", /it joins that bill and takes its category, Carmel Home \(defer\)/, "the possible-match card says what Combine does: joins the bill, sets the category");
 
   const before = categorizeSuggestions();
-  assert.deepEqual(before.deferred, [{ merchant: "Dga", count: 1, to: "Dgappcare Chicago" }], "the category queue defers Dga to the merge");
+  assert.deepEqual(before.deferred.map(({ merchant, count, to }) => ({ merchant, count, to })), [{ merchant: "Dga", count: 1, to: "Dgappcare Chicago" }], "the category queue defers Dga to the merge");
+  // The card rides along, with the bill's evidence, so a row can answer it.
+  assert.deepEqual(before.deferred[0].merge.bill, { name: "Dgappcare Chicago", amount: 29, cadence: "monthly", day: Number(daysAgo(28).slice(8, 10)) });
   assert.ok(!before.suggestions.some((s) => s.merchant === "Dga"), "no proposal of its own");
   assert.equal(before.needsModelCount, 0, "and the model is not asked about it");
   await withModelApis({ typesafe: true }, () => ({ choice: "Other", confidence: 0.5, probabilities: { Other: 0.5 } }), async (sent) => {
@@ -3349,4 +3427,285 @@ test("the budget plan's chart carries each month's spend so far and the same mon
   const plan = categorySummary(CAT, ym(0))!.budgetEntry.plan;
   assert.deepEqual([plan[0].spent, plan[0].lastYear], [120, 0], "this month: spent so far; nothing a year ago");
   assert.deepEqual([plan[1].month, plan[1].spent, plan[1].lastYear], [ym(1), null, 2400], "next month: not spent yet; last year's $2,400");
+});
+
+// WHY: re-adding a bank in Plaid (or Plaid replacing a link, as Chase did on
+// 2026-10-02) issues new transaction_ids for every charge already held. Keyed
+// on the id, the next sync imported months of history a second time: every
+// figure since the last CSV import doubled for that bank.
+test("a relinked bank's charges take over the rows already held instead of importing twice", () => {
+  const pull = (prefix: string, accountId: string) => ({
+    accounts: [{ account_id: accountId, name: "Rod Checking" }],
+    transactions: [
+      { transaction_id: `${prefix}-kroger`, account_id: accountId, date: "2026-07-03", name: "KROGER #123", merchant_name: "Kroger", amount: 84.12, pending: false },
+      // Two identical coffees on one day are two charges, not one.
+      { transaction_id: `${prefix}-cof1`, account_id: accountId, date: "2026-07-04", name: "Starbucks", merchant_name: "Starbucks", amount: 5.25, pending: false },
+      { transaction_id: `${prefix}-cof2`, account_id: accountId, date: "2026-07-04", name: "Starbucks", merchant_name: "Starbucks", amount: 5.25, pending: false },
+      { transaction_id: `${prefix}-gym`, account_id: accountId, date: "2026-07-05", name: "Gym", merchant_name: "Gym", amount: 50, pending: false },
+    ],
+  });
+  importPlaidTransactions([pull("old", "acct-old")]);
+  const db = getDb();
+  const kroger = db.prepare("SELECT id FROM transactions WHERE hash = 'old-kroger'").get() as { id: number };
+  db.prepare("UPDATE transactions SET categoryId = ?, note = 'weekly shop' WHERE hash = 'old-kroger'").run(CAT);
+  db.prepare("INSERT INTO plan_charges (hash, key) VALUES ('old-gym', 'Gym')").run();
+  db.prepare("INSERT INTO transactions (date, merchant, rawMerchant, amount, account, source, hash) VALUES ('2026-07-05', 'Gym — Kids', 'Gym — Kids', -20, 'Rod Checking', 'plaid', 'old-gym:s0')").run();
+
+  // The bank is relinked: the same charges, new ids, a new account id. One new
+  // charge arrives alongside them.
+  const relinked = pull("new", "acct-new");
+  relinked.transactions.push({ transaction_id: "new-shell", account_id: "acct-new", date: "2026-07-06", name: "Shell", merchant_name: "Shell", amount: 40, pending: false });
+  const res = importPlaidTransactions([relinked]);
+
+  const count = (db.prepare("SELECT COUNT(*) n FROM transactions WHERE source = 'plaid' AND hash NOT LIKE '%:s%'").get() as { n: number }).n;
+  assert.deepEqual([res.relinked, res.inserted, count], [4, 1, 5], "four charges taken over, one genuinely new, nothing doubled");
+  const k = db.prepare("SELECT id, categoryId, note FROM transactions WHERE hash = 'new-kroger'").get() as { id: number; categoryId: number; note: string };
+  assert.deepEqual([k.id, k.categoryId, k.note], [kroger.id, CAT, "weekly shop"], "the row keeps its id, category and note");
+  assert.equal((db.prepare("SELECT key FROM plan_charges WHERE hash = 'new-gym'").get() as { key: string } | undefined)?.key, "Gym", "its plan follows the new id");
+  assert.equal((db.prepare("SELECT COUNT(*) n FROM transactions WHERE hash = 'new-gym:s0'").get() as { n: number }).n, 1, "and so does its split part");
+
+  const again = importPlaidTransactions([relinked]);
+  assert.deepEqual([again.relinked, again.inserted], [0, 0], "the next sync is a no-op");
+});
+
+test("a new charge that merely resembles a held one, still in the pull, is not taken over", () => {
+  // A held row the pull still carries by its own id is a live charge, so a
+  // same-day, same-amount charge from the same vendor is a second charge.
+  const item = (txns: { id: string; amount: number }[]) => ({
+    accounts: [{ account_id: "a1", name: "Card" }],
+    transactions: txns.map((t) => ({ transaction_id: t.id, account_id: "a1", date: "2026-08-01", name: "Uber", merchant_name: "Uber", amount: t.amount, pending: false })),
+  });
+  importPlaidTransactions([item([{ id: "u1", amount: 12 }])]);
+  const res = importPlaidTransactions([item([{ id: "u1", amount: 12 }, { id: "u2", amount: 12 }])]);
+  assert.deepEqual([res.relinked, res.inserted], [0, 1]);
+});
+
+test("a relinked charge matches even when the new link sends Plaid's cleaned-up name instead of the bank's", () => {
+  // The real relink of 2026-10-02: the old link stored "Benjamin Franklin Pl"
+  // (the bank's descriptor, no merchant_name); the new one sent merchant_name
+  // "Ben Franklin Plumbing" with that same descriptor as `name`. Matching on
+  // merchant_name alone imported 24 charges a second time.
+  const acct = [{ account_id: "a1", name: "Platinum" }];
+  importPlaidTransactions([{ accounts: acct, transactions: [
+    { transaction_id: "old-bf", account_id: "a1", date: "2026-08-12", name: "Benjamin Franklin Pl", merchant_name: null, amount: 215, pending: false },
+  ] }]);
+  const res = importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Platinum" }], transactions: [
+    { transaction_id: "new-bf", account_id: "a2", date: "2026-08-12", name: "Benjamin Franklin Pl", merchant_name: "Ben Franklin Plumbing", amount: 215, pending: false },
+  ] }]);
+  assert.deepEqual([res.relinked, res.inserted], [1, 0]);
+});
+
+test("a loan's own transactions stay out of the ledger: the payment from checking is the spending", () => {
+  // A relinked Chase brought its mortgage along, and the mortgage account's
+  // records of three payments came in as $14,583 of income. The payment out
+  // of checking already counts; the loan side is a balance, not spending.
+  const res = importPlaidTransactions([{
+    accounts: [{ account_id: "chk", name: "Checking", type: "depository" }, { account_id: "mtg", name: "MORTGAGE LOAN", type: "loan" }],
+    transactions: [
+      { transaction_id: "pay-out", account_id: "chk", date: "2026-09-01", name: "CHASE MORTGAGE PMT", merchant_name: null, amount: 4861.04, pending: false },
+      { transaction_id: "pay-in", account_id: "mtg", date: "2026-09-01", name: "PAYMENT", merchant_name: null, amount: -4861.04, pending: false },
+    ],
+  }]);
+  const accounts = (getDb().prepare("SELECT account FROM transactions WHERE source = 'plaid' AND hash IN ('pay-out', 'pay-in')").all() as { account: string }[]).map((r) => r.account);
+  assert.deepEqual([res.inserted, accounts], [1, ["Checking"]]);
+});
+
+test("a relinked charge with no name in common is still matched when it's the only one in its slot", () => {
+  // Grubhub orders came back from the new link as "Grubhub" where the old one
+  // said "Sweetnew": nothing to compare by name. One held charge dropped from
+  // the pull on that account, day and amount is that charge; two would be a
+  // guess, so they import rather than merge.
+  const acct = [{ account_id: "a1", name: "Gold" }];
+  importPlaidTransactions([{ accounts: acct, transactions: [
+    { transaction_id: "old-sw", account_id: "a1", date: "2026-08-07", name: "SWEETNEW", merchant_name: null, amount: 31.4, pending: false },
+    { transaction_id: "old-a", account_id: "a1", date: "2026-08-09", name: "CAFE ONE", merchant_name: null, amount: 9, pending: false },
+    { transaction_id: "old-b", account_id: "a1", date: "2026-08-09", name: "KIOSK TWO", merchant_name: null, amount: 9, pending: false },
+  ] }]);
+  const res = importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Gold" }], transactions: [
+    { transaction_id: "new-sw", account_id: "a2", date: "2026-08-07", name: "Grubhub", merchant_name: "Grubhub", amount: 31.4, pending: false },
+    { transaction_id: "new-x", account_id: "a2", date: "2026-08-09", name: "Square Inc", merchant_name: "Square", amount: 9, pending: false },
+  ] }]);
+  assert.deepEqual([res.relinked, res.inserted], [1, 1], "the lone Grubhub slot matches; the ambiguous $9 doesn't");
+});
+
+// WHY: combines, name cleanups and vendor shelves key on a charge's stored
+// name. The 2026-10-02 relink sent Plaid's cleaned-up names where the old link
+// had sent the bank's descriptor, and the import overwrote the stored names:
+// 69 charges fell out of the vendor the user had combined them into.
+test("a re-pulled charge keeps the name it was stored under, so it stays in its combined vendor", () => {
+  const db = getDb();
+  importPlaidTransactions([{ accounts: [{ account_id: "a1", name: "Gold" }], transactions: [
+    { transaction_id: "old-sr", account_id: "a1", date: "2026-09-01", name: "Southern Ridge Landscaindianapolis", merchant_name: null, amount: 2600.72, pending: false },
+  ] }]);
+  db.prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge Landscaindianapolis', 'Southern')").run();
+  importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Gold" }], transactions: [
+    { transaction_id: "new-sr", account_id: "a2", date: "2026-09-01", name: "Southern Ridge Landscaindianapolis", merchant_name: "Southern Ridge", amount: 2600.72, pending: false },
+  ] }]);
+  const row = db.prepare("SELECT merchant, rawMerchant FROM transactions WHERE hash = 'new-sr'").get() as { merchant: string; rawMerchant: string };
+  assert.deepEqual(row, { merchant: "Southern Ridge Landscaindianapolis", rawMerchant: "Southern Ridge Landscaindianapolis" });
+});
+
+test("a relinked charge's new name becomes an alias, so the vendor's next charges join it", () => {
+  // The Oct 1 Southern Ridge charge posted under the new link's name, "Southern
+  // Ridge", which no charge or combine knew, so it sat apart from Southern. The
+  // relink had already matched Sep 1's charge, stored as "Southern Ridge
+  // Landscaindianapolis", to that same new name: that pair is the alias.
+  const db = getDb();
+  db.prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge Landscaindianapolis', 'Southern')").run();
+  importPlaidTransactions([{ accounts: [{ account_id: "a1", name: "Gold" }], transactions: [
+    { transaction_id: "old-sr", account_id: "a1", date: "2026-09-01", name: "Southern Ridge Landscaindianapolis", merchant_name: null, amount: 2600.72, pending: false },
+  ] }]);
+  const res = importPlaidTransactions([{ accounts: [{ account_id: "a2", name: "Gold" }], transactions: [
+    { transaction_id: "new-sr", account_id: "a2", date: "2026-09-01", name: "SOUTHERNRIDGELANDSCAINDIANAPOLIS IN", merchant_name: "Southern Ridge", amount: 2600.72, pending: false },
+    { transaction_id: "new-oct", account_id: "a2", date: "2026-10-01", name: "SOUTHERNRIDGELANDSCAINDIANAPOLIS IN", merchant_name: "Southern Ridge", amount: 412.26, pending: false },
+  ] }]);
+  const links = Object.fromEntries((db.prepare("SELECT alias, primaryMerchant FROM merchant_links").all() as { alias: string; primaryMerchant: string }[]).map((r) => [r.alias, r.primaryMerchant]));
+  assert.equal(res.aliased, 1);
+  assert.equal(canonicalMerchant("Southern Ridge", links), "Southern", "the new name resolves to the combined vendor");
+  // A name already in use is the user's own vendor, never re-pointed.
+  tx("Kroger", { amount: -5, date: "2026-07-01" });
+  importPlaidTransactions([{ accounts: [{ account_id: "a1", name: "Gold" }], transactions: [
+    { transaction_id: "k-old", account_id: "a1", date: "2026-08-01", name: "KROGER 941", merchant_name: null, amount: 30, pending: false },
+  ] }]);
+  importPlaidTransactions([{ accounts: [{ account_id: "a3", name: "Gold" }], transactions: [
+    { transaction_id: "k-new", account_id: "a3", date: "2026-08-01", name: "KROGER 941", merchant_name: "Kroger", amount: 30, pending: false },
+  ] }]);
+  assert.equal(db.prepare("SELECT 1 FROM merchant_links WHERE alias = 'Kroger'").get(), undefined, "Kroger stays its own vendor");
+});
+
+test("a name already combined into a vendor is never offered to another vendor's bill", () => {
+  // "Southern Ridge" (an alias of the user's combined vendor Southern) was
+  // offered to the monthly "South Central Inmartinsville In" bill on a shared
+  // "South", the same day and a similar amount. Combining it would have
+  // folded a landscaper into the electric co-op.
+  const last = daysAgo(28);
+  const rid = Number(
+    getDb()
+      .prepare(`INSERT INTO recurrings (merchant, categoryId, avgAmount, cadence, lastDate, nextDate, count) VALUES (?,?,?,?,?,?,?)`)
+      .run("South Central Inmartinsville In", CAT, -400, "monthly", last, daysAgo(-2), 3).lastInsertRowid
+  );
+  tx("South Central Inmartinsville In", { amount: -390, date: daysAgo(58), categoryId: CAT, recurringId: rid });
+  tx("South Central Inmartinsville In", { amount: -400, date: last, categoryId: CAT, recurringId: rid });
+  tx("Southern Ridge", { amount: -412.26, date: daysAgo(0), categoryId: CAT });
+  added("South Central Inmartinsville In");
+  const offered = () => recurringMatchSuggestions(new Set()).some((g) => g.variants.some((v) => v.merchant === "Southern Ridge"));
+  assert.equal(offered(), true, "uncombined, the shared 'South' still surfaces it, low-confidence");
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge', 'Southern')").run();
+  assert.equal(offered(), false, "combined into Southern, it isn't offered elsewhere");
+});
+
+test("a regular bill keeps its plan beside one or two odd charges, even after it ended", () => {
+  // Southern: seven $400 monthly payments (Jul 2025 – Jan 2026), then, once
+  // the user combined a landscaper into the vendor, a $2,600.72 job and a
+  // $412.26 charge. The odd two broke the amount test for the whole vendor,
+  // and the plan's past charges came loose. The $412 is near $400 but nine
+  // months on: not the bill's history.
+  const days = ["2025-07-13", "2025-08-20", "2025-09-03", "2025-10-13", "2025-11-04", "2025-12-08", "2026-01-13"];
+  for (const d of days) tx("Southern", { amount: -400, date: d, categoryId: CAT });
+  tx("Southern", { amount: -2600.72, date: "2026-09-01", categoryId: CAT });
+  tx("Southern", { amount: -412.26, date: "2026-10-01", categoryId: CAT });
+  detectRecurrings();
+  const linked = (getDb().prepare("SELECT amount FROM transactions WHERE merchant = 'Southern' AND recurringId IS NOT NULL ORDER BY date").all() as { amount: number }[]).map((r) => r.amount);
+  assert.deepEqual(linked, days.map(() => -400), "the seven $400 charges hold the plan; the two odd ones stay out");
+
+  // Three odd charges are usage or a variable bill: left to the other paths.
+  tx("Southern", { amount: -1800, date: "2026-10-15", categoryId: CAT });
+  detectRecurrings();
+  assert.equal((getDb().prepare("SELECT COUNT(*) n FROM transactions WHERE merchant = 'Southern' AND recurringId IS NOT NULL").get() as { n: number }).n, 0);
+});
+
+test("similar names: one place's bank spellings match; a shared short start doesn't", () => {
+  // Puccini's posts as "Puccini S Pizza", "Puccinis Smilcarmel In" and
+  // "Puccini'spizzapacarmel In": one restaurant, offered to combine at once.
+  // Chatham and Charleston's share only "Cha"; Southern and South Central
+  // only "South": never offered.
+  for (const m of ["Puccini S Pizza", "Puccinis Smilcarmel In", "Puccini'spizzapacarmel In", "Chatham", "Charlestons Carmel", "Southern", "South Central Inmartinsville In"])
+    tx(m, { amount: -20, date: "2026-09-01", categoryId: CAT });
+  getDb().prepare("INSERT INTO recurring_settings (merchant, alias) VALUES ('Puccini S Pizza', 'Puccini''s')").run();
+  const names = (m: string) => similarVendors(m).map((v) => v.merchant).sort();
+  assert.deepEqual(names("Puccini S Pizza"), ["Puccini'spizzapacarmel In", "Puccinis Smilcarmel In"]);
+  assert.deepEqual(names("Chatham"), [], "Chatham is not Charleston's");
+  assert.deepEqual(names("Southern"), [], "Southern is not South Central");
+  // A name already combined is part of its vendor, not a candidate.
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Puccinis Smilcarmel In', 'Puccini S Pizza')").run();
+  assert.deepEqual(names("Puccini S Pizza"), ["Puccini'spizzapacarmel In"]);
+});
+
+test("only a plan the user added anchors a stray: a detected guess draws nothing", () => {
+  // The detector read Charleston's, a restaurant, as a quarterly bill, and
+  // never asked; "Chatham" (0.82 on a shared "Cha", the same weeks, a similar
+  // amount) was offered to it. A guess counts nowhere else since durable plans.
+  const last = daysAgo(40);
+  const rid = Number(
+    getDb()
+      .prepare(`INSERT INTO recurrings (merchant, categoryId, avgAmount, cadence, lastDate, nextDate, count) VALUES (?,?,?,?,?,?,?)`)
+      .run("Charlestcarmel In", CAT, -100, "quarterly", last, daysAgo(-50), 4).lastInsertRowid
+  );
+  for (const d of [daysAgo(220), daysAgo(130), last]) tx("Charlestcarmel In", { amount: -100, date: d, categoryId: CAT, recurringId: rid });
+  tx("Chatham", { amount: -90, date: daysAgo(10), categoryId: null });
+  const offered = () => recurringMatchSuggestions(new Set()).some((g) => g.variants.some((v) => v.merchant === "Chatham"));
+  assert.equal(offered(), false, "a guessed bill anchors nothing");
+  added("Charlestcarmel In");
+  assert.equal(offered(), true, "once the user adds it, the same stray is offered (low-confidence)");
+});
+
+test("a charge keeps the bank's own text beside its name, so a guessed name can be checked", () => {
+  // Plaid filed a $35 Platinum charge as "Commissary"; the bank's text,
+  // "GP001 - CAPITOL COMMINDIANAPOLIS IN", was thrown away, and it is the
+  // only clue to where the charge was.
+  const db = getDb();
+  db.exec("ALTER TABLE transactions DROP COLUMN descriptor"); // a server started before the column
+  const pull = (name: string, merchant_name: string | null) => [{ accounts: [{ account_id: "a1", name: "Platinum" }], transactions: [
+    { transaction_id: "cm", account_id: "a1", date: "2026-10-02", name, merchant_name, amount: 35, pending: false },
+  ] }];
+  importPlaidTransactions(pull("GP001 - CAPITOL COMMINDIANAPOLIS IN", "Commissary"));
+  const id = (db.prepare("SELECT id FROM transactions WHERE hash = 'cm'").get() as { id: number }).id;
+  assert.equal(transactionById(id)!.bankText, "GP001 - CAPITOL COMMINDIANAPOLIS IN");
+  importPlaidTransactions(pull("SOMETHING ELSE", "Commissary"));
+  assert.equal(transactionById(id)!.bankText, "GP001 - CAPITOL COMMINDIANAPOLIS IN", "kept as first seen");
+  // A CSV-imported charge kept the bank's text as its raw name all along.
+  tx("Southern", { amount: -400, date: "2026-01-13", hash: "csv-southern" });
+  db.prepare("UPDATE transactions SET source = 'copilot', rawMerchant = 'Aplpay In *southern' WHERE hash = 'csv-southern'").run();
+  const csv = (db.prepare("SELECT id FROM transactions WHERE hash = 'csv-southern'").get() as { id: number }).id;
+  assert.equal(transactionById(csv)!.bankText, "Aplpay In *southern");
+});
+
+test("the header's period runs to the month's last counted day; a finished month is all of it", () => {
+  // "Oct 1–4" is the one place the period is said, and the comparisons cover
+  // the same days, so it must end where the figures do: a charge left out of
+  // totals (excluded, or a Transfers category) doesn't move it.
+  const now = new Date();
+  const ym = now.toISOString().slice(0, 7);
+  const day = now.getUTCDate();
+  assert.equal(monthThroughDay(ym), 0, "nothing counted yet: the header says so");
+  if (day >= 3) {
+    tx("Kroger", { amount: -40, date: `${ym}-02`, categoryId: CAT });
+    tx("Kroger", { amount: -40, date: `${ym}-${String(day).padStart(2, "0")}`, categoryId: CAT, excluded: 1 });
+    assert.equal(monthThroughDay(ym), 2, "the excluded charge on a later day doesn't extend the period");
+  }
+  assert.equal(monthThroughDay("2025-02"), 28, "a finished month is the whole month");
+});
+
+test("a stray is offered to a plan when it echoes any name the plan's vendor goes by", () => {
+  // "Every Media" (a new Plaid name) scored 0.796 against the plan's key
+  // "Every Every.to-chargbrooklyn" but 0.82 against the vendor's combined
+  // "Every Every.to Charg": same card, $20, the 4th. Compared with the key
+  // alone it was offered nowhere and sat uncategorized outside its plan.
+  const last = daysAgo(30);
+  const rid = Number(getDb().prepare(`INSERT INTO recurrings (merchant, categoryId, avgAmount, cadence, lastDate, nextDate, count) VALUES (?,?,?,?,?,?,?)`)
+    .run("Every Every.to-chargbrooklyn", CAT, -20, "monthly", last, daysAgo(0), 3).lastInsertRowid);
+  added("Every Every.to-chargbrooklyn");
+  for (const d of [daysAgo(90), daysAgo(60)]) tx("Every Every.to-chargbrooklyn", { amount: -20, date: d, categoryId: CAT, recurringId: rid });
+  tx("Every Every.to Charg", { amount: -20, date: last, categoryId: CAT, recurringId: rid });
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Every Every.to Charg', 'Every Every.to-chargbrooklyn')").run();
+  tx("Every Media", { amount: -20, date: daysAgo(0), categoryId: null });
+  // The guard: a name that echoes none of a vendor's names stays unoffered.
+  tx("Chatham", { amount: -20, date: daysAgo(0), categoryId: null });
+  // A short other name ("Adt", ADT's) isn't evidence: "Pad Thai" contains it.
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Adt', 'Every Every.to-chargbrooklyn')").run();
+  tx("Pad Thai", { amount: -20, date: daysAgo(0), categoryId: null });
+  const offered = (m: string) => recurringMatchSuggestions(new Set()).find((g) => g.variants.some((v) => v.merchant === m))?.canonical ?? null;
+  assert.equal(offered("Every Media"), "Every Every.to-chargbrooklyn");
+  assert.equal(offered("Chatham"), null);
+  assert.equal(offered("Pad Thai"), null);
 });

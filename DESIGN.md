@@ -115,12 +115,18 @@ and §3 carry over unchanged.
   filters, sort), and it must *look* interactive (visible affordance). Custom
   dropdowns only when the content is rich (the combine picker, the emoji grid).
   No disguised controls. *(One-pattern, Anchor)*
-- **Forward-looking figures are qualified — by a word, not a symbol.** Mid-month
-  net is shown projected with a "so far" actual; bills read "paid so far of $X
-  expected"; projections are withheld until enough of the month has elapsed. The
-  qualifier is said once where figures share a frame: the month is the header
-  picker, figure labels are sentence case ("Net", "Spent so far"), and each
-  projected figure carries its "$X so far". No ≈ or ~ in front of a figure. *(Honest)*
+- **The period is said once; figures are what has happened.** The header states
+  the days the page's figures cover, beside the month picker ("Oct 1–4"; "Sep
+  1–30" once the month is done), so no figure, card or row says "so far". The
+  summary card's figures are actuals over that period, each with its change
+  against the same days of last month ("▲ $1,204 (8%)"), from the first day;
+  the basis is said once, after the period, on the header's line ("Oct 1–4 ·
+  vs Sep 1–4"), not under each figure (IBCS UN 2.2: time, then scenario). A projection
+  is forward-looking and says so in words, in its two places only: the verdict
+  ("on pace to finish $4,732 under budget", withheld until enough of the month
+  has elapsed) and the chart's dashed line. A sheet that covers the header (the
+  category shelf on a phone) states the period itself. No ≈ or ~ in front of a
+  figure. *(Honest)*
 - **A toast is for what you can't see.** A success message appears only when
   the outcome is off-screen (a vendor combined, a category deleted, a split
   applied), spans many things (Apply all, Overrides reset, dismissed vendors
@@ -177,7 +183,7 @@ new floor). The audit that produced it lives in the session artifacts.
 | 24 | summary figures | `text-2xl` |
 
 Weights: 400 body · 500 names and labels · 600 titles and figures. Case: sentence case
-describes a figure ("Spent so far", "Left to pay"); uppercase, at 11px and
+describes a figure ("Spent", "Left to pay"); uppercase, at 11px and
 letter-spaced, names a section or a box ("BUDGET", "RECENT", "LAST 12
 MONTHS"). A label never shouts a qualifier. Tabular
 figures wherever numbers align.
@@ -193,7 +199,7 @@ on the dashboard and the Categories page): the spend fills in the accent at
 through the budget's period we are (pace). A category's colour is on its
 badge, never its bar; the recurring amount is in the row's caption and the
 shelf, not on the bar. Under a bar, what's left is said, in the same words on
-every page ("$416 left so far", "$1,350 over"): a spent / budget pair makes
+every page ("$416 left", "$1,350 over"): a spent / budget pair makes
 you subtract. The dashboard's spending chart carries the month's budget as a
 dotted line, the summary card's figure, withheld when material spending sits
 outside the budget (the curve would count what the line doesn't).
@@ -205,30 +211,34 @@ and room for a difference under the amount). One radius for cards and controls (
 pills and tags; nothing else.
 
 **Summary card anatomy** — the month is said once, in the header picker, so the
-card does not repeat it. Figure labels are sentence case, one or two words, and
-carry the qualifier where one is due ("Spent so far"; a projected figure's
-"$X so far" beneath it), with the whole the bar measures in the panel's caption
+card does not repeat it, nor its days (the header's period does). Figure labels
+are sentence case, one or two words ("Net", "Spent", "Paid"), with the whole the
+bar measures in the panel's caption
 ("78% of $42,530"); one height on every page (no floor: a caveat on what the bar
 measures is a "?" hint beside the caption, never a line of its own, and a
 verdict is written to fit one line);
 then two panels centred on one line on the page's own 3:2 grid, run to the card's edges: the figures as columns
-across the chart card's width below — the first, the result (net, spent so
-far, paid so far), at the summary size and every other at the card-title
-size, on every page — and the budget
+across the chart card's width below — every figure at the summary size, in
+three columns on every page, the result (net, spent, paid)
+first: its place ranks it, since peers at two sizes read as a mistake, not a
+ranking — and the budget
 across the category card's (its text starting on that card's text), with the hairline
 in the middle of the gutter. The budget panel reads label, share, bar, then
 the verdict at the card-title size — "on pace to finish under budget",
 "2 overdue" — since every verdict describes the bar; counts that follow it
 ("· 20 upcoming · 60 paid", "· 6 not budgeted") are bookkeeping, a 12px muted
 caption on the same line, never the verdict's size. They stack below desktop width. One colour signal per card, the verdict's: only a finished
-month's net takes its colour.
+month's net takes its colour, and a delta under a figure reads in the muted
+text, its arrow saying the direction (and there is none before five days of
+the month: the labels and the verdict already say it is early).
 
-**Page anatomy** — header: title, optional one-line subtitle, the month picker
+**Page anatomy** — header: title, the period on the title's line (on a phone
+beneath it), the month picker
 in one slot on every page, page actions to its right (on a phone the title
 and the picker hold one row and the subtitle, or the transactions figure, sits beneath both). Then the summary card
 (the month). Transactions is the statement, and the exception: its net sits on
-the title's line at the card-title size with its count beside it ("217 shown ·
-so far"), because a second card above a day-by-day list would bury the
+the title's line at the card-title size with its count and the period beside it
+("217 shown · Oct 1–4"), because a second card above a day-by-day list would bury the
 statement; every header is the same height, so switching tabs doesn't jump.
 The month picker steps with ‹ › and reads the month in full. Then the toolbar — search, filters, sort — sitting directly
 above the list it acts on, never in the header and never above the summary.

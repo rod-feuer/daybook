@@ -315,6 +315,30 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
       close
     );
   }
+  // Several similar names into this vendor at once (the shelf's Similar
+  // names). Each is the same link a single Combine makes; the shelf stays
+  // open on the vendor, now holding their charges.
+  function combineMany(losers: string[]) {
+    if (target?.kind !== "merchant" || !mData) return;
+    const primary = mData.merchant;
+    return write(
+      async () => {
+        for (const alias of losers) await postJson("/api/recurrings/link", { alias, primary });
+      },
+      { success: `Combined ${losers.length} name${losers.length === 1 ? "" : "s"} into ${mData.displayName}`, error: "Couldn't combine — please try again" }
+    );
+  }
+  // One category for several similar names that stay separate vendors (the
+  // shelf's Similar names): each vendor moves as a whole, as on its own shelf.
+  function categorizeMany(merchants: string[], categoryId: number) {
+    const name = cats.find((c) => c.id === categoryId)?.name ?? "the category";
+    return write(
+      async () => {
+        for (const merchant of merchants) await postJson("/api/recurrings/recategorize", { merchant, categoryId });
+      },
+      { success: `Set ${merchants.length} vendor${merchants.length === 1 ? "" : "s"} to ${name}`, error: "Couldn't set the category — please try again" }
+    );
+  }
   function unlinkName(alias: string) {
     if (target?.kind !== "merchant") return;
     return write(
@@ -508,6 +532,8 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 amountHint={amountHint}
                 vendors={vendors}
                 onCombine={combineMerchant}
+                onCombineMany={combineMany}
+                onCategorizeMany={categorizeMany}
                 onRemoveSplit={(id, applied) =>
                   write(() => deleteJson(`/api/split-rules/${id}`), {
                     success: applied ? `Split removed · ${applied} charge${applied === 1 ? "" : "s"} restored` : "Split removed",

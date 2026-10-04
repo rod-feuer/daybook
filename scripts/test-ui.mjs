@@ -471,11 +471,16 @@ async function dashboardAnatomy(browser) {
     // read as a paragraph. A projected figure's frame is the "$X so far"
     // beneath it (the projection is the whole month, the actual is what has
     // posted). Net stays the summary size; income and expenses drop to the
-    // card-title size so the result outranks its parts.
+    // card-title size so the result outranks its parts. (Superseded: one size.)
     const forward = f.figs.every((x) => x.sub.includes("so far"));
     record("dashboard", "the three figures are in one frame and reconcile: income − expenses = net", f.figs.length === 3 && /^net( so far)?\|income( so far)?\|expenses( so far)?$/.test(f.figs.map((x) => x.label).join("|")) && Math.abs(income.value - expenses.value - net.value) <= 1, f.figs.map((x) => `${x.label} ${x.value}`).join(" | "));
     record("dashboard", "the card does not repeat the month, and a projected figure carries its actual so far beneath it", !f.repeatedMonth && f.frameWords === 0, `eyebrow=${f.repeatedMonth} · ${f.frameWords} frame word(s) · ` + (forward ? f.figs.map((x) => x.sub).join(" | ") : "not projecting in this fixture month"));
-    record("dashboard", "net is the summary figure; income and expenses are the card-title size", f.figs.length === 3 && net.px === "24px" && income.px === "15px" && expenses.px === "15px", f.figs.map((x) => x.px).join("/"));
+    // Peers in equal columns at one size: the result ranks by its place,
+    // first. 24px beside 15px read as a mistake, not a ranking.
+    record("dashboard", "net, income and expenses are one size (24px), net first", f.figs.length === 3 && [net, income, expenses].every((x) => x.px === "24px") && /^net/.test(f.figs[0].label), f.figs.map((x) => x.px).join("/"));
+    // One colour signal per card, the verdict's: a delta reads in the muted text.
+    const deltaColours = await page.evaluate(() => { const probe = (v) => { const p = document.createElement("span"); p.style.color = `var(${v})`; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }; const bad = probe("--bad"), good = probe("--good"); return [...document.querySelectorAll("[data-summary] [data-figure] ~ div *")].filter((e) => /▲|▼/.test(e.textContent)).map((e) => getComputedStyle(e).color).filter((c) => c === bad || c === good).length; });
+    record("dashboard", "the deltas under the figures carry no colour; the verdict is the card's one signal", deltaColours === 0, `${deltaColours} coloured delta(s)`);
     // The verdict is the card's sentence and reads first. Two panels: the
     // three figures as equal columns from the left, and the budget (its label,
     // its share, the bar, the note) to their right, level with them — one
@@ -560,35 +565,43 @@ async function restingActions(browser) {
 }
 
 async function partialMonthQualifiers(browser) {
+  // The period is said once, in the header beside the month picker ("Oct 1–4";
+  // "Sep 1–30" for a finished month), so no figure, card or row says "so far":
+  // it used to sit under every figure, in every label and under every bar.
+  // The summary card shows actuals, each against the same days of last month,
+  // from day one; the projection is the verdict's and the chart's.
   await withPage(browser, async (page) => {
-    const check = async (route, month, needles, expect) => {
+    const read = async (route, month) => {
       await page.goto(BASE + route, { waitUntil: "networkidle2" });
       await pickMonth(page, month);
-      const t = await lowerText(page);
-      for (const n of needles) {
-        const present = t.includes(n.toLowerCase());
-        record("qualifiers", `${route} ${month} "${n}"`, present === expect, expect ? (present ? "present" : "MISSING") : (present ? "SHOWN on a past month" : "absent"));
-      }
+      await page.waitForFunction(() => /\b1(–\d+)?$/.test(document.querySelector("header p, main p")?.textContent ?? "") || true, { timeout: 3000 }).catch(() => {});
+      await sleep(400);
+      return page.evaluate(() => {
+        const sub = [...document.querySelectorAll("header p, header span")].map((e) => e.textContent.trim().match(/([A-Z][a-z]{2} (?:1(?:–\d+)?|· nothing yet))(?: · vs [^·]+)?$/)?.[1]).find(Boolean) ?? null;
+        const card = (document.querySelector("[data-summary]")?.innerText ?? "").toLowerCase();
+        return { sub, card };
+      });
     };
-    await check("/", CUR, ["so far"], true); // "$X so far" under each figure
-    await check("/categories", CUR, ["spent so far"], true); // the label
-    await check("/recurrings", CUR, ["paid so far"], true); // the label
-    await check("/transactions", CUR, ["so far"], true); // the header caption; the net is the figure above it
-    await check("/", PAST, ["so far", ", projected"], false);
-    // A finished month's summary is plain actuals: no forward-looking word in the
-    // card. (Scoped to the card: the chart's legend says "Projected" on any month.)
-    const pastCard = (await page.evaluate(() => document.querySelector("[data-summary]")?.innerText ?? "")).toLowerCase();
+    for (const route of ["/", "/categories", "/recurrings", "/transactions"]) {
+      const cur = await read(route, CUR);
+      record("qualifiers", `${route} ${CUR}: the header states the period, and the card says no "so far"`, !!cur.sub && !cur.card.includes("so far"), `${cur.sub ?? "no period"}${cur.card.includes("so far") ? " · card says so far" : ""}`);
+      const past = await read(route, PAST);
+      record("qualifiers", `${route} ${PAST}: a finished month's period is the whole month`, !!past.sub && /1–(28|29|30|31)$/.test(past.sub), past.sub ?? "no period");
+    }
+    // Comparisons from day one, on the same days.
+    const dash = await read("/", CUR);
+    // The basis is said once, in the header ("Oct 1–4 · vs Sep 1–4"); each
+    // figure carries only its change.
+    const head = await page.evaluate(() => document.querySelector("header")?.innerText.replace(/\s+/g, " ") ?? "");
+    record("qualifiers", "the dashboard's figures carry their changes, and the header says once what they're against", /▲|▼|no change/.test(dash.card) && !/ vs /.test(dash.card) && /[A-Z][a-z]{2} 1(–\d+)? · vs [A-Z][a-z]{2}( 1(–\d+)?)?/.test(head), `${head.slice(0, 60)} | ${dash.card.replace(/\s+/g, " ").slice(0, 100)}`);
+    // A finished month's card is plain actuals: no forward-looking word.
+    const pastCard = (await read("/", PAST)).card;
     record("qualifiers", `/ ${PAST} summary card is plain actuals`, pastCard.length > 0 && !/so far|projected|expected|on pace/.test(pastCard), pastCard.replace(/\s+/g, " ").slice(0, 120));
-    await check("/categories", PAST, ["so far"], false);
-    await check("/recurrings", PAST, ["so far"], false);
-    await check("/transactions", PAST, ["so far"], false);
+    // The category shelf, a sheet over the header on a phone, says the period itself.
     await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
     await page.click("[data-drawer-row]"); await shelfIs(page, true); await shelfSettled(page);
-    const shelf = (await page.evaluate((sel) => document.querySelector(sel).innerText, shelfSel)).toLowerCase();
-    // "spent so far" always; mid-month the trend names the days it compares
-    // ("vs aug 1–27"), never a partial month against a whole "last month".
-    const trend = shelf.match(/vs ([a-z]{3} 1–\d+|last month)/)?.[0] ?? null;
-    record("qualifiers", "shelf (category, current month)", shelf.includes("spent so far") && trend !== "vs last month", trend ?? "no prior month in the fixture");
+    const shelf = await page.evaluate((sel) => document.querySelector(sel).innerText, shelfSel);
+    record("qualifiers", "shelf (category, current month): its header states the period and its cards say no \"so far\"", /[A-Z][a-z]{2} 1(–\d+)?/.test(shelf) && !/so far/i.test(shelf.split(/LAST 12 MONTHS|Last 12 months/)[0]), shelf.split("\n").slice(0, 4).join(" | "));
   });
 }
 
@@ -771,6 +784,98 @@ async function queueButtons(browser) {
       };
     });
     record("queue buttons", "with several queue rows on the page, accept is secondary, Dismiss is quiet, and no row adds a primary", r.accepts >= 2 && r.filled === 0 && r.bordered === r.accepts && r.dismissQuiet && r.primaries <= 1, `${r.accepts} accept buttons (${r.labels}), ${r.filled} filled, ${r.bordered} bordered; dismiss quiet=${r.dismissQuiet}; ${r.primaries} primaries on the page`);
+    // A merge card says its direction: which names fold into which vendor.
+    // The title alone, with the target listed among the names, read as a
+    // choice between equals.
+    const dir = await page.$$eval("[data-merge-direction]", (els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
+    record("queue buttons", "every merge card says which names it combines into which vendor", dir.length > 0 && dir.every((t) => /^Combine .+ \(\d+\)( · .+ \(\d+\))* into \S.*$/.test(t)), dir[0] ?? "no merge cards");
+  });
+}
+
+// Picks survive a reload: a category picked on a row is the user's answer
+// until that row is applied or dismissed. Applying one row reloads the queue
+// (the page refreshes behind it), and the reload put every other picked row
+// back to its proposal. Every request is answered here; no API is called.
+async function queuePicksSurvive(browser) {
+  await withPage(browser, async (page) => {
+    const cats = await (await fetch(BASE + "/api/categories")).json();
+    const exp = cats.filter((c) => c.kind === "expense");
+    const sug = (merchant, c) => ({ merchant, categoryId: c.id, categoryName: c.name, categoryIcon: c.icon, count: 1, source: "history" });
+    let list = [sug("Alpha Grill", exp[0]), sug("Beta Books", exp[0]), sug("Gamma Garden", exp[0])];
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (!req.url().endsWith("/api/category-suggestions")) return req.continue();
+      if (req.method() === "POST") {
+        const body = JSON.parse(req.postData() ?? "{}");
+        if (body.action === "apply") list = list.filter((x) => x.merchant !== body.merchant);
+        return req.respond({ status: 200, contentType: "application/json", body: "{\"ok\":true}" });
+      }
+      return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ suggestions: list, needsModelCount: 0, dismissedCount: 0, modelEnabled: false }) });
+    });
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-suggestion] [data-category-property] select");
+    // Pick a different category on the first two rows, then Apply the third.
+    const picked = await page.evaluate((other) => {
+      const rows = [...document.querySelectorAll("[data-suggestion]")];
+      for (const name of ["Alpha Grill", "Beta Books"]) {
+        const s = rows.find((li) => li.textContent.includes(name)).querySelector("[data-category-property] select");
+        s.value = String(other); s.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return String(other);
+    }, exp[1].id);
+    await sleep(300);
+    await page.evaluate(() => [...document.querySelectorAll("[data-suggestion]")].find((li) => li.textContent.includes("Gamma Garden")).querySelector("[data-queue-accept]").click());
+    await page.waitForFunction(() => ![...document.querySelectorAll("[data-suggestion]")].some((li) => li.textContent.includes("Gamma Garden")), { timeout: 8000 });
+    await sleep(800); // the page's refresh, and the queue's reload behind it
+    const after = await page.evaluate(() => [...document.querySelectorAll("[data-suggestion]")].map((li) => ({ name: li.querySelector(".truncate").textContent, value: li.querySelector("[data-category-property] select").value, edited: /edited/.test(li.textContent) })));
+    record("queue picks", "categories picked on rows not yet applied survive another row's Apply", after.length === 2 && after.every((r) => r.value === picked && r.edited), JSON.stringify(after));
+  });
+}
+
+// Similar names on the vendor shelf: one place's other bank spellings,
+// combined in one step instead of one Combine each. Nothing starts ticked
+// (names sharing a first word can be different places); Select all is one
+// click; Combine folds the ticked names in and the list empties.
+async function similarNames(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/transactions?vendor=" + encodeURIComponent("Jimmy Johns"), { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    await page.$eval("[data-drawer-row]", (r) => r.click()); await shelfIs(page, true); await shelfSettled(page);
+    await page.click(`${shelfSel} [data-open-vendor]`);
+    const shown = await page.waitForSelector(`${shelfSel} [data-similar-names]`, { timeout: 8000 }).then(() => true, () => false);
+    const before = await page.evaluate((sel) => {
+      const box = document.querySelector(`${sel} [data-similar-names]`);
+      return box ? { names: [...box.querySelectorAll("li")].map((li) => li.innerText.replace(/\s+/g, " ").trim()), ticked: box.querySelectorAll("input:checked").length, actions: !!box.querySelector("[data-combine-similar], [data-categorize-similar]") } : null;
+    }, shelfSel);
+    record("similar names", "a vendor's shelf lists its other spellings, none ticked, its actions waiting for a tick", shown && before && before.names.some((t) => /Jimmy John's/.test(t)) && before.ticked === 0 && !before.actions, JSON.stringify(before));
+    if (!shown) return;
+
+    // Set category: the ticked names take one category and stay their own vendors.
+    const catOf = async () => page.evaluate(async () => {
+      const r = await fetch("/api/transactions?q=" + encodeURIComponent("Jimmy John's") + "&limit=5").then((x) => x.json());
+      return (r.rows ?? []).filter((t) => /Jimmy John's/.test(t.merchant)).map((t) => t.categoryId);
+    });
+    const was = await catOf();
+    await page.click(`${shelfSel} [data-similar-names] li input`);
+    await page.waitForSelector(`${shelfSel} [data-categorize-similar]`);
+    const target = await page.$eval(`${shelfSel} [data-categorize-similar]`, (s) => [...s.options].find((o) => o.value)?.value);
+    await page.select(`${shelfSel} [data-categorize-similar]`, target);
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/transactions?q=" + encodeURIComponent("Jimmy John's") + "&limit=5").then((x) => x.json());
+      const ids = (r.rows ?? []).filter((x) => /Jimmy John's/.test(x.merchant)).map((x) => String(x.categoryId));
+      return ids.length > 0 && ids.every((id) => id === t);
+    }, { timeout: 8000 }, target).then(() => true, () => false).then((ok) => record("similar names", "Set category gives the ticked names one category, and they stay listed as their own vendors", ok, `→ category ${target}`));
+    await page.waitForSelector(`${shelfSel} [data-similar-names] li`, { timeout: 8000 }).catch(() => {});
+    // restore the fixture's category
+    await page.evaluate(async (c) => fetch("/api/recurrings/recategorize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: "Jimmy John's", categoryId: c }) }), was[0] ?? null);
+    await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-similar-names] button`)].find((b) => /Select all/.test(b.textContent)).click(), shelfSel);
+    const label = await page.$eval(`${shelfSel} [data-combine-similar]`, (b) => b.textContent.trim());
+    await page.click(`${shelfSel} [data-combine-similar]`);
+    const gone = await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-similar-names]`), { timeout: 8000 }, shelfSel).then(() => true, () => false);
+    record("similar names", "Select all and Combine fold the other spellings in, in one press, and the list empties", gone && /^Combine \d+ into /.test(label), `${label}; list gone=${gone}`);
+    // restore, so later groups see the fixture's two spellings
+    await page.evaluate(async () => fetch("/api/recurrings/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alias: "Jimmy John's", unlink: true }) }));
+    if (errs.length) record("similar names", "page errors", false, errs[0]);
   });
 }
 
@@ -1648,12 +1753,20 @@ async function dashboardReadout(browser) {
     record("dashboard readout", "the chart's budget line is the summary card's figure, named in the legend, and withheld when spending sits outside the budget", drawnRight, chart.outside ? `withheld: ${chart.outside}` : `line "${chart.lineLabel}", card ${chart.cardBudget}`);
     record("dashboard readout", "the chart is described in words for a screen reader", chart.role === "img" && /^(Spent \$[\d,]+ through|No spending yet)/.test(chart.said) && (chart.lineLabel == null || /Budget \$/.test(chart.said)), chart.said);
 
-    const rows = await page.$$eval("[data-drawer-row]", (els) => els.filter((e) => e.querySelector("[data-row-left]")).map((e) => {
-      const nums = [...e.innerText.matchAll(/\$([\d,]+)/g)].map((m) => Number(m[1].replace(/,/g, "")));
-      return { spent: nums[0], budget: nums[1], said: e.querySelector("[data-row-left]").textContent };
-    }));
+    // The row says what was spent and what's left; the budget isn't repeated
+    // in it (a fraction made you subtract), so it comes from the data.
+    const rows = await page.evaluate(async () => {
+      const month = document.querySelector("[data-month-picker] select")?.value;
+      const d = await (await fetch(`/api/dashboard${month ? `?month=${month}` : ""}`)).json();
+      const budgetOf = Object.fromEntries((d.byCategory ?? []).map((c) => [c.name, c.budget]));
+      return [...document.querySelectorAll("[data-drawer-row]")].filter((e) => e.querySelector("[data-row-left]")).map((e) => {
+        const name = e.querySelector(".font-medium")?.textContent.trim();
+        const spent = Number((e.querySelector("[data-row-spent]")?.textContent.match(/\$([\d,]+)/)?.[1] ?? "x").replace(/,/g, ""));
+        return { name, spent, budget: Math.round(budgetOf[name] ?? NaN), said: e.querySelector("[data-row-left]").textContent, fraction: / \/ \$/.test(e.innerText) };
+      });
+    });
     const wrong = rows.filter((r) => { const d = r.budget - r.spent; const n = Number((r.said.match(/\$([\d,]+)/)?.[1] ?? "x").replace(/,/g, "")); return d >= 0 ? !(/left/.test(r.said) && Math.abs(n - d) <= 1) : !(/over/.test(r.said) && Math.abs(n + d) <= 1); });
-    record("dashboard readout", "each budgeted category row says what's left or over, and the sum is right", rows.length > 0 && wrong.length === 0, `${rows.length} rows; ${wrong.map((r) => JSON.stringify(r)).join(" ") || "all right"}`);
+    record("dashboard readout", "each budgeted category row says what's left or over, and the sum is right", rows.length > 0 && wrong.length === 0 && rows.every((r) => !r.fraction), `${rows.length} rows; ${wrong.map((r) => JSON.stringify(r)).join(" ") || "all right"}`);
 
     const motion = await page.evaluate(() => { const el = document.querySelector("[data-budget-bar] *[style*='width']") ?? document.querySelector("button"); return getComputedStyle(el).transitionDuration; });
     record("dashboard readout", "with reduced motion asked for, transitions settle at once", motion.split(",").every((d) => parseFloat(d) < 0.001), motion);
@@ -1718,8 +1831,8 @@ async function headerNav(browser) {
       await page.waitForSelector("[data-summary] [data-figure]");
       sizes[path] = await page.$$eval("[data-summary] [data-figure]", (fs) => fs.map((f) => getComputedStyle(f).fontSize));
     }
-    const ranked = Object.values(sizes).every((f) => f[0] === "24px" && f.slice(1).every((x) => x === "15px") && f.length >= 2);
-    record("header nav", "every summary card leads with one 24px result, the rest at 15px", ranked, JSON.stringify(sizes));
+    const oneSize = Object.values(sizes).every((f) => f.length >= 2 && f.every((x) => x === "24px"));
+    record("header nav", "every summary card's figures are one size (24px)", oneSize, JSON.stringify(sizes));
 
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
     await page.goto(BASE + "/", { waitUntil: "networkidle2" });
@@ -2158,11 +2271,14 @@ async function deferToMerge(browser) {
     const d = await page.evaluate(() => {
       const li = [...document.querySelectorAll("[data-uncategorized] [data-drawer-row]")].find((x) => x.innerText.includes("Marlows Deli"));
       if (!li) return null;
-      const link = [...li.querySelectorAll("a[data-deferred]")].find((a) => a.getBoundingClientRect().width > 0);
+      const ask = [...li.querySelectorAll("[data-deferred]")].find((a) => a.getBoundingClientRect().width > 0);
       const sel = li.querySelector("[data-category-property] select");
-      return { link: link?.textContent.trim() ?? null, href: link?.getAttribute("href"), picked: sel?.options[sel.selectedIndex]?.textContent.trim(), apply: [...li.querySelectorAll("[data-queue-accept]")].filter((b) => b.getBoundingClientRect().width > 0).length };
+      return { ask: ask?.textContent.replace(/\s+/g, " ").trim() ?? null, combine: !!ask?.querySelector("[data-inline-combine]"), picked: sel?.options[sel.selectedIndex]?.textContent.trim(), apply: [...li.querySelectorAll("[data-queue-accept]")].filter((b) => b.getBoundingClientRect().width > 0).length };
     });
-    record("defer to merge", "the dashboard row points at the merge and keeps the plain picker, with no Apply", d?.link === "possibly Marlow's Deli →" && d.href === "/transactions" && /Uncategorized/.test(d.picked) && d.apply === 0, JSON.stringify(d));
+    // The row asks the merge card's question (with the bill's amount and day
+    // when the card is a bill match; Marlow's is a same-name card) and answers
+    // it in place: Combine. It keeps the plain picker and no Apply.
+    record("defer to merge", "the dashboard row asks the merge question with the bill's evidence and its own Combine, and keeps the plain picker, with no Apply", !!d && /^Same as Marlow's Deli( \(\$[\d,.]+ \w+, the \d+(st|nd|rd|th)\))?\? ?Combine$/.test(d.ask ?? "") && d.combine && /Uncategorized/.test(d.picked) && d.apply === 0, JSON.stringify(d));
     // Dismiss the merge: the vendor is a category question again.
     const merges = await (await fetch(BASE + "/api/merges")).json();
     const g = merges.find((x) => x.variants?.some((v) => v.merchant === "Marlows Deli"));
@@ -2181,7 +2297,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }

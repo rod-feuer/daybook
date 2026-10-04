@@ -16,6 +16,11 @@ type PreviewTx = { date: string; amount: number; account: string };
 // dismiss. `onChange` lets the host page refresh its own data after a combine
 // (which can re-stamp recurringId and fill a category). Renders nothing when the
 // queue is empty, so it's safe to drop into any page.
+// The names a card folds in, and the vendor they fold into (when it has
+// charges of its own under that name).
+const strays = (g: MergeSuggestion) => g.variants.filter((v) => v.merchant !== g.canonical);
+const target = (g: MergeSuggestion) => g.variants.find((v) => v.merchant === g.canonical);
+
 export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; version?: number }) {
   const [merges, setMerges] = useState<MergeSuggestion[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -107,8 +112,13 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                     </span>
                   )}
                 </div>
-                <div className="mt-1 text-xs text-[var(--muted)]">
-                  {g.variants.map((v) => `${v.merchant} (${v.count})`).join("  ·  ")}
+                {/* The direction, said on the card: the title is the vendor
+                    the others fold into, and listing it among them read as a
+                    choice between equals. */}
+                <div className="mt-1 text-xs text-[var(--muted)]" data-merge-direction>
+                  Combine {strays(g).map((v) => `${v.merchant} (${v.count})`).join(" · ")} into{" "}
+                  <span className="font-medium text-[var(--foreground)]">{g.canonical}</span>
+                  {target(g) && ` (${target(g)!.count})`}
                 </div>
                 {g.note && (
                   <div
@@ -132,6 +142,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                 <button
                   disabled={busy === g.key}
                   onClick={() => resolve(g, "approve")}
+                  aria-label={`Combine ${strays(g).map((v) => v.merchant).join(", ")} into ${g.canonical}`}
                   data-queue-accept
                   className="btn-ghost text-xs disabled:opacity-50"
                 >

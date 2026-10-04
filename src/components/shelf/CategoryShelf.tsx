@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usd, isCurrentMonth, monthName, spendTrend } from "@/lib/format";
+import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { Tooltip } from "@/components/Tooltip";
 import { recurringState } from "@/components/RecurringGlyph";
 import type { CatSummary } from "@/components/shelf/types";
@@ -28,7 +29,10 @@ export function CategoryHeader({
   onRename: (name: string) => void;
   onEditAppearance: (patch: { icon?: string; color?: string; kind?: "expense" | "income" }) => void;
 }) {
-  const label = new Date(month + "-01T00:00:00Z").toLocaleDateString("en-US", {
+  // The period, as the page's header says it ("Oct 1–4"): on a phone the
+  // sheet covers that header, and the cards below no longer say "so far".
+  const period = usePeriodLabel(month);
+  const label = (isCurrentMonth(month) && period) || new Date(month + "-01T00:00:00Z").toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
     timeZone: "UTC",
@@ -42,7 +46,7 @@ export function CategoryHeader({
         <CategoryName name={data.name} onRename={fixed ? undefined : onRename} textClassName="text-[15px] font-semibold" />
         <div className="text-xs text-[var(--muted)]">
           {data.upcoming.length > 0
-            ? `${data.txCount} posted`
+            ? `${data.txCount - data.pendingCount} posted${data.pendingCount ? ` · ${data.pendingCount} pending` : ""}`
             : `${data.txCount} transaction${data.txCount === 1 ? "" : "s"}`}{" "}
           · {label}
         </div>
@@ -97,12 +101,12 @@ export function CategoryBody({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2">
-        <PropertyCard label={`${isIncome ? "received" : isExcluded ? "total" : "spent"}${partial ? " so far" : ""}`} detail={trend}>
+        <PropertyCard label={isIncome ? "received" : isExcluded ? "total" : "spent"} detail={trend}>
           <div className="text-2xl font-semibold tabular-nums" data-shelf-lead>{usd(data.spent, { cents: false })}</div>
         </PropertyCard>
         {budgetable && b.amount != null ? (
           <PropertyCard
-            label={`${remaining >= 0 ? "left" : "over"}${annual ? " this year" : partial ? " so far" : ""}`}
+            label={`${remaining >= 0 ? "left" : "over"}${annual ? " this year" : ""}`}
             detail={
               <>
                 <div>of {usd(b.amount, { cents: false })}</div>

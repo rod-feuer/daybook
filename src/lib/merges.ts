@@ -8,6 +8,8 @@ import {
   isRecurringActive,
   getRecurringOverrides,
   getRecurringSettings,
+  merchantDisplayName,
+  confirmedKey,
 } from "./queries";
 import { CADENCE_DAYS, type Cadence } from "./cadence";
 
@@ -52,6 +54,9 @@ export type MergeSuggestion = {
   note?: string; // why it's suggested (recurring-match only)
   categoryId?: number; // recurring-match: set uncategorized variant charges to this
   lowConfidence?: boolean; // 0.8–0.9 name band — surface for confirmation, not certain
+  // The bill a recurring-match card folds into, as a row elsewhere can say it
+  // to decide there: "Same as Every ($20 monthly, the 4th)?".
+  bill?: { name: string; amount: number; cadence: string; day: number };
 };
 
 function dismissedKeys(db: ReturnType<typeof getDb>): Set<string> {
@@ -115,6 +120,10 @@ export { nameAffinity, NAME_MATCH, LOW_MATCH };
 // processor prefix). Catches the class the location-suffix rule can't. The name
 // filter is what disambiguates two similar monthly bills. `exclude` skips
 // merchants already surfaced by the location detector. Dismiss key = "rec:<m>".
+// Only plans the user added are bills to fold a stray into: a plan the
+// detector merely suggested is a guess (Charleston's, a restaurant read as a
+// quarterly bill, drew "Chatham" on a shared "Cha"), and since durable plans
+// a guess counts nowhere else either.
 export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion[] {
   const db = getDb();
   const dismissed = dismissedKeys(db);
@@ -127,7 +136,7 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
                 MIN(ABS(t.amount)) lo, MAX(ABS(t.amount)) hi
          FROM recurrings r JOIN transactions t ON t.recurringId = r.id
          LEFT JOIN categories c ON c.id = r.categoryId
-         WHERE r.avgAmount < 0
+         WHERE r.avgAmount < 0 AND ${confirmedKey("r.merchant")}
          GROUP BY r.id`
       )
       .all() as {
@@ -136,6 +145,7 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
       categoryName: string | null;
       cadence: string;
       lastDate: string;
+      avgAmount: number;
       lo: number;
       hi: number;
     }[]
@@ -164,6 +174,24 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
     (byMerchant[c.merchant] ??= []).push(c);
   }
 
+  // Every name a vendor goes by (its plan's key and the names combined into
+  // it): a stray is compared with all of them. "Every Media" scored 0.796
+  // against the plan's key "Every Every.to-chargbrooklyn" and 0.82 against the
+  // same vendor's "Every Every.to Charg", and was offered nowhere.
+  const namesOf = new Map<string, Set<string>>();
+  for (const name of [...merchants.map((m) => m.merchant), ...Object.keys(links), ...Object.values(links)]) {
+    const c = canonicalMerchant(name, links);
+    (namesOf.get(c) ?? namesOf.set(c, new Set()).get(c)!).add(name);
+  }
+  // A short name matches anything that contains its letters ("Adt", ADT's
+  // other name, is in "pADThai": 0.81), so other names count from five letters.
+  const letters = (n: string) => n.replace(/[^a-z]/gi, "").length;
+  const affinityTo = (stray: string, recMerchant: string) =>
+    Math.max(
+      nameAffinity(stray, recMerchant),
+      ...[...(namesOf.get(canonicalMerchant(recMerchant, links)) ?? [])].filter((n) => letters(n) >= 5).map((n) => nameAffinity(stray, n))
+    );
+
   // Match each orphan merchant to its best recurring, then GROUP orphans by that
   // recurring so several stray descriptors of one vendor become a single card.
   const groups = new Map<
@@ -173,6 +201,10 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
   for (const [merchant, cs] of Object.entries(byMerchant)) {
     if (exclude.has(merchant) || dismissed.has("rec:" + merchant)) continue;
     const cm = canonicalMerchant(merchant, links);
+    // A name already combined into a vendor has had its decision (DESIGN.md
+    // §2: one decision per vendor). "Southern Ridge", an alias of Southern,
+    // was offered to "South Central Inmartinsville In" on a shared "South".
+    if (cm !== merchant) continue;
 
     // Best recurring by name affinity (the disambiguator), confirmed by a
     // plausible amount and a charge that posts around the bill's cadence. The
@@ -182,7 +214,7 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
       const mag = Math.abs(c.amount);
       for (const r of recs) {
         if (canonicalMerchant(r.merchant, links) === cm) continue; // already same vendor
-        const affinity = nameAffinity(merchant, r.merchant);
+        const affinity = affinityTo(merchant, r.merchant);
         if (affinity < LOW_MATCH) continue; // names must at least echo each other
         if (mag < r.lo * 0.5 || mag > r.hi * 1.5) continue; // amount implausible
         const period = PERIOD[r.cadence] ?? 30;
@@ -218,14 +250,23 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
       variants,
       total: variants.reduce((s, v) => s + v.count, 0),
       note: lowConfidence
-        ? `Possibly the same as your ${r.cadence} “${r.merchant}” bill — similar name, posts in the same slot at a similar amount. Combine only if it's the same vendor${
-            r.categoryName ? `; combining sets its category to ${r.categoryName}` : ""
-          }.`
+        ? // Says the whole of what Combine does: it joins the bill as well as
+          // the vendor. The note named only the category, so a Combine that
+          // matched the charge into its plan read as a rename.
+          `Possibly the same as your ${r.cadence} “${r.merchant}” bill — similar name, posts in the same slot at a similar amount. Combine only if it's the same vendor: ${
+            orphans.length > 1 ? "they join" : "it joins"
+          } that bill${r.categoryName ? ` and ${orphans.length > 1 ? "take" : "takes"} its category, ${r.categoryName}` : ""}.`
         : `Lands in your ${r.cadence} “${r.merchant}” slot at a similar amount — likely the same vendor renamed. Combining makes ${
             orphans.length > 1 ? "them" : "it"
           } recurring${r.categoryId != null ? " and sets the category" : ""}.`,
       categoryId: r.categoryId ?? undefined,
       lowConfidence,
+      bill: {
+        name: merchantDisplayName(r.merchant, getRecurringSettings(), links),
+        amount: Math.abs(r.avgAmount),
+        cadence: r.cadence,
+        day: Number(r.lastDate.slice(8, 10)),
+      },
     });
   }
   // Confident matches first, borderline ones last.

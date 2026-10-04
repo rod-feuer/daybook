@@ -1,7 +1,7 @@
 "use client";
 
 import { buildVerdict } from "@/lib/verdict";
-import { withoutAmountQualifier } from "@/lib/series";
+import { withoutAmountQualifier, dayLabel } from "@/lib/series";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
@@ -28,6 +28,7 @@ import { AmountCell, CategoryProperty } from "@/components/RowCells";
 import type { Category } from "@/lib/types";
 import { LoadError, LoadingRows } from "@/components/LoadState";
 import Shell from "@/components/Shell";
+import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { HeaderMenu } from "@/components/HeaderMenu";
 import { useTxDrawer, useCategoryShelf, useShelfActive } from "@/components/TransactionDrawer";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
@@ -85,6 +86,7 @@ type Tx = TransactionRow;
 export default function DashboardPage() {
   const { months, setMonths, month, setMonth, status, setStatus, boot } = useMonthBoot();
   const [data, setData] = useState<Dash | null>(null);
+  const period = usePeriodLabel(month, data);
   const still = useReducedMotion();
   const [recent, setRecent] = useState<Tx[]>([]);
   const openTx = useTxDrawer();
@@ -159,8 +161,10 @@ export default function DashboardPage() {
   return (
     <Shell
       title="Dashboard"
-      // No subtitle: the month picker already shows the month (it was duplicated
-      // as "June 2026" both here and in the picker below).
+      // The period the figures cover ("Oct 1–4"), said once for the page.
+      // The period, then the comparison basis, said once for the card's
+      // deltas (IBCS UN 2.2: time first, then scenario): "Oct 1–4 · vs Sep 1–4".
+      subtitle={period && data?.prev ? `${period} · vs ${prevPeriodLabel(data.prev)}` : period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
         <HeaderMenu>
@@ -173,23 +177,20 @@ export default function DashboardPage() {
       {status === "loading" && !data && <LoadingRows />}
       {status !== "error" && data && (
         <div className="flex flex-col gap-6">
-          {/* One summary card, as on Categories and Recurrings: the projected
-              net leads (the one figure that answers "how am I doing"), income
-              and expenses beside it, the budget bar, and the verdict as the
-              status line. The three tiles and the standalone verdict sentence
-              this replaces were the last of the dashboard's own dialect. */}
+          {/* One summary card, as on Categories and Recurrings: net first,
+              income and expenses beside it (actuals over the header's period,
+              each with its change), the budget bar, and the verdict as the
+              status line. */}
           {(() => {
             const current = isCurrentMonth(month);
             const b = data.budget;
             const v = buildVerdict(data, current);
-            // One frame. While the month is being projected, all three big
-            // figures are the month-end view and each carries its actual "so far"
-            // beneath — so the headline can be checked on the card itself:
-            // expected income − projected expenses = projected net. Before, the
-            // headline was projected and the two beside it were actuals, and the
-            // projected spend it was built from appeared only under the chart.
-            const projecting = data.projectedNet != null && data.projectedIncome != null && data.pace.projectedMonthEnd != null;
-            const net = projecting ? (data.projectedNet as number) : data.net;
+            // The figures are the month's actuals, over the period the header
+            // states ("Oct 1–4"), each against the same days of last month. The
+            // projection is the verdict's and the chart's dashed line: as big
+            // figures it made each one carry its actual "so far" beneath, and
+            // the card said "so far" in every corner.
+            const net = data.net;
             const { amount: unbudgeted, material: unbudgetedMaterial } = outsideBudget(data);
             const progress = b && b.total > 0 ? b.spent / b.total : data.income > 0 ? data.expenses / data.income : 0;
             const barLabel =
@@ -199,57 +200,29 @@ export default function DashboardPage() {
             const prevLabel = prevPeriodLabel(data.prev);
             return (
               <SummaryCard
-                // The month is the header picker. Three labels each used to
-                // carry the frame ("net cash flow, projected") and the card
-                // read as a paragraph. Too early to project, the labels say
-                // "so far"; with a projection, the line under each figure does.
+                // The labels are one word; the period and the comparison basis
+                // are the header's ("Oct 1–4 · vs Sep 1–4").
                 primary={{
                   value: usd(net, { sign: true, cents: false }),
-                  // In progress but too early to project, the figures are the
-                  // month so far and the label says so (with a projection, the
-                  // "$X so far" beneath each figure carries it).
-                  label: current && !projecting ? "net so far" : "net",
-                  // One colour signal per card, and it is the verdict's. A red
-                  // net beside a green "under budget" argued with it. Only a
-                  // finished month's net is a fact, and only then does it take
-                  // its colour.
-                  tone: current ? undefined : net >= 0 ? "good" : "bad",
+                  label: "net",
+                  // One colour signal per card, and it is the verdict's: a red
+                  // net beside a green "under budget" argued with it, so the
+                  // net stays neutral, finished month or not.
                   href: `/transactions?month=${month}`,
-                  sub:
-                    projecting ? (
-                      // Mid-month net is misleading (income hasn't posted) — lead
-                      // with the projected month-end figure, keep the actual as context.
-                      <span>{usd(data.net, { sign: true, cents: false })} so far</span>
-                    ) : (
-                      <DeltaLine cur={data.net} prev={data.prev?.net} prevLabel={prevLabel} higherIsGood />
-                    ),
+                  sub: <DeltaLine cur={data.net} prev={data.prev?.net} prevLabel={prevLabel} />,
                 }}
                 secondary={[
                   {
-                    value: usd(projecting ? (data.projectedIncome as number) : data.income, { cents: false }),
-                    label: current && !projecting ? "income so far" : "income",
+                    value: usd(data.income, { cents: false }),
+                    label: "income",
                     href: `/transactions?month=${month}&type=income`,
-                    sub:
-                      projecting ? (
-                        // Income posts late in the month, so a vs-prior delta on the
-                        // amount-so-far is noise — what has arrived is the context.
-                        <span>{usd(data.income, { cents: false })} so far</span>
-                      ) : (
-                        <DeltaLine cur={data.income} prev={data.prev?.income} prevLabel={prevLabel} higherIsGood />
-                      ),
+                    sub: <DeltaLine cur={data.income} prev={data.prev?.income} prevLabel={prevLabel} />,
                   },
                   {
-                    value: usd(projecting ? (data.pace.projectedMonthEnd as number) : data.expenses, { cents: false }),
-                    label: current && !projecting ? "expenses so far" : "expenses",
+                    value: usd(data.expenses, { cents: false }),
+                    label: "expenses",
                     href: `/transactions?month=${month}&type=expense`,
-                    sub: projecting ? (
-                      // One comparison while the month runs, and it is the chart's
-                      // (projected vs last month). A second one here, so far vs the
-                      // same days, gave a different number an inch away.
-                      <span>{usd(data.expenses, { cents: false })} so far</span>
-                    ) : (
-                      <DeltaLine cur={data.expenses} prev={data.prev?.expenses} prevLabel={prevLabel} higherIsGood={false} />
-                    ),
+                    sub: <DeltaLine cur={data.expenses} prev={data.prev?.expenses} prevLabel={prevLabel} />,
                   },
                 ]}
                 progress={progress}
@@ -324,6 +297,12 @@ export default function DashboardPage() {
                 // outside the budget: the curve counts it, the budget doesn't.
                 const b = data.budget;
                 const budgetLine = b && b.total > 0 && !outsideBudget(data).material ? b.total : null;
+                // The axis fits the spending (this month, its projection, last
+                // month), in round steps. Forced up to the budget, three days
+                // of spending hugged the floor under a $49k top that sat beside
+                // a $45k tick. A budget within reach is on the chart; one well
+                // above it is said at the top edge.
+                const { top, ticks, budgetOnChart } = chartScale(data.pace.series, budgetLine);
                 return (
                   <>
                     <ChartLegend
@@ -331,7 +310,12 @@ export default function DashboardPage() {
                       showPrev={data.prev != null}
                       showBudget={budgetLine != null}
                     />
-                    <div className="min-h-[14rem] flex-1" role="img" aria-label={chartSummary(data, budgetLine)} data-pace-chart>
+                    <div className="relative min-h-[14rem] flex-1" role="img" aria-label={chartSummary(data, budgetLine)} data-pace-chart>
+                      {budgetLine != null && !budgetOnChart && (
+                        <span className="absolute right-2 top-0 z-10 text-[11px] text-[var(--muted)]" data-budget-above>
+                          Budget {usd(budgetLine, { cents: false })} ↑
+                        </span>
+                      )}
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={data.pace.series} margin={{ left: -8, right: 8, top: 4 }}>
                           <defs>
@@ -349,11 +333,12 @@ export default function DashboardPage() {
                             minTickGap={28}
                           />
                           <YAxis
-                            domain={[0, (max: number) => Math.max(max, (budgetLine ?? 0) * 1.05)]}
+                            domain={[0, top]}
+                            ticks={ticks}
                             tick={{ fontSize: 11, fill: "var(--muted)" }}
                             axisLine={false}
                             tickLine={false}
-                            tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+                            tickFormatter={(v) => (v >= 1000 ? `$${(v / 1000).toFixed(v % 1000 ? 1 : 0)}k` : `$${v}`)}
                             width={44}
                           />
                           <Tooltip
@@ -376,21 +361,21 @@ export default function DashboardPage() {
                             }}
                             labelStyle={{ color: "var(--foreground)" }}
                           />
-                          {budgetLine != null && (
+                          {budgetLine != null && budgetOnChart && (
                             <ReferenceLine
                               y={budgetLine}
                               stroke="var(--muted)"
                               strokeDasharray="2 3"
-                              ifOverflow="extendDomain"
                               label={{ value: `Budget ${usd(budgetLine, { cents: false })}`, position: "insideTopRight", fontSize: 11, fill: "var(--muted)" }}
                             />
                           )}
-                          {/* Faint prior-month curve, drawn first so it sits beneath. */}
+                          {/* Prior-month curve, drawn first so it sits beneath: muted,
+                              not the hairline grey, which vanished on the card. */}
                           <Area
                             type="monotone"
                             dataKey="prev"
                             isAnimationActive={!still}
-                            stroke="var(--border)"
+                            stroke="var(--muted)"
                             strokeWidth={1.5}
                             fill="none"
                             connectNulls
@@ -559,7 +544,7 @@ function ChartLegend({
       )}
       {showPrev && (
         <span className="flex items-center gap-2">
-          <span className="inline-block h-0.5 w-3.5 rounded-full bg-[var(--border)]" />
+          <span className="inline-block h-0.5 w-3.5 rounded-full bg-[var(--muted)]" />
           Last month
         </span>
       )}
@@ -573,13 +558,9 @@ function ChartLegend({
   );
 }
 
-// Pace metrics under the chart — fills the height the category card forces on this
-// card with useful context (and gives the chart card a reason to be this tall).
 // Persistent-but-faint affordance marking a row/card as drillable. Visible at
 // rest (so the interaction is discoverable, not hover-only) and strengthens +
 // nudges right on hover. Parent must carry `group`.
-// Secondary header actions behind a "⋯" on mobile (rendered inline on desktop by
-// the caller). Lightweight dropdown — mirrors the transactions "+ Filter" menu.
 function DrillChevron({ className = "" }: { className?: string }) {
   return (
     <svg
@@ -622,51 +603,59 @@ function prevPeriodLabel(prev: Dash["prev"]): string | null {
   return prev.throughDay != null ? `${m} 1–${prev.throughDay}` : m;
 }
 
-// Month-over-month delta shown under a stat, as "$abs (%)" — dollars answer
-// "how much", percent answers "how unusual". Color reflects whether the move is
-// favorable, which depends on the metric — hence `higherIsGood`. The percent is
-// omitted when the base is zero or the sign flips (where a % would mislead);
-// that only arises for net cash flow, since income/expenses are non-negative.
+// The spending chart's y-axis: round steps (1, 2 or 5 × 10ⁿ) to just above
+// the largest spending point, at most six ticks. The budget joins the scale
+// when it sits within a fifth of that top; further up, it is said in words.
+function chartScale(
+  series: { actual: number | null; projected: number | null; prev: number | null }[],
+  budget: number | null
+): { top: number; ticks: number[]; budgetOnChart: boolean } {
+  const spend = Math.max(1, ...series.flatMap((p) => [p.actual ?? 0, p.projected ?? 0, p.prev ?? 0]));
+  const budgetOnChart = budget != null && budget <= spend * 1.2;
+  const reach = budgetOnChart ? Math.max(spend, budget as number) : spend;
+  const raw = reach / 5;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((x) => x >= raw) as number;
+  const top = Math.ceil(reach / step) * step;
+  return { top, ticks: Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step), budgetOnChart };
+}
+
+// Month-over-month change under a figure, as "▲ $abs (%)": dollars answer "how
+// much", percent answers "how unusual". The percent is omitted when the base is
+// zero or the sign flips (where a % would mislead), which only arises for net.
+// Muted, since the verdict is the card's one colour signal (DESIGN.md §2); the
+// arrow says the direction, and the basis is the header's.
 function DeltaLine({
   cur,
   prev,
   prevLabel,
-  higherIsGood,
 }: {
   cur: number;
   prev: number | undefined;
   prevLabel: string | null | undefined;
-  higherIsGood: boolean;
 }) {
   if (prev === undefined || !prevLabel) return null;
   const change = cur - prev;
   if (Math.round(change) === 0) {
     return (
       <div className="mt-1 text-xs font-medium text-[var(--muted)]">
-        No change vs {prevLabel}
+        No change
       </div>
     );
   }
   const up = change > 0;
-  const favorable = up === higherIsGood;
   const dollars = usd(Math.abs(change), { cents: false });
   const showPct = prev !== 0 && Math.sign(cur) === Math.sign(prev);
   const pct = showPct
     ? ` (${Math.abs(Math.round((change / Math.abs(prev)) * 100))}%)`
     : "";
   return (
-    <div
-      className={`mt-1 flex flex-wrap items-center gap-x-1 text-xs font-medium ${
-        favorable ? "text-[var(--good)]" : "text-[var(--bad)]"
-      }`}
-    >
-      {/* In a narrow column the line breaks between its two halves, never
-          inside one. */}
+    // The basis ("vs Sep 1–4") is the header's, said once for all three.
+    <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs font-medium text-[var(--muted)]">
       <span className="whitespace-nowrap">
         {up ? "▲" : "▼"} {dollars}
         {pct}
       </span>
-      <span className="whitespace-nowrap font-normal text-[var(--muted)]">vs {prevLabel}</span>
     </div>
   );
 }
@@ -674,8 +663,9 @@ function DeltaLine({
 // Header delta for the pace chart: projected month-end vs last month's full
 // total (the gray curve's endpoint = the max of its cumulative series). States
 // the trend the chart shows visually, instead of repeating the projected dollar
-// figure that already appears in the summary card. Mirrors DeltaLine's idiom
-// (▲/▼ · dollars · "vs <month>") for consistency; spending less is favorable.
+// figure that already appears in the summary card. ▲/▼ and dollars as DeltaLine,
+// plus its own "vs <month>", since it compares with a different total; spending
+// less is favorable.
 function PaceDelta({
   projected,
   series,
@@ -799,6 +789,21 @@ function UncategorizedResolver({
     setBusy(null);
   }
 
+  // The merge card's Combine, from the row: the vendor folds into the bill's
+  // and the row leaves (it has the bill's category now). Same request as the
+  // card on Transactions.
+  async function combineInto(t: UncatTx, d: DeferredToMerge) {
+    const g = d.merge;
+    setBusy(t.id);
+    setRows((prev) => prev.filter((x) => x.merchant !== t.merchant)); // optimistic
+    await mutate(
+      () => postJson("/api/merges", { action: "approve", keys: g.dismissKeys, canonical: g.canonical, variants: g.variants.map((v) => v.merchant), categoryId: g.categoryId }),
+      { success: `Combined into ${d.to}`, error: "Couldn't combine — please try again" },
+      { refresh: "always" }
+    );
+    setBusy(null);
+  }
+
   // Taking a proposal is the queue's Apply: the vendor's rule is learned and its
   // other uncategorized charges fill with it, not only this row's.
   async function applyProposal(t: UncatTx, s: CategorySuggestion) {
@@ -834,12 +839,33 @@ function UncategorizedResolver({
         {s.guess ? "a guess" : "possible match"}
       </span>
     ) : null;
-  // The merge card and its evidence live on Transactions; the row only points.
-  const mergeLink = (d: DeferredToMerge) => (
-    <Link href="/transactions" data-deferred={d.to} onClick={(e) => e.stopPropagation()} className="btn-link shrink-0 text-xs">
-      possibly {d.to} →
-    </Link>
-  );
+  // A charge whose vendor waits on a merge card is answered here too: the
+  // card's question with its evidence (the bill's amount and day) and its own
+  // Combine, which joins the bill and takes its category. Going to
+  // Transactions to say yes to one clear question was a detour. The card
+  // stays there as the full view; answering either clears both.
+  const mergeAsk = (t: UncatTx, d: DeferredToMerge) => {
+    const b = d.merge.bill;
+    return (
+      <span className="flex shrink-0 items-center gap-2 text-xs" data-deferred={d.to}>
+        <span className="text-[var(--muted)]">
+          Same as <span className="font-medium text-[var(--foreground)]">{d.to}</span>
+          {b && ` (${usd(b.amount, { cents: b.amount % 1 !== 0 })} ${b.cadence}, the ${dayLabel(b.day)})`}?
+        </span>
+        <button
+          disabled={busy === t.id}
+          onClick={(e) => {
+            e.stopPropagation();
+            void combineInto(t, d);
+          }}
+          className="btn-ghost tap text-xs"
+          data-inline-combine
+        >
+          Combine
+        </button>
+      </span>
+    );
+  };
   const applyButton = (t: UncatTx, s: CategorySuggestion) => (
     <button
       disabled={busy === t.id}
@@ -895,12 +921,12 @@ function UncategorizedResolver({
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:hidden">
                   {picker(t, s, "-ml-2")}
                   {s && proposalTag(s)}
-                  {d && mergeLink(d)}
+                  {d && mergeAsk(t, d)}
                 </div>
               </div>
               <span className="hidden shrink-0 items-center justify-end gap-2 sm:flex">
                 {s && proposalTag(s)}
-                {d && mergeLink(d)}
+                {d && mergeAsk(t, d)}
                 {picker(t, s)}
                 {s && applyButton(t, s)}
               </span>
@@ -938,7 +964,6 @@ function CategoryBars({
   if (rows.length === 0)
     return <p className="text-[13px] text-[var(--muted)]">No spending this month.</p>;
   const pace = paceOf(month);
-  const current = isCurrentMonth(month);
   const fmt = (v: number) => usd(v, { cents: false });
   const shown = rows.slice(0, 7);
   return (
@@ -957,19 +982,15 @@ function CategoryBars({
                 <span className="font-medium">{r.name}</span>
               </span>
               <span className="flex items-center gap-2">
-                {/* The whole spent/budget pair right-aligns to one clean edge before
-                    the chevron (matching the aligned chevron column), with the slash
-                    snug between. Spent is ranked foreground; the budget reference is
-                    muted — the bar below already encodes the ratio, so these are a
-                    per-row readout, not a column to scan. Spent's left edge goes
-                    ragged, but that's hidden in the gap after the category name. */}
-                <span className="whitespace-nowrap text-right tabular-nums">
+                {/* What was spent; what's left is said under the bar, so the
+                    budget isn't here too: "$6,593 / $7,100" over "$507 left"
+                    said the budget twice and made you subtract (DESIGN.md §2).
+                    The budget itself is on the Categories page and the shelf. */}
+                <span className="whitespace-nowrap text-right tabular-nums" data-row-spent>
                   <span className={over ? "font-semibold text-[var(--bad)]" : "font-medium"}>
                     {fmt(r.total)}
                   </span>
-                  {r.budget != null && (
-                    <span className="font-normal text-[var(--muted)]"> / {fmt(r.budget)}</span>
-                  )}
+                  <span className="font-normal text-[var(--muted)]"> spent</span>
                 </span>
                 <DrillChevron className="-mr-1 h-3.5 w-3.5" />
               </span>
@@ -980,7 +1001,7 @@ function CategoryBars({
                 Categories row's words, so the two pages agree. */}
             {r.budget != null && (
               <div className={`mt-1 text-right text-xs ${over ? "font-medium text-[var(--bad)]" : "text-[var(--muted)]"}`} data-row-left>
-                {over ? `${fmt(r.total - r.budget)} over` : `${fmt(r.budget - r.total)} left${current ? " so far" : ""}`}
+                {over ? `${fmt(r.total - r.budget)} over` : `${fmt(r.budget - r.total)} left`}
               </div>
             )}
           </>

@@ -21,6 +21,7 @@ import { CADENCE_DAYS, CADENCE_LABEL } from "@/lib/cadence";
 import { LoadError, LoadingRows } from "@/components/LoadState";
 import { SummaryCard } from "@/components/SummaryCard";
 import { useMonthBoot } from "@/components/useMonthBoot";
+import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { billStatus, billDelta, chargedOften } from "@/lib/bills";
 import { usd, shortDate, isCurrentMonth as isCurrentMonthOf } from "@/lib/format";
 import type { RecurringSettings, RecurringForMonth, RecurringSuggestion } from "@/lib/queries";
@@ -45,6 +46,7 @@ function isActive(r: Rec): boolean {
 
 export default function RecurringsPage() {
   const { months, month, setMonth, status, setStatus, boot } = useMonthBoot();
+  const period = usePeriodLabel(month); // the days the figures cover, said once
   const [recs, setRecs] = useState<Rec[]>([]);
   const [cats, setCats] = useState<Cat[]>([]);
   const [busy, setBusy] = useState(false);
@@ -251,6 +253,7 @@ export default function RecurringsPage() {
   return (
     <Shell
       title="Recurrings"
+      subtitle={period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
         <HeaderMenu>
@@ -280,7 +283,7 @@ export default function RecurringsPage() {
               // the labels are short. "Paid so far of $19,708 expected" wrapped under its figure.
               primary={{
                 value: usd(paidSoFar, { cents: false }),
-                label: isCurrentMonth ? "paid so far" : "paid",
+                label: "paid",
               }}
               secondary={{
                 value: usd(leftToPay, { cents: false }),
