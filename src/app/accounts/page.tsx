@@ -146,7 +146,7 @@ function AccountRow({ a, when, active, onOpen }: { a: Account; when: string | nu
         {meta && <div className="truncate text-xs text-[var(--muted)]">{meta}</div>}
       </div>
       {/* A card's or loan's balance is what's owed; none of these is an inflow. */}
-      <AmountCell value={a.amount} sign={false} excluded quiet className="w-28 shrink-0" />
+      <AmountCell value={a.amount} sign={false} excluded quiet cents={false} className="w-28 shrink-0" />
     </div>
   );
 }
