@@ -79,8 +79,12 @@ export function splitDriftFor(
 // Apply all split rules to matching, not-yet-split transactions. Idempotent:
 // a parent is "already split" once child rows (hash `<parent>:s*`) exist, and a
 // split parent is marked excluded so it never double-counts or re-matches.
-// Pending charges are never split: a sync replaces a pending row (remove + add),
-// which would bring the parent back un-excluded while its children survive.
+// Pending charges are split too, so a bill shows in its parts' categories
+// while it waits to post. The parts are pending while their parent is, and
+// follow it: a sync that drops a pending row drops its parts (importPlaid
+// Transactions), so the posted row splits afresh; a parent whose amount no
+// longer matches its parts (it posted at a different amount) is restored to
+// counting whole and re-matched.
 // Expenses only: the parts are inserted as debits, so matching on magnitude
 // alone turned a refund of exactly the rule's amount into that much spending.
 export function applySplitRules(): number {
@@ -91,9 +95,9 @@ export function applySplitRules(): number {
   if (rules.length === 0) return 0;
 
   const findMatches = db.prepare(
-    `SELECT id, date, merchant, amount, account, source, hash
+    `SELECT id, date, merchant, amount, account, source, hash, pending
      FROM transactions
-     WHERE LOWER(merchant) LIKE ? AND amount < 0 AND ABS(ABS(amount) - ?) < 0.01 AND excluded = 0 AND pending = 0`
+     WHERE LOWER(merchant) LIKE ? AND amount < 0 AND ABS(ABS(amount) - ?) < 0.01 AND excluded = 0`
   );
   const hasChildren = db.prepare(
     "SELECT 1 FROM transactions WHERE hash LIKE ? LIMIT 1"
@@ -104,11 +108,32 @@ export function applySplitRules(): number {
   const insertChild = db.prepare(
     `INSERT OR IGNORE INTO transactions
        (date, merchant, rawMerchant, amount, categoryId, account, pending, excluded, source, hash)
-     VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+  );
+  // Parents whose parts no longer add up to them: a pending charge that
+  // posted in place at another amount.
+  const stale = db.prepare(
+    `SELECT p.id, p.hash FROM transactions p
+     JOIN transactions c ON c.hash LIKE p.hash || ':s%'
+     WHERE p.hash NOT LIKE '%:s%'
+     GROUP BY p.id HAVING ABS(SUM(c.amount) - p.amount) >= 0.01`
+  );
+  const dropParts = db.prepare("DELETE FROM transactions WHERE hash LIKE ?");
+  const restoreParent = db.prepare("UPDATE transactions SET excluded = 0 WHERE id = ?");
+  // Parts are pending exactly while their parent is (one that posted in place).
+  const syncPending = db.prepare(
+    `UPDATE transactions AS c SET pending = p.pending
+     FROM transactions p
+     WHERE c.hash LIKE p.hash || ':s%' AND p.hash NOT LIKE '%:s%' AND c.pending != p.pending`
   );
 
   let split = 0;
   const tx = db.transaction(() => {
+    for (const p of stale.all() as { id: number; hash: string }[]) {
+      dropParts.run(`${p.hash}:s%`);
+      restoreParent.run(p.id);
+    }
+    syncPending.run();
     for (const rule of rules) {
       const parts = JSON.parse(rule.parts) as SplitPart[];
       const matches = findMatches.all(
@@ -122,6 +147,7 @@ export function applySplitRules(): number {
         account: string;
         source: string;
         hash: string;
+        pending: number;
       }[];
       for (const t of matches) {
         if (hasChildren.get(`${t.hash}:%`)) continue; // already split
@@ -135,6 +161,7 @@ export function applySplitRules(): number {
             -Math.abs(p.amount),
             p.categoryId,
             t.account,
+            t.pending,
             t.source,
             `${t.hash}:s${i}`
           );
