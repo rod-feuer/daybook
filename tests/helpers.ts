@@ -39,6 +39,8 @@ export const TABLES = [
   "split_rules",
   "budget_entries",
   "categories",
+  "balances",
+  "accounts",
 ];
 
 export function wipe(except: string[] = []) {

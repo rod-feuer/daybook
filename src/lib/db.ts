@@ -143,6 +143,7 @@ function init(db: Database.Database) {
   ensureMergeDismissals(db);
   ensurePlans(db);
   ensurePlanCharges(db);
+  ensureAccounts(db);
 }
 
 // Individual charges the user flagged as one-offs, excluded from their
@@ -227,6 +228,38 @@ export function ensurePlans(db: Database.Database) {
 // pin it is not the user's edit, so a charge here reads as auto.
 export function ensurePlanCharges(db: Database.Database) {
   db.exec("CREATE TABLE IF NOT EXISTS plan_charges (hash TEXT PRIMARY KEY, key TEXT NOT NULL)");
+}
+
+// What the household owns and owes (POSITIONING §12, layer 1). An account is
+// a bank link's account (source 'plaid', keyed by Plaid's account_id) or one
+// the owner keeps by hand ('manual': a home, a vehicle, an unlinked account).
+// `side` says how its balance counts in net worth; `kind` groups it. A
+// balance is one per account per day, stored as Plaid states it: what the
+// account holds for an asset, what is owed for a liability. `source` says
+// where it came from: the bank, the owner, or the owner's estimate.
+export function ensureAccounts(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL CHECK (source IN ('plaid','manual')),
+      plaidAccountId TEXT UNIQUE,
+      institution TEXT,
+      mask TEXT,
+      subtype TEXT,
+      name TEXT NOT NULL,
+      side TEXT NOT NULL CHECK (side IN ('asset','liability')),
+      kind TEXT NOT NULL CHECK (kind IN ('cash','card','loan','mortgage','investment','property','vehicle','other')),
+      hidden INTEGER NOT NULL DEFAULT 0,
+      inNetWorth INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS balances (
+      accountId INTEGER NOT NULL REFERENCES accounts(id),
+      asOf TEXT NOT NULL,
+      amount REAL NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('bank','owner','estimate')),
+      PRIMARY KEY (accountId, asOf)
+    );
+  `);
 }
 
 // Merge suggestions the user rejected, keyed by the proposed canonical name, so

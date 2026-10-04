@@ -15,14 +15,15 @@ process.on("exit", () => fs.rmSync(dir, { recursive: true, force: true }));
 
 export type BankTxn = { id: string; date: string; name: string; amount: number; pending?: boolean };
 // Amounts use Plaid's sign: positive is money out.
-export function setBankPayload(txns: BankTxn[]) {
+// `balance` is the account's current balance, as Plaid sends it with the pull.
+export function setBankPayload(txns: BankTxn[], balance?: number) {
   fs.writeFileSync(
     payload,
     JSON.stringify({
       items: [
         {
           item: { item_id: "item-1" },
-          accounts: [{ account_id: "acct-1", name: "Visa" }],
+          accounts: [{ account_id: "acct-1", name: "Visa", type: "credit", subtype: "credit card", mask: "0001", ...(balance === undefined ? {} : { balances: { current: balance } }) }],
           transactions: txns.map((t) => ({ transaction_id: t.id, account_id: "acct-1", date: t.date, name: t.name, merchant_name: t.name, amount: t.amount, pending: !!t.pending })),
         },
       ],
