@@ -1,7 +1,7 @@
 import { getDb } from "./db";
 import { categorizeByRules, categorizeByHistory, learnRule } from "./core";
 import { proposeCategories, CONFIDENCE } from "./categorize";
-import { allMergeSuggestions } from "./merges";
+import { allMergeSuggestions, type MergeSuggestion } from "./merges";
 import type { Category } from "./types";
 
 // A proposed category for an uncategorized vendor, with where it came from so the
@@ -55,10 +55,12 @@ function modelAnswers(db: ReturnType<typeof getDb>, cats: Category[]): Map<strin
 // vendor? Its category follows from the answer, and Combine sets it. So the
 // category queue proposes nothing for it and the model is not asked; it points
 // at the merge card instead. Dismiss the merge and the vendor is back here.
-export type DeferredToMerge = { merchant: string; count: number; to: string };
-function pendingMerges(): Map<string, string> {
-  const to = new Map<string, string>();
-  for (const g of allMergeSuggestions()) for (const v of g.variants) if (v.merchant !== g.canonical) to.set(v.merchant, g.canonical);
+// A charge whose vendor waits on a merge card: the card rides along, so a row
+// can be answered where it sits (Combine) as well as on Transactions.
+export type DeferredToMerge = { merchant: string; count: number; to: string; merge: MergeSuggestion };
+function pendingMerges(): Map<string, MergeSuggestion> {
+  const to = new Map<string, MergeSuggestion>();
+  for (const g of allMergeSuggestions()) for (const v of g.variants) if (v.merchant !== g.canonical) to.set(v.merchant, g);
   return to;
 }
 
@@ -101,9 +103,9 @@ export function categorizeSuggestions(): {
       dismissedCount++;
       continue;
     }
-    const to = mergeTo.get(u.merchant);
-    if (to) {
-      deferred.push({ merchant: u.merchant, count: u.count, to });
+    const merge = mergeTo.get(u.merchant);
+    if (merge) {
+      deferred.push({ merchant: u.merchant, count: u.count, to: merge.bill?.name ?? merge.canonical, merge });
       continue;
     }
     let categoryId = categorizeByRules(u.merchant);

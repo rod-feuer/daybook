@@ -2829,7 +2829,9 @@ test("an uncategorized duplicate candidate is deferred to the merge, which names
   assert.match(merge!.note ?? "", /it joins that bill and takes its category, Carmel Home \(defer\)/, "the possible-match card says what Combine does: joins the bill, sets the category");
 
   const before = categorizeSuggestions();
-  assert.deepEqual(before.deferred, [{ merchant: "Dga", count: 1, to: "Dgappcare Chicago" }], "the category queue defers Dga to the merge");
+  assert.deepEqual(before.deferred.map(({ merchant, count, to }) => ({ merchant, count, to })), [{ merchant: "Dga", count: 1, to: "Dgappcare Chicago" }], "the category queue defers Dga to the merge");
+  // The card rides along, with the bill's evidence, so a row can answer it.
+  assert.deepEqual(before.deferred[0].merge.bill, { name: "Dgappcare Chicago", amount: 29, cadence: "monthly", day: Number(daysAgo(28).slice(8, 10)) });
   assert.ok(!before.suggestions.some((s) => s.merchant === "Dga"), "no proposal of its own");
   assert.equal(before.needsModelCount, 0, "and the model is not asked about it");
   await withModelApis({ typesafe: true }, () => ({ choice: "Other", confidence: 0.5, probabilities: { Other: 0.5 } }), async (sent) => {

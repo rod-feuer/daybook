@@ -1,7 +1,7 @@
 "use client";
 
 import { buildVerdict } from "@/lib/verdict";
-import { withoutAmountQualifier } from "@/lib/series";
+import { withoutAmountQualifier, dayLabel } from "@/lib/series";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
@@ -797,6 +797,21 @@ function UncategorizedResolver({
     setBusy(null);
   }
 
+  // The merge card's Combine, from the row: the vendor folds into the bill's
+  // and the row leaves (it has the bill's category now). Same request as the
+  // card on Transactions.
+  async function combineInto(t: UncatTx, d: DeferredToMerge) {
+    const g = d.merge;
+    setBusy(t.id);
+    setRows((prev) => prev.filter((x) => x.merchant !== t.merchant)); // optimistic
+    await mutate(
+      () => postJson("/api/merges", { action: "approve", keys: g.dismissKeys, canonical: g.canonical, variants: g.variants.map((v) => v.merchant), categoryId: g.categoryId }),
+      { success: `Combined into ${d.to}`, error: "Couldn't combine — please try again" },
+      { refresh: "always" }
+    );
+    setBusy(null);
+  }
+
   // Taking a proposal is the queue's Apply: the vendor's rule is learned and its
   // other uncategorized charges fill with it, not only this row's.
   async function applyProposal(t: UncatTx, s: CategorySuggestion) {
@@ -832,12 +847,33 @@ function UncategorizedResolver({
         {s.guess ? "a guess" : "possible match"}
       </span>
     ) : null;
-  // The merge card and its evidence live on Transactions; the row only points.
-  const mergeLink = (d: DeferredToMerge) => (
-    <Link href="/transactions" data-deferred={d.to} onClick={(e) => e.stopPropagation()} className="btn-link shrink-0 text-xs">
-      possibly {d.to} →
-    </Link>
-  );
+  // A charge whose vendor waits on a merge card is answered here too: the
+  // card's question with its evidence (the bill's amount and day) and its own
+  // Combine, which joins the bill and takes its category. Going to
+  // Transactions to say yes to one clear question was a detour. The card
+  // stays there as the full view; answering either clears both.
+  const mergeAsk = (t: UncatTx, d: DeferredToMerge) => {
+    const b = d.merge.bill;
+    return (
+      <span className="flex shrink-0 items-center gap-2 text-xs" data-deferred={d.to}>
+        <span className="text-[var(--muted)]">
+          Same as <span className="font-medium text-[var(--foreground)]">{d.to}</span>
+          {b && ` (${usd(b.amount, { cents: b.amount % 1 !== 0 })} ${b.cadence}, the ${dayLabel(b.day)})`}?
+        </span>
+        <button
+          disabled={busy === t.id}
+          onClick={(e) => {
+            e.stopPropagation();
+            void combineInto(t, d);
+          }}
+          className="btn-ghost tap text-xs"
+          data-inline-combine
+        >
+          Combine
+        </button>
+      </span>
+    );
+  };
   const applyButton = (t: UncatTx, s: CategorySuggestion) => (
     <button
       disabled={busy === t.id}
@@ -893,12 +929,12 @@ function UncategorizedResolver({
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:hidden">
                   {picker(t, s, "-ml-2")}
                   {s && proposalTag(s)}
-                  {d && mergeLink(d)}
+                  {d && mergeAsk(t, d)}
                 </div>
               </div>
               <span className="hidden shrink-0 items-center justify-end gap-2 sm:flex">
                 {s && proposalTag(s)}
-                {d && mergeLink(d)}
+                {d && mergeAsk(t, d)}
                 {picker(t, s)}
                 {s && applyButton(t, s)}
               </span>
