@@ -29,11 +29,11 @@ export default function ThemeToggle({ compact = false }: { compact?: boolean }) 
   const label = theme === "dark" ? "Light mode" : "Dark mode";
   if (compact) {
     return (
-      // A tab-bar utility: icon over a word, like the tabs, in a narrower
-      // cell past the hairline. The icon alone didn't say what it did.
-      <button type="button" onClick={toggle} className="tap flex w-12 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]" aria-label={label}>
+      // A tab-bar utility in a narrow cell past the hairline, icon only: with
+      // five page tabs, the word "Theme" crowded their labels together. Named
+      // for screen readers (aria-label) and on hover (title).
+      <button type="button" onClick={toggle} title={label} className="tap flex w-9 items-center justify-center py-2 text-[var(--muted)] transition-colors hover:text-[var(--foreground)]" aria-label={label}>
         <span aria-hidden className="text-[15px] leading-none">{theme === "dark" ? "☀️" : "🌙"}</span>
-        <span aria-hidden>Theme</span>
       </button>
     );
   }

@@ -13,7 +13,7 @@ const CHROME =
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 const month = new Date().toISOString().slice(0, 7);
-const PAGES = ["/", "/transactions", "/categories", "/recurrings"];
+const PAGES = ["/", "/transactions", "/categories", "/recurrings", "/accounts"];
 const APIS = [
   "/api/dashboard",
   "/api/transactions?limit=5",

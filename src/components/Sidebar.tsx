@@ -65,12 +65,22 @@ const RecurringsIcon = () => (
   </Icon>
 );
 
+// Accounts — a bank's columns under a pediment.
+const AccountsIcon = () => (
+  <Icon>
+    <path d="M3 10l9-6 9 6" />
+    <path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8" />
+    <path d="M3 21h18" />
+  </Icon>
+);
+
 // Shared by the desktop sidebar and the mobile bottom-tab bar (BottomNav).
 export const NAV = [
   { href: "/", label: "Dashboard", Icon: DashboardIcon },
   { href: "/transactions", label: "Transactions", Icon: TransactionsIcon },
   { href: "/categories", label: "Categories", Icon: CategoriesIcon },
   { href: "/recurrings", label: "Recurrings", Icon: RecurringsIcon },
+  { href: "/accounts", label: "Accounts", Icon: AccountsIcon },
 ];
 
 // `signOut`: the layout passes whether the password gate is on (server-side check).

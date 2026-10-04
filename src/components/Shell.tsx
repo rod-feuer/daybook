@@ -78,7 +78,9 @@ export default function Shell({
           )}
           {subtitle && <p className="order-last w-full text-xs text-[var(--muted)] sm:order-none sm:w-auto">{subtitle}</p>}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* At least the month picker's height (38px), so a page without one
+            (Accounts) has the same header height and switching tabs doesn't jump. */}
+        <div className="flex min-h-9.5 flex-wrap items-center justify-end gap-2">
           {month}
           {actions}
         </div>

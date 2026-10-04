@@ -285,6 +285,7 @@ async function honestLoadStates(browser) {
     { route: "/transactions", fail: /\/api\/transactions\?/, empty: "no transactions match.", what: "transactions" },
     { route: "/categories", fail: /\/api\/categories(\?|$)/, empty: "no categories.", what: "categories" },
     { route: "/recurrings", fail: /\/api\/recurrings\?/, empty: "no recurring patterns", what: "recurring bills" },
+    { route: "/accounts", fail: /\/api\/net-worth/, empty: "no balances yet", what: "accounts" },
   ];
   for (const c of cases) {
     await withPage(browser, async (page, errs) => {
@@ -424,7 +425,7 @@ async function pageHeader(browser) {
         utils: !!utils && utils.compareDocumentPosition(document.querySelector("nav[aria-label='Primary'] > a")) & Node.DOCUMENT_POSITION_PRECEDING,
       };
     });
-    record("page header", "the current page is foreground, not the accent, and Sign out's cluster sits after the four tabs", nav.side && nav.bottom && nav.tabs === 4 && nav.utils, `side=${nav.side}, bottom=${nav.bottom}, tabs=${nav.tabs}, utilities after tabs=${!!nav.utils}`);
+    record("page header", "the current page is foreground, not the accent, and Sign out's cluster sits after the five tabs", nav.side && nav.bottom && nav.tabs === 5 && nav.utils, `side=${nav.side}, bottom=${nav.bottom}, tabs=${nav.tabs}, utilities after tabs=${!!nav.utils}`);
   });
 }
 
@@ -1836,8 +1837,8 @@ async function headerNav(browser) {
 
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
     await page.goto(BASE + "/", { waitUntil: "networkidle2" });
-    const util = await page.$eval("[data-nav-utilities]", (d) => d.innerText.trim());
-    record("header nav", "the phone tab bar's utilities are labelled", /Theme/.test(util), `"${util.replace(/\s+/g, " ")}"`);
+    const util = await page.$$eval("[data-nav-utilities] button", (bs) => bs.map((b) => b.getAttribute("aria-label")).join(", "));
+    record("header nav", "the phone tab bar's utilities are icons, each named for a screen reader", /mode/i.test(util), `"${util}"`);
   });
 }
 

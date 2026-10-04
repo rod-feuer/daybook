@@ -12,6 +12,7 @@ const PAGES = [
   ["/transactions", "transactions", true],
   ["/categories", "categories", true],
   ["/recurrings", "recurrings", false],
+  ["/accounts", "accounts", false],
 ];
 
 // Set any month-picker <select> (options look like YYYY-MM) to MONTH and fire change.
