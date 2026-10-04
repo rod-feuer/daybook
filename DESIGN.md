@@ -212,16 +212,19 @@ carry the qualifier where one is due ("Spent so far"; a projected figure's
 measures is a "?" hint beside the caption, never a line of its own, and a
 verdict is written to fit one line);
 then two panels centred on one line on the page's own 3:2 grid, run to the card's edges: the figures as columns
-across the chart card's width below — the first, the result (net, spent so
-far, paid so far), at the summary size and every other at the card-title
-size, on every page — and the budget
+across the chart card's width below — every figure at the summary size, in
+three columns on every page, the result (net, spent so far, paid so far)
+first: its place ranks it, since peers at two sizes read as a mistake, not a
+ranking — and the budget
 across the category card's (its text starting on that card's text), with the hairline
 in the middle of the gutter. The budget panel reads label, share, bar, then
 the verdict at the card-title size — "on pace to finish under budget",
 "2 overdue" — since every verdict describes the bar; counts that follow it
 ("· 20 upcoming · 60 paid", "· 6 not budgeted") are bookkeeping, a 12px muted
 caption on the same line, never the verdict's size. They stack below desktop width. One colour signal per card, the verdict's: only a finished
-month's net takes its colour.
+month's net takes its colour, and a delta under a figure reads in the muted
+text, its arrow saying the direction (and there is none before five days of
+the month: the labels and the verdict already say it is early).
 
 **Page anatomy** — header: title, optional one-line subtitle, the month picker
 in one slot on every page, page actions to its right (on a phone the title

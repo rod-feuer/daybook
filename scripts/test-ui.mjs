@@ -471,11 +471,16 @@ async function dashboardAnatomy(browser) {
     // read as a paragraph. A projected figure's frame is the "$X so far"
     // beneath it (the projection is the whole month, the actual is what has
     // posted). Net stays the summary size; income and expenses drop to the
-    // card-title size so the result outranks its parts.
+    // card-title size so the result outranks its parts. (Superseded: one size.)
     const forward = f.figs.every((x) => x.sub.includes("so far"));
     record("dashboard", "the three figures are in one frame and reconcile: income − expenses = net", f.figs.length === 3 && /^net( so far)?\|income( so far)?\|expenses( so far)?$/.test(f.figs.map((x) => x.label).join("|")) && Math.abs(income.value - expenses.value - net.value) <= 1, f.figs.map((x) => `${x.label} ${x.value}`).join(" | "));
     record("dashboard", "the card does not repeat the month, and a projected figure carries its actual so far beneath it", !f.repeatedMonth && f.frameWords === 0, `eyebrow=${f.repeatedMonth} · ${f.frameWords} frame word(s) · ` + (forward ? f.figs.map((x) => x.sub).join(" | ") : "not projecting in this fixture month"));
-    record("dashboard", "net is the summary figure; income and expenses are the card-title size", f.figs.length === 3 && net.px === "24px" && income.px === "15px" && expenses.px === "15px", f.figs.map((x) => x.px).join("/"));
+    // Peers in equal columns at one size: the result ranks by its place,
+    // first. 24px beside 15px read as a mistake, not a ranking.
+    record("dashboard", "net, income and expenses are one size (24px), net first", f.figs.length === 3 && [net, income, expenses].every((x) => x.px === "24px") && /^net/.test(f.figs[0].label), f.figs.map((x) => x.px).join("/"));
+    // One colour signal per card, the verdict's: a delta reads in the muted text.
+    const deltaColours = await page.evaluate(() => { const probe = (v) => { const p = document.createElement("span"); p.style.color = `var(${v})`; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }; const bad = probe("--bad"), good = probe("--good"); return [...document.querySelectorAll("[data-summary] [data-figure] ~ div *")].filter((e) => /▲|▼/.test(e.textContent)).map((e) => getComputedStyle(e).color).filter((c) => c === bad || c === good).length; });
+    record("dashboard", "the deltas under the figures carry no colour; the verdict is the card's one signal", deltaColours === 0, `${deltaColours} coloured delta(s)`);
     // The verdict is the card's sentence and reads first. Two panels: the
     // three figures as equal columns from the left, and the budget (its label,
     // its share, the bar, the note) to their right, level with them — one
@@ -1810,8 +1815,8 @@ async function headerNav(browser) {
       await page.waitForSelector("[data-summary] [data-figure]");
       sizes[path] = await page.$$eval("[data-summary] [data-figure]", (fs) => fs.map((f) => getComputedStyle(f).fontSize));
     }
-    const ranked = Object.values(sizes).every((f) => f[0] === "24px" && f.slice(1).every((x) => x === "15px") && f.length >= 2);
-    record("header nav", "every summary card leads with one 24px result, the rest at 15px", ranked, JSON.stringify(sizes));
+    const oneSize = Object.values(sizes).every((f) => f.length >= 2 && f.every((x) => x === "24px"));
+    record("header nav", "every summary card's figures are one size (24px)", oneSize, JSON.stringify(sizes));
 
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
     await page.goto(BASE + "/", { waitUntil: "networkidle2" });
