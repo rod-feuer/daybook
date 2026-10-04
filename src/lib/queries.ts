@@ -140,6 +140,45 @@ export function distinctVendors(): { merchant: string; displayName: string; coun
     .sort((a, b) => b.count - a.count || a.displayName.localeCompare(b.displayName));
 }
 
+// Other vendors whose name begins like this one's: the bank's spellings of
+// one place (Puccini's, Puccini'spizzapacarmel In, Puccinis Smilcarmel In;
+// Charleston's, Charlestons Carmel, Charlestcarmel In), offered on the
+// vendor's shelf to combine in one step. The first words, letters only, share
+// their first seven letters (shorter words must match whole), so a short
+// common start ("Cha", "South") never pairs Chatham with Charleston's. The
+// user ticks off a wrong pair ("American Airlines" / "American Express")
+// before combining; nothing happens on its own. Keyed by canonical vendor.
+export function similarVendors(
+  merchant: string
+): { merchant: string; displayName: string; count: number; categoryName: string | null }[] {
+  const links = getMerchantLinks();
+  const me = canonicalMerchant(merchant, links);
+  const head = (name: string) => (name.toLowerCase().trim().split(/\s+/)[0] ?? "").replace(/[^a-z]/g, "");
+  const alike = (a: string, b: string) => {
+    if (!a || !b) return false;
+    if (a.length < 7 || b.length < 7) return a === b && a.length >= 4;
+    return a.slice(0, 7) === b.slice(0, 7);
+  };
+  const mine = new Set([head(me), head(merchantDisplayName(me, getRecurringSettings(), links))]);
+  const out = distinctVendors().filter(
+    (v) => v.merchant !== me && [head(v.merchant), head(v.displayName)].some((h) => [...mine].some((m) => alike(m, h)))
+  );
+  if (!out.length) return [];
+  // Each candidate's usual category, so a wrong pair is easy to spot.
+  const db = getDb();
+  const catOf = (vendor: string) => {
+    const names = Object.entries(links).filter(([, p]) => canonicalMerchant(p, links) === vendor).map(([a]) => a).concat(vendor);
+    const row = db
+      .prepare(
+        `SELECT c.name FROM transactions t JOIN categories c ON c.id = t.categoryId
+         WHERE t.merchant IN (${names.map(() => "?").join(",")}) GROUP BY c.id ORDER BY COUNT(*) DESC LIMIT 1`
+      )
+      .get(...names) as { name: string } | undefined;
+    return row?.name ?? null;
+  };
+  return out.map((v) => ({ ...v, categoryName: catOf(v.merchant) }));
+}
+
 export type MatchRule = {
   matchMode: "exact" | "contains";
   matchText: string | null;
@@ -1141,6 +1180,8 @@ export function merchantSummary(merchant: string, series?: string | null) {
     // Found by the detector, not added: it doesn't count yet (the shelf offers Add).
     planConfirmed: rec != null && !!db.prepare("SELECT 1 FROM plans WHERE key = ?").get(rec.merchant),
 
+    // Vendors named like this one, to combine in one step (the vendor shelf, not a plan's).
+    similar: seriesRow ? [] : similarVendors(merchant),
     settingsKey, // where alias / expected / cadence / ended / match live for this shelf
     plans,
     planList,
