@@ -8,6 +8,7 @@ import {
   ensureRecurringTxExclusions,
   ensureRecurringTxInclusions,
   ensureBudgetEntries,
+  ensureTxDescriptor,
   BUDGET_ALWAYS,
 } from "./db";
 import type { TransactionWithCategory, Recurring, Category } from "./types";
@@ -537,6 +538,10 @@ function spendByYear(scope: string, args: (string | number)[]): { year: string; 
 // is linked to, else the vendor's most recently charged plan (the one "In
 // plan" would put it into) — and the plan's display name.
 export type ChargeDetail = TransactionRow & {
+  // The bank's own text for the charge, when it says more than the name it
+  // is filed under: Plaid's `name` for a Plaid charge, the original
+  // descriptor for an imported one. Null when unknown.
+  bankText: string | null;
   recurringIncluded: 0 | 1;
   planKey: string | null;
   planConfirmed: boolean;
@@ -556,6 +561,7 @@ export type ChargeDetail = TransactionRow & {
 };
 export function transactionById(id: number): ChargeDetail | null {
   const db = getDb();
+  ensureTxDescriptor(db);
   ensureRecurringTxExclusions(db);
   ensureRecurringTxInclusions(db);
   const row = db
@@ -609,9 +615,11 @@ export function transactionById(id: number): ChargeDetail | null {
   const vendorCount = (
     db.prepare(`SELECT COUNT(*) AS n FROM transactions t WHERE ${scopeSql} AND ${notParent}`).get(...scopeArgs) as { n: number }
   ).n;
+  const raw = row as unknown as { descriptor: string | null; source: string; rawMerchant: string | null };
   return {
     ...row,
     displayName: chargeDisplayName(row, settings, links, planNames(settings)),
+    bankText: raw.descriptor ?? (raw.source !== "plaid" ? raw.rawMerchant : null),
     planKey: plan?.merchant ?? null,
     planName: plan ? (settings[plan.merchant]?.alias ?? displayMerchant(plan.merchant)) : null,
     // A plan the detector found and nobody added doesn't count: its charge

@@ -40,6 +40,14 @@ export function ChargeHeader({ data, onOpenVendor }: { data: ChargeDetail | null
       {data.displayName !== data.merchant && (
         <div className="truncate text-[11px] text-[var(--muted)]">{data.merchant}</div>
       )}
+      {/* The bank's own words, when they say more than the names above:
+          "Commissary" was Plaid's guess; "GP001 - CAPITOL COMMINDIANAPOLIS
+          IN" is where the charge was. */}
+      {data.bankText && ![data.displayName, data.merchant].some((n) => n.toLowerCase() === data.bankText!.toLowerCase()) && (
+        <div className="truncate text-[11px] text-[var(--muted)]" data-bank-text title={data.bankText}>
+          Bank: {data.bankText}
+        </div>
+      )}
       <div className="text-xs text-[var(--muted)]">
         posted {monthDayYear(data.date)} · {data.account}
         {data.pending ? " · pending" : ""}
