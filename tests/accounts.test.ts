@@ -84,3 +84,63 @@ test("an account left out of net worth, or hidden, doesn't count", () => {
   getDb().prepare("UPDATE accounts SET hidden = 1 WHERE plaidAccountId = 'brk'").run();
   assert.equal(netWorth("2026-10-04").net, 1000 - 50000);
 });
+
+import { createManualAccount, setValue, removeValue, updateAccount, deleteManualAccount, accountDetail } from "../src/lib/accounts";
+
+test("a home the owner values counts in what's owned, marked as an estimate", () => {
+  // WHY: a mortgage without its home reads as pure debt. The home's value is
+  // the owner's judgement, so it counts but says it's an estimate.
+  recordBalances(bank(), "2026-10-04");
+  const home = createManualAccount("Sample home", "property", { asOf: "2026-10-04", amount: 80000, estimate: true });
+  const nw = netWorth("2026-10-04");
+  assert.deepEqual([nw.owned, nw.net], [111000, 111000 - 50200]);
+  const row = nw.accounts.find((a) => a.id === home)!;
+  assert.deepEqual([row.side, row.kind, row.origin, row.source], ["asset", "property", "manual", "estimate"]);
+});
+
+test("a linked account's balance is the bank's: the owner can't set it or delete the account", () => {
+  // WHY: the bank's balance is the fact; an owner figure on top would be
+  // overwritten by the next sync or, worse, mixed into its history.
+  recordBalances(bank(), "2026-10-04");
+  const linked = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'chk'").get() as { id: number }).id;
+  assert.equal(setValue(linked, { asOf: "2026-10-04", amount: 1, estimate: false }), false);
+  assert.equal(deleteManualAccount(linked), false);
+  assert.equal(netWorth("2026-10-04").owned, 31000, "untouched");
+});
+
+test("a linked account renamed by the owner keeps the name through the next sync", () => {
+  // WHY: banks send names like "CREDIT CARD"; the owner's name must survive
+  // the daily sync, or every rename is undone overnight.
+  recordBalances(bank(), "2026-10-04");
+  const card = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'card'").get() as { id: number }).id;
+  updateAccount(card, { name: "Everyday card" });
+  recordBalances(bank(), "2026-10-05");
+  assert.equal(accountDetail(card)!.name, "Everyday card");
+});
+
+test("an account left out of net worth stays listed, so it can be counted again", () => {
+  // WHY: an account that vanished when left out could never be brought back.
+  recordBalances(bank(), "2026-10-04");
+  const card = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'card'").get() as { id: number }).id;
+  updateAccount(card, { counted: false });
+  let nw = netWorth("2026-10-04");
+  assert.equal(nw.owed, 50000, "not summed");
+  assert.equal(nw.accounts.find((a) => a.id === card)?.counted, false, "but listed");
+  updateAccount(card, { counted: true });
+  nw = netWorth("2026-10-04");
+  assert.equal(nw.owed, 50200);
+});
+
+test("a hand-kept account's values: the same day replaces, a value can be removed but the last one stays, and the account can be deleted", () => {
+  // WHY: a typo'd value must be fixable without leaving the account valueless
+  // (it would drop off the page, out of reach); deleting takes its history too.
+  const car = createManualAccount("Sample car", "vehicle", { asOf: "2026-01-01", amount: 30000, estimate: true });
+  setValue(car, { asOf: "2026-10-04", amount: 25000, estimate: true });
+  setValue(car, { asOf: "2026-10-04", amount: 24000, estimate: true });
+  assert.deepEqual(accountDetail(car)!.history.map((h) => [h.asOf, h.amount]), [["2026-10-04", 24000], ["2026-01-01", 30000]]);
+  assert.equal(removeValue(car, "2026-10-04"), true);
+  assert.equal(removeValue(car, "2026-01-01"), false, "the last value stays");
+  assert.equal(deleteManualAccount(car), true);
+  assert.equal(accountDetail(car), null);
+  assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM balances WHERE accountId = ?").get(car) as { n: number }).n, 0, "its values went with it");
+});

@@ -1,0 +1,29 @@
+import type { NetWorth } from "@/lib/accounts";
+import { shortDate } from "@/lib/format";
+
+type Account = Pick<NetWorth["accounts"][number], "kind" | "origin" | "subtype" | "mask" | "source" | "asOf">;
+
+// Plaid's subtypes are lower case; a few are initialisms.
+const SUBTYPE: Record<string, string> = { ira: "IRA", roth: "Roth IRA", "401k": "401(k)", "403b": "403(b)", "457b": "457(b)", hsa: "HSA", "529": "529 plan", cd: "CD" };
+// What the owner picks when adding an account, in their words.
+export const KIND_LABEL: Record<string, string> = {
+  property: "Home", vehicle: "Vehicle", cash: "Cash", investment: "Investment", loan: "Loan", other: "Other",
+};
+
+const YEAR_MS = 365 * 24 * 3600 * 1000;
+export const olderThanAYear = (asOf: string, today: string) =>
+  Date.parse(today + "T00:00:00Z") - Date.parse(asOf + "T00:00:00Z") > YEAR_MS;
+
+// "IRA ··1234" for a linked account; "Home · estimate" for one kept by hand.
+export function accountKind(a: Account): string {
+  if (a.origin === "manual") return [KIND_LABEL[a.kind] ?? a.kind, a.source === "estimate" ? "estimate" : "set by you"].join(" · ");
+  const sub = a.subtype ? (SUBTYPE[a.subtype] ?? a.subtype.charAt(0).toUpperCase() + a.subtype.slice(1)) : null;
+  return sub && a.mask ? `${sub} ··${a.mask}` : (sub ?? "");
+}
+
+// When a figure isn't the page's day, its own date; an estimate over a year
+// old says so (it's meant to be revisited).
+export function accountWhen(a: Account, latest: string | null, today: string): string | null {
+  if (a.source === "estimate" && olderThanAYear(a.asOf, today)) return `${shortDate(a.asOf)}, over a year old`;
+  return a.asOf !== latest ? `as of ${shortDate(a.asOf)}` : null;
+}

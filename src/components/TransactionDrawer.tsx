@@ -19,28 +19,34 @@ import type { Cat, CatSummary, SettingsPatch, Summary, Vendor } from "@/componen
 import { CategoryBody, CategoryHeader } from "@/components/shelf/CategoryShelf";
 import { ChargeBody, ChargeHeader, SplitDialog } from "@/components/shelf/ChargeShelf";
 import { MerchantBody, MerchantHeader } from "@/components/shelf/MerchantShelf";
+import { AccountBody, AccountHeader } from "@/components/shelf/AccountShelf";
+import type { AccountDetail, OwnerValue } from "@/lib/accounts";
 
 type OpenOpts = { onChange?: () => void; amountHint?: number | null; series?: string }; // series: one plan of a multi-plan vendor
 type Target =
   | { kind: "merchant"; merchant: string; series?: string }
   | { kind: "category"; categoryId: number; month: string }
-  | { kind: "charge"; id: number };
+  | { kind: "charge"; id: number }
+  | { kind: "account"; id: number };
 
 type Shelf = {
   openMerchant: (merchant: string, opts?: OpenOpts) => void;
   openCategory: (categoryId: number, month: string, opts?: OpenOpts) => void;
   openCharge: (id: number, opts?: OpenOpts) => void;
+  openAccount: (id: number, opts?: OpenOpts) => void;
   active: Target | null; // what the shelf is currently showing, for active-state styling
 };
 const Ctx = createContext<Shelf>({
   openMerchant: () => {},
   openCategory: () => {},
   openCharge: () => {},
+  openAccount: () => {},
   active: null,
 });
 export const useTxDrawer = () => useContext(Ctx).openMerchant;
 export const useCategoryShelf = () => useContext(Ctx).openCategory;
 export const useChargeShelf = () => useContext(Ctx).openCharge;
+export const useAccountShelf = () => useContext(Ctx).openAccount;
 
 // Whether a given trigger is the one the shelf is currently showing — so a row or
 // bar can render a "selected" state while its detail is open (and make the
@@ -53,6 +59,7 @@ export const useShelfActive = () => {
     isCategory: (id: number, month: string) =>
       active?.kind === "category" && active.categoryId === id && active.month === month,
     isCharge: (id: number) => active?.kind === "charge" && active.id === id,
+    isAccount: (id: number) => active?.kind === "account" && active.id === id,
   };
 };
 
@@ -61,6 +68,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   const [mData, setMData] = useState<Summary | null>(null);
   const [cData, setCData] = useState<CatSummary | null>(null);
   const [xData, setXData] = useState<ChargeDetail | null>(null);
+  const [aData, setAData] = useState<AccountDetail | null>(null);
   const [back, setBack] = useState<Target | null>(null);
   const [amountHint, setAmountHint] = useState<number | null>(null);
   const [cats, setCats] = useState<Cat[]>([]);
@@ -133,6 +141,10 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     (id: number, keep = false) => read<ChargeDetail>(`/api/transactions/${id}`, setXData, keep),
     [read]
   );
+  const fetchAccount = useCallback(
+    (id: number, keep = false) => read<AccountDetail>(`/api/net-worth/accounts/${id}`, setAData, keep),
+    [read]
+  );
 
   const close = useCallback(() => {
     setTarget(null);
@@ -199,6 +211,23 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     [target, close, fetchCategory, holdSheet]
   );
 
+  // One account (the Accounts page): its value, history, and verbs.
+  const openAccount = useCallback(
+    (id: number, opts?: OpenOpts) => {
+      if (target?.kind === "account" && target.id === id) {
+        close();
+        return;
+      }
+      holdSheet();
+      onChange.current = opts?.onChange;
+      setAmountHint(null);
+      setBack(null);
+      setTarget({ kind: "account", id });
+      fetchAccount(id);
+    },
+    [target, close, fetchAccount, holdSheet]
+  );
+
   // Drill from a category's transaction into that vendor, remembering the
   // category so the panel can offer a "← Back".
   const drillToMerchant = (m: string, series?: string) => {
@@ -217,6 +246,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     setTarget(b);
     if (b.kind === "category") fetchCategory(b.categoryId, b.month);
     else if (b.kind === "charge") fetchCharge(b.id);
+    else if (b.kind === "account") fetchAccount(b.id);
     else fetchMerchant(b.merchant);
   };
 
@@ -264,6 +294,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     if (target?.kind === "category") fetchCategory(target.categoryId, target.month, true);
     else if (target?.kind === "merchant") fetchMerchant(target.merchant, target.series, true);
     else if (target?.kind === "charge") fetchCharge(target.id, true);
+    else if (target?.kind === "account") fetchAccount(target.id, true);
   };
   // Every shelf write has one shape: do it, and on success re-read what the
   // shelf is showing and tell the page behind it. `after` replaces the re-read
@@ -399,7 +430,27 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  const loading = target?.kind === "merchant" ? !mData : target?.kind === "category" ? !cData : !xData;
+  const loading =
+    target?.kind === "merchant" ? !mData : target?.kind === "category" ? !cData : target?.kind === "account" ? !aData : !xData;
+
+  // Account writes. A rename or a value shows on the shelf and the row, so
+  // they say nothing; a delete closes the shelf, so it says what happened.
+  const [confirmingAccountDelete, setConfirmingAccountDelete] = useState<number | null>(null);
+  const accountPatch = (id: number, patch: { name?: string; counted?: boolean }) =>
+    write(() => patchJson(`/api/net-worth/accounts/${id}`, patch), { error: UPDATE_ERROR });
+  const accountSetValue = (id: number, v: OwnerValue) =>
+    write(() => postJson(`/api/net-worth/accounts/${id}/values`, v), { error: "Couldn't save the value — please try again" });
+  const accountRemoveValue = (id: number, asOf: string) =>
+    write(() => deleteJson(`/api/net-worth/accounts/${id}/values?asOf=${asOf}`), { error: "Couldn't remove the value — please try again" });
+  function accountDelete(a: AccountDetail) {
+    if (confirmingAccountDelete !== a.id) {
+      setConfirmingAccountDelete(a.id);
+      setTimeout(() => setConfirmingAccountDelete((cur) => (cur === a.id ? null : cur)), 3000);
+      return;
+    }
+    setConfirmingAccountDelete(null);
+    return write(() => deleteJson(`/api/net-worth/accounts/${a.id}`), { success: `Deleted "${a.name}"`, error: `Couldn't delete "${a.name}" — please try again` }, close);
+  }
   useEffect(() => {
     if (!loading && asideRef.current) asideRef.current.style.minHeight = "";
   }, [loading, target]);
@@ -432,7 +483,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <Ctx.Provider value={{ openMerchant, openCategory, openCharge, active: target }}>
+    <Ctx.Provider value={{ openMerchant, openCategory, openCharge, openAccount, active: target }}>
       {children}
       {target && (
         <>
@@ -486,6 +537,8 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                   onRename={(name) => cData && categoryPatch(cData.id, { name }, "Couldn't rename — please try again")}
                   onEditAppearance={(patch) => cData && categoryPatch(cData.id, patch, "Couldn't update category — please try again")}
                 />
+              ) : target.kind === "account" ? (
+                <AccountHeader data={aData} onRename={(name) => aData && accountPatch(aData.id, { name })} />
               ) : (
                 <ChargeHeader data={xData} onOpenVendor={() => xData && drillToMerchant(xData.merchant)} />
               )}
@@ -503,13 +556,15 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
           <div className="flex-1 overflow-y-auto p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-4">
             {loadError ? (
               <LoadError
-                what={target.kind === "merchant" ? "this vendor" : target.kind === "category" ? "this category" : "this charge"}
+                what={target.kind === "merchant" ? "this vendor" : target.kind === "category" ? "this category" : target.kind === "account" ? "this account" : "this charge"}
                 onRetry={() =>
                   target.kind === "merchant"
                     ? fetchMerchant(target.merchant, target.series)
                     : target.kind === "category"
                       ? fetchCategory(target.categoryId, target.month)
-                      : fetchCharge(target.id)
+                      : target.kind === "account"
+                        ? fetchAccount(target.id)
+                        : fetchCharge(target.id)
                 }
               />
             ) : loading ? (
@@ -550,6 +605,15 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 onSetMonthBudget={(month, amount) => categorySetMonthBudget(cData.id, month, amount)}
                 onDelete={() => categoryDelete(cData)}
                 confirmingDelete={confirmingDelete === cData.id}
+              />
+            ) : target.kind === "account" && aData ? (
+              <AccountBody
+                data={aData}
+                onSetValue={(v) => accountSetValue(aData.id, v)}
+                onRemoveValue={(asOf) => accountRemoveValue(aData.id, asOf)}
+                onSetCounted={(counted) => accountPatch(aData.id, { counted })}
+                onDelete={() => accountDelete(aData)}
+                confirmingDelete={confirmingAccountDelete === aData.id}
               />
             ) : target.kind === "charge" && xData ? (
               <ChargeBody
@@ -593,7 +657,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
             )}
             {/* The way out follows the content, not the panel's edge: a
                 link pinned to the foot sat across a gap on every short shelf. */}
-            {target.kind !== "charge" && (target.kind === "merchant" ? mData : cData) && (
+            {(target.kind === "merchant" || target.kind === "category") && (target.kind === "merchant" ? mData : cData) && (
               <Link
                 href={
                   target.kind === "merchant"
