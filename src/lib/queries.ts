@@ -120,6 +120,26 @@ export function distinctMerchants(): { merchant: string; count: number }[] {
 // One entry per VENDOR (canonical merchant, descriptors folded together) with its
 // friendly display name — for the combine picker, so it lists "Central Indiana
 // Academy of Dance" once instead of every raw bank descriptor.
+// How far a month's figures run, for the header's period ("Oct 1–4") and so
+// the same days as the comparisons ("vs Sep 1–4"): in the month in progress,
+// the last day with a counted charge (the dashboard's own filter: not
+// excluded, not in a category left out of totals); a finished month, all of
+// it; 0 when the month has nothing counted yet.
+export function monthThroughDay(month: string): number {
+  const [y, m] = month.split("-").map(Number);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  if (month !== new Date().toISOString().slice(0, 7)) return days;
+  const row = getDb()
+    .prepare(
+      `SELECT MAX(CAST(substr(COALESCE(t.effectiveDate, t.date), 9, 2) AS INTEGER)) AS d
+       FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
+       WHERE substr(COALESCE(t.effectiveDate, t.date), 1, 7) = ? AND t.excluded = 0
+         AND COALESCE(c.excludeFromTotals, 0) = 0`
+    )
+    .get(month) as { d: number | null };
+  return row.d ?? 0;
+}
+
 export function distinctVendors(): { merchant: string; displayName: string; count: number }[] {
   const db = getDb();
   const links = getMerchantLinks();
