@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges } from "./db";
+import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureTxDescriptor } from "./db";
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
 import { normalizeMerchant } from "./merchant";
@@ -131,10 +131,14 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   // renamed 96 held charges, and 69 fell out of the vendor they'd been
   // combined into ("Southern Ridge Landscaindianapolis" became "Southern
   // Ridge"). So an update never touches merchant or rawMerchant.
+  // The bank's text is kept as first seen too, and filled in on rows stored
+  // before it was kept.
+  ensureTxDescriptor(db);
   const upsert = db.prepare(
-    `INSERT INTO transactions (date, merchant, rawMerchant, amount, categoryId, account, pending, source, hash)
-     VALUES (@date, @merchant, @rawMerchant, @amount, @categoryId, @account, @pending, 'plaid', @hash)
+    `INSERT INTO transactions (date, merchant, rawMerchant, descriptor, amount, categoryId, account, pending, source, hash)
+     VALUES (@date, @merchant, @rawMerchant, @descriptor, @amount, @categoryId, @account, @pending, 'plaid', @hash)
      ON CONFLICT(hash) DO UPDATE SET
+       descriptor = COALESCE(transactions.descriptor, excluded.descriptor),
        date = excluded.date,
        amount = excluded.amount,
        account = excluded.account,

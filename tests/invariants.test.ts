@@ -82,6 +82,14 @@ before(() => {
 });
 cleanDbBeforeEach(["categories"]); // categories are created once in before()
 
+// A plan the user added (durable plans): only these count as bills, and only
+// these anchor the merge queue's stray matching. Fixtures that insert a
+// detected plan as a user's bill mark it added with this.
+const added = (...keys: string[]) => {
+  for (const k of keys)
+    getDb().prepare("INSERT OR IGNORE INTO plans (key, vendor, amount, cadence, anchorDate) VALUES (?, ?, 0, 'monthly', '2026-01-01')").run(k, k);
+};
+
 test("merchantSummary carries next-due and match-rule overrides, and whether any override exists", () => {
   // WHY: the recurrings page's inline editor was the only place next-due and
   // matching could be edited. Moving them to the shelf means the shelf's data
@@ -830,6 +838,7 @@ test("recurring-match picks the renamed vendor by name, not a same-amount decoy"
   // The orphan: a new descriptor for Acme, uncategorized, posting ~1 month later.
   tx("Acme Power", { amount: -102, date: daysAgo(0), categoryId: null });
 
+  added("Acme Power Bill", "Zeta Water");
   const g = recurringMatchSuggestions(new Set()).find((x) =>
     x.variants.some((v) => v.merchant === "Acme Power")
   );
@@ -854,6 +863,7 @@ test("a borderline name match surfaces as a low-confidence suggestion", () => {
   // human, below the 0.9 auto-bar.
   tx("Metronet", { amount: -93, date: daysAgo(0), categoryId: null });
 
+  added("Metro Fibernet L Metfibenet");
   const g = recurringMatchSuggestions(new Set()).find((x) =>
     x.variants.some((v) => v.merchant === "Metronet")
   );
@@ -877,6 +887,7 @@ test("multiple stray descriptors of one vendor collapse into a single suggestion
   tx("Upgrade", { amount: -100, date: daysAgo(1), categoryId: null });
   tx("Upgrade, Inc. Co Entry Descr", { amount: -100, date: daysAgo(2), categoryId: null });
 
+  added("Upgrade, Inc. Payment");
   const s = recurringMatchSuggestions(new Set());
   const up = s.filter((g) => g.canonical === "Upgrade, Inc. Payment");
   assert.equal(up.length, 1, "the two strays form ONE card, not two");
@@ -2810,6 +2821,7 @@ test("an uncategorized duplicate candidate is deferred to the merge, which names
   for (const d of [daysAgo(88), daysAgo(58), last]) tx("Dgappcare Chicago", { amount: -29, date: d, categoryId: home, recurringId: rid });
   tx("Dga", { amount: -29.41, date: daysAgo(0), categoryId: null });
 
+  added("Dgappcare Chicago");
   const merge = allMergeSuggestions().find((g) => g.variants.some((v) => v.merchant === "Dga"));
   assert.ok(merge && merge.canonical === "Dgappcare Chicago", "the merge queue holds Dga as a candidate for the bill");
   assert.ok(merge!.lowConfidence, "a borderline name: the card is a possible match");
@@ -3510,6 +3522,7 @@ test("a name already combined into a vendor is never offered to another vendor's
   tx("South Central Inmartinsville In", { amount: -390, date: daysAgo(58), categoryId: CAT, recurringId: rid });
   tx("South Central Inmartinsville In", { amount: -400, date: last, categoryId: CAT, recurringId: rid });
   tx("Southern Ridge", { amount: -412.26, date: daysAgo(0), categoryId: CAT });
+  added("South Central Inmartinsville In");
   const offered = () => recurringMatchSuggestions(new Set()).some((g) => g.variants.some((v) => v.merchant === "Southern Ridge"));
   assert.equal(offered(), true, "uncombined, the shared 'South' still surfaces it, low-confidence");
   getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Southern Ridge', 'Southern')").run();
@@ -3551,4 +3564,43 @@ test("similar names: one place's bank spellings match; a shared short start does
   // A name already combined is part of its vendor, not a candidate.
   getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Puccinis Smilcarmel In', 'Puccini S Pizza')").run();
   assert.deepEqual(names("Puccini S Pizza"), ["Puccini'spizzapacarmel In"]);
+});
+
+test("only a plan the user added anchors a stray: a detected guess draws nothing", () => {
+  // The detector read Charleston's, a restaurant, as a quarterly bill, and
+  // never asked; "Chatham" (0.82 on a shared "Cha", the same weeks, a similar
+  // amount) was offered to it. A guess counts nowhere else since durable plans.
+  const last = daysAgo(40);
+  const rid = Number(
+    getDb()
+      .prepare(`INSERT INTO recurrings (merchant, categoryId, avgAmount, cadence, lastDate, nextDate, count) VALUES (?,?,?,?,?,?,?)`)
+      .run("Charlestcarmel In", CAT, -100, "quarterly", last, daysAgo(-50), 4).lastInsertRowid
+  );
+  for (const d of [daysAgo(220), daysAgo(130), last]) tx("Charlestcarmel In", { amount: -100, date: d, categoryId: CAT, recurringId: rid });
+  tx("Chatham", { amount: -90, date: daysAgo(10), categoryId: null });
+  const offered = () => recurringMatchSuggestions(new Set()).some((g) => g.variants.some((v) => v.merchant === "Chatham"));
+  assert.equal(offered(), false, "a guessed bill anchors nothing");
+  added("Charlestcarmel In");
+  assert.equal(offered(), true, "once the user adds it, the same stray is offered (low-confidence)");
+});
+
+test("a charge keeps the bank's own text beside its name, so a guessed name can be checked", () => {
+  // Plaid filed a $35 Platinum charge as "Commissary"; the bank's text,
+  // "GP001 - CAPITOL COMMINDIANAPOLIS IN", was thrown away, and it is the
+  // only clue to where the charge was.
+  const db = getDb();
+  db.exec("ALTER TABLE transactions DROP COLUMN descriptor"); // a server started before the column
+  const pull = (name: string, merchant_name: string | null) => [{ accounts: [{ account_id: "a1", name: "Platinum" }], transactions: [
+    { transaction_id: "cm", account_id: "a1", date: "2026-10-02", name, merchant_name, amount: 35, pending: false },
+  ] }];
+  importPlaidTransactions(pull("GP001 - CAPITOL COMMINDIANAPOLIS IN", "Commissary"));
+  const id = (db.prepare("SELECT id FROM transactions WHERE hash = 'cm'").get() as { id: number }).id;
+  assert.equal(transactionById(id)!.bankText, "GP001 - CAPITOL COMMINDIANAPOLIS IN");
+  importPlaidTransactions(pull("SOMETHING ELSE", "Commissary"));
+  assert.equal(transactionById(id)!.bankText, "GP001 - CAPITOL COMMINDIANAPOLIS IN", "kept as first seen");
+  // A CSV-imported charge kept the bank's text as its raw name all along.
+  tx("Southern", { amount: -400, date: "2026-01-13", hash: "csv-southern" });
+  db.prepare("UPDATE transactions SET source = 'copilot', rawMerchant = 'Aplpay In *southern' WHERE hash = 'csv-southern'").run();
+  const csv = (db.prepare("SELECT id FROM transactions WHERE hash = 'csv-southern'").get() as { id: number }).id;
+  assert.equal(transactionById(csv)!.bankText, "Aplpay In *southern");
 });

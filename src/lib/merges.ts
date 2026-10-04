@@ -8,6 +8,7 @@ import {
   isRecurringActive,
   getRecurringOverrides,
   getRecurringSettings,
+  confirmedKey,
 } from "./queries";
 import { CADENCE_DAYS, type Cadence } from "./cadence";
 
@@ -115,6 +116,10 @@ export { nameAffinity, NAME_MATCH, LOW_MATCH };
 // processor prefix). Catches the class the location-suffix rule can't. The name
 // filter is what disambiguates two similar monthly bills. `exclude` skips
 // merchants already surfaced by the location detector. Dismiss key = "rec:<m>".
+// Only plans the user added are bills to fold a stray into: a plan the
+// detector merely suggested is a guess (Charleston's, a restaurant read as a
+// quarterly bill, drew "Chatham" on a shared "Cha"), and since durable plans
+// a guess counts nowhere else either.
 export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion[] {
   const db = getDb();
   const dismissed = dismissedKeys(db);
@@ -127,7 +132,7 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
                 MIN(ABS(t.amount)) lo, MAX(ABS(t.amount)) hi
          FROM recurrings r JOIN transactions t ON t.recurringId = r.id
          LEFT JOIN categories c ON c.id = r.categoryId
-         WHERE r.avgAmount < 0
+         WHERE r.avgAmount < 0 AND ${confirmedKey("r.merchant")}
          GROUP BY r.id`
       )
       .all() as {
