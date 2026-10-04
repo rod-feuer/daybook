@@ -1,6 +1,7 @@
 "use client";
 
 import { buildVerdict } from "@/lib/verdict";
+import { MIN_ELAPSED_DAYS } from "@/lib/budgetOutlook";
 import { withoutAmountQualifier } from "@/lib/series";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
@@ -221,7 +222,7 @@ export default function DashboardPage() {
                       // with the projected month-end figure, keep the actual as context.
                       <span>{usd(data.net, { sign: true, cents: false })} so far</span>
                     ) : (
-                      <DeltaLine cur={data.net} prev={data.prev?.net} prevLabel={prevLabel} higherIsGood />
+                      <DeltaLine cur={data.net} prev={data.prev?.net} prevLabel={prevLabel} throughDay={data.prev?.throughDay} />
                     ),
                 }}
                 secondary={[
@@ -235,7 +236,7 @@ export default function DashboardPage() {
                         // amount-so-far is noise — what has arrived is the context.
                         <span>{usd(data.income, { cents: false })} so far</span>
                       ) : (
-                        <DeltaLine cur={data.income} prev={data.prev?.income} prevLabel={prevLabel} higherIsGood />
+                        <DeltaLine cur={data.income} prev={data.prev?.income} prevLabel={prevLabel} throughDay={data.prev?.throughDay} />
                       ),
                   },
                   {
@@ -248,7 +249,7 @@ export default function DashboardPage() {
                       // same days, gave a different number an inch away.
                       <span>{usd(data.expenses, { cents: false })} so far</span>
                     ) : (
-                      <DeltaLine cur={data.expenses} prev={data.prev?.expenses} prevLabel={prevLabel} higherIsGood={false} />
+                      <DeltaLine cur={data.expenses} prev={data.prev?.expenses} prevLabel={prevLabel} throughDay={data.prev?.throughDay} />
                     ),
                   },
                 ]}
@@ -627,18 +628,26 @@ function prevPeriodLabel(prev: Dash["prev"]): string | null {
 // favorable, which depends on the metric — hence `higherIsGood`. The percent is
 // omitted when the base is zero or the sign flips (where a % would mislead);
 // that only arises for net cash flow, since income/expenses are non-negative.
+// One colour signal per card, and it is the verdict's (DESIGN.md §2): the
+// deltas were red or green under every figure, three signals beside the
+// verdict. They read in the muted text; the arrow says the direction.
+// Compared over fewer than MIN_ELAPSED_DAYS of the month, a delta is when a
+// bill happened to post ("Income ▼ 67% vs Sep 1–3" on $82), so there is none:
+// the "so far" labels and the verdict already say the month is young, and a
+// "too early to compare" under each figure said it three more times.
 function DeltaLine({
   cur,
   prev,
   prevLabel,
-  higherIsGood,
+  throughDay,
 }: {
   cur: number;
   prev: number | undefined;
   prevLabel: string | null | undefined;
-  higherIsGood: boolean;
+  throughDay?: number | null;
 }) {
   if (prev === undefined || !prevLabel) return null;
+  if (throughDay != null && throughDay < MIN_ELAPSED_DAYS) return null;
   const change = cur - prev;
   if (Math.round(change) === 0) {
     return (
@@ -648,18 +657,13 @@ function DeltaLine({
     );
   }
   const up = change > 0;
-  const favorable = up === higherIsGood;
   const dollars = usd(Math.abs(change), { cents: false });
   const showPct = prev !== 0 && Math.sign(cur) === Math.sign(prev);
   const pct = showPct
     ? ` (${Math.abs(Math.round((change / Math.abs(prev)) * 100))}%)`
     : "";
   return (
-    <div
-      className={`mt-1 flex flex-wrap items-center gap-x-1 text-xs font-medium ${
-        favorable ? "text-[var(--good)]" : "text-[var(--bad)]"
-      }`}
-    >
+    <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs font-medium text-[var(--muted)]">
       {/* In a narrow column the line breaks between its two halves, never
           inside one. */}
       <span className="whitespace-nowrap">

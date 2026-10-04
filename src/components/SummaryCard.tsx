@@ -6,8 +6,8 @@ import { Tooltip } from "@/components/Tooltip";
 // The page-top summary: the result on the left, counter-figures beside it,
 // a progress bar, and the verdict under the bar. The month is not repeated
 // here — the header's picker already says it. Categories (spent / left),
-// Recurrings (paid / left to pay) and the Dashboard (net, with income and
-// expenses smaller beside it) share the card, so the tabs read as one app.
+// Recurrings (paid / left to pay) and the Dashboard (net, income, expenses)
+// share the card, so the tabs read as one app.
 export type Figure = {
   value: string;
   label: ReactNode;
@@ -16,7 +16,7 @@ export type Figure = {
   tone?: "good" | "bad";
   alarm?: boolean; // = tone "bad"
 };
-function Fig({ f, support = false }: { f: Figure; support?: boolean }) {
+function Fig({ f }: { f: Figure }) {
   const colour =
     f.alarm || f.tone === "bad" ? "text-[var(--bad)]" : f.tone === "good" ? "text-[var(--good)]" : "";
   // A string label is sentence case ("Net so far"). A node is the caller's,
@@ -25,7 +25,7 @@ function Fig({ f, support = false }: { f: Figure; support?: boolean }) {
   const label = typeof f.label === "string" ? f.label.charAt(0).toUpperCase() + f.label.slice(1) : f.label;
   const inner = (
     <>
-      <div data-figure className={`${support ? "text-[15px]" : "text-2xl"} font-semibold tracking-tight ${colour}`}>{f.value}</div>
+      <div data-figure className={`text-2xl font-semibold tracking-tight tabular-nums ${colour}`}>{f.value}</div>
       <div className="text-xs text-[var(--muted)]">{label}</div>
       {f.sub && <div className="text-xs text-[var(--muted)]">{f.sub}</div>}
     </>
@@ -72,14 +72,14 @@ export function SummaryCard({
 }) {
   const pct = Math.max(0, Math.min(progress, 1)) * 100;
   const secondaries = secondary == null ? [] : Array.isArray(secondary) ? secondary : [secondary];
-  // The first figure is the result (net, spent so far, paid so far) at the
-  // summary size; every other figure supports it at the card-title size. One
-  // rule on every page: the dashboard ranked its figures and the other pages
-  // kept a pair of equals, so the card changed rhythm between tabs.
-  const support = secondaries.length >= 1;
-  // Three columns when the page has three figures (the dashboard). Two figures
-  // don't leave an empty third column.
-  const figureCols = secondaries.length >= 2 ? "lg:grid-cols-3" : "lg:grid-cols-2";
+  // Every figure at the summary size, the result (net, spent so far, paid so
+  // far) first. They sit as peers in equal columns, and the result was 24px
+  // beside 15px counter-figures: size said "rank" where the layout said
+  // "peers", the columns' labels fell on different lines, and the scale gives
+  // 24px to summary figures, plural. The result's rank is its place: first.
+  // Three columns on every page, so two figures sit as a pair on the left
+  // instead of spreading across the panel.
+  const figureCols = "lg:grid-cols-3";
   return (
     <div className={`card p-6 ${className}`.trim()} data-summary>
       {/* Two panels: the month's figures on the left, the budget on the right,
@@ -107,7 +107,7 @@ export function SummaryCard({
             <div data-figure-pair className="grid w-full grid-cols-2 items-start gap-4 sm:flex sm:w-auto sm:flex-wrap sm:gap-8 lg:contents">
               {secondary.map((f, i) => (
                 <div key={i} className="min-w-0 sm:min-w-32 sm:max-w-48 lg:max-w-none">
-                  <Fig f={f} support={support} />
+                  <Fig f={f} />
                 </div>
               ))}
             </div>
@@ -116,7 +116,7 @@ export function SummaryCard({
               <div className="flex flex-wrap items-start gap-8 lg:contents">
                 {(Array.isArray(secondary) ? secondary : [secondary]).map((f, i) => (
                   <div key={i} className="min-w-0 sm:min-w-32 sm:max-w-48 lg:max-w-none">
-                    <Fig f={f} support={support} />
+                    <Fig f={f} />
                   </div>
                 ))}
               </div>
