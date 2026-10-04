@@ -162,7 +162,9 @@ export default function DashboardPage() {
     <Shell
       title="Dashboard"
       // The period the figures cover ("Oct 1–4"), said once for the page.
-      subtitle={period}
+      // The period, then the comparison basis, said once for the card's
+      // deltas (IBCS UN 2.2: time first, then scenario): "Oct 1–4 · vs Sep 1–4".
+      subtitle={period && data?.prev ? `${period} · vs ${prevPeriodLabel(data.prev)}` : period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
       actions={
         <HeaderMenu>
@@ -646,7 +648,7 @@ function DeltaLine({
   if (Math.round(change) === 0) {
     return (
       <div className="mt-1 text-xs font-medium text-[var(--muted)]">
-        No change vs {prevLabel}
+        No change
       </div>
     );
   }
@@ -657,14 +659,13 @@ function DeltaLine({
     ? ` (${Math.abs(Math.round((change / Math.abs(prev)) * 100))}%)`
     : "";
   return (
+    // The basis ("vs Sep 1–4") is the header's, said once for all three.
     <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs font-medium text-[var(--muted)]">
-      {/* In a narrow column the line breaks between its two halves, never
-          inside one. */}
       <span className="whitespace-nowrap">
         {up ? "▲" : "▼"} {dollars}
         {pct}
       </span>
-      <span className="whitespace-nowrap font-normal text-[var(--muted)]">vs {prevLabel}</span>
+
     </div>
   );
 }
