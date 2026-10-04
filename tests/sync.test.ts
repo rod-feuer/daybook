@@ -44,3 +44,13 @@ test("detectRecurrings is all-or-nothing: a rebuild that fails leaves the old pl
   }
   assert.deepEqual({ plans: plans(), linked: linked() }, before);
 });
+
+// WHY: balances ride on the pull the sync already makes; the sync, not a
+// separate job, has to record them, dated by the day it ran.
+test("syncFromBank records each account's balance from the same pull", async () => {
+  setBankPayload([{ id: "t1", date: daysAgo(1), name: "Gym Co", amount: 40 }], 250);
+  const res = await syncFromBank();
+  assert.equal(res.balances, 1);
+  const row = getDb().prepare("SELECT a.side, a.kind, b.amount FROM balances b JOIN accounts a ON a.id = b.accountId").get();
+  assert.deepEqual(row, { side: "liability", kind: "card", amount: 250 });
+});

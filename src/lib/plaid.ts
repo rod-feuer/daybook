@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureTxDescriptor } from "./db";
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
+import { recordBalances } from "./accounts";
 import { normalizeMerchant } from "./merchant";
 import { nameAffinity, NAME_MATCH } from "./merges";
 
@@ -18,8 +19,15 @@ type PlaidTxn = {
   amount: number; // Plaid sign: positive = money out (our expenses)
   pending: boolean;
 };
-type PlaidAccount = { account_id: string; name: string; type?: string };
-export type PlaidItem = { accounts: PlaidAccount[]; transactions: PlaidTxn[] };
+export type PlaidAccount = {
+  account_id: string;
+  name: string;
+  type?: string;
+  subtype?: string | null;
+  mask?: string | null;
+  balances?: { current: number | null };
+};
+export type PlaidItem = { institution?: string; accounts: PlaidAccount[]; transactions: PlaidTxn[] };
 
 // Pull transactions for a date range via the Plaid CLI. We use `transactions
 // list` (not `sync`) on purpose: it's idempotent and cursor-free, so manual CLI
@@ -45,12 +53,12 @@ export async function fetchPlaidTransactions(
       { maxBuffer: 64 * 1024 * 1024 }
     );
     const data = JSON.parse(stdout) as {
-      items?: { item?: { item_id?: string }; accounts?: PlaidAccount[]; transactions?: PlaidTxn[] }[];
+      items?: { item?: { item_id?: string; institution_id?: string }; accounts?: PlaidAccount[]; transactions?: PlaidTxn[] }[];
     };
     let pageCount = 0;
     for (const it of data.items ?? []) {
       const id = it.item?.item_id ?? "default";
-      const acc = byItem.get(id) ?? { accounts: it.accounts ?? [], transactions: [] };
+      const acc = byItem.get(id) ?? { institution: it.item?.institution_id, accounts: it.accounts ?? [], transactions: [] };
       acc.transactions.push(...(it.transactions ?? []));
       pageCount += it.transactions?.length ?? 0;
       byItem.set(id, acc);
@@ -335,7 +343,7 @@ export function importPlaidTransactions(items: PlaidItem[]): {
 // A whole sync, callable from anywhere (the route, the digest job): pull from
 // the bank since the last imported day, import, apply the split rules, and
 // rebuild the plans when anything changed.
-export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; total: number }> {
+export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; balances: number; total: number }> {
   const end = new Date().toISOString().slice(0, 10);
   // Start after existing history so Plaid doesn't duplicate the back-import.
   // Clamp to `end` in case prior data is future-dated (nothing to pull then).
@@ -346,7 +354,9 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   const result = importPlaidTransactions(items);
   const split = applySplitRules();
   if (result.inserted > 0 || result.updated > 0) detectRecurrings();
+  // The same pull carries each account's balance: one a day, dated by the sync.
+  const balances = recordBalances(items, end);
 
   const total = items.reduce((a, i) => a + i.transactions.length, 0);
-  return { ...result, split, total };
+  return { ...result, split, balances, total };
 }
