@@ -1750,12 +1750,20 @@ async function dashboardReadout(browser) {
     record("dashboard readout", "the chart's budget line is the summary card's figure, named in the legend, and withheld when spending sits outside the budget", drawnRight, chart.outside ? `withheld: ${chart.outside}` : `line "${chart.lineLabel}", card ${chart.cardBudget}`);
     record("dashboard readout", "the chart is described in words for a screen reader", chart.role === "img" && /^(Spent \$[\d,]+ through|No spending yet)/.test(chart.said) && (chart.lineLabel == null || /Budget \$/.test(chart.said)), chart.said);
 
-    const rows = await page.$$eval("[data-drawer-row]", (els) => els.filter((e) => e.querySelector("[data-row-left]")).map((e) => {
-      const nums = [...e.innerText.matchAll(/\$([\d,]+)/g)].map((m) => Number(m[1].replace(/,/g, "")));
-      return { spent: nums[0], budget: nums[1], said: e.querySelector("[data-row-left]").textContent };
-    }));
+    // The row says what was spent and what's left; the budget isn't repeated
+    // in it (a fraction made you subtract), so it comes from the data.
+    const rows = await page.evaluate(async () => {
+      const month = document.querySelector("[data-month-picker] select")?.value;
+      const d = await (await fetch(`/api/dashboard${month ? `?month=${month}` : ""}`)).json();
+      const budgetOf = Object.fromEntries((d.byCategory ?? []).map((c) => [c.name, c.budget]));
+      return [...document.querySelectorAll("[data-drawer-row]")].filter((e) => e.querySelector("[data-row-left]")).map((e) => {
+        const name = e.querySelector(".font-medium")?.textContent.trim();
+        const spent = Number((e.querySelector("[data-row-spent]")?.textContent.match(/\$([\d,]+)/)?.[1] ?? "x").replace(/,/g, ""));
+        return { name, spent, budget: Math.round(budgetOf[name] ?? NaN), said: e.querySelector("[data-row-left]").textContent, fraction: / \/ \$/.test(e.innerText) };
+      });
+    });
     const wrong = rows.filter((r) => { const d = r.budget - r.spent; const n = Number((r.said.match(/\$([\d,]+)/)?.[1] ?? "x").replace(/,/g, "")); return d >= 0 ? !(/left/.test(r.said) && Math.abs(n - d) <= 1) : !(/over/.test(r.said) && Math.abs(n + d) <= 1); });
-    record("dashboard readout", "each budgeted category row says what's left or over, and the sum is right", rows.length > 0 && wrong.length === 0, `${rows.length} rows; ${wrong.map((r) => JSON.stringify(r)).join(" ") || "all right"}`);
+    record("dashboard readout", "each budgeted category row says what's left or over, and the sum is right", rows.length > 0 && wrong.length === 0 && rows.every((r) => !r.fraction), `${rows.length} rows; ${wrong.map((r) => JSON.stringify(r)).join(" ") || "all right"}`);
 
     const motion = await page.evaluate(() => { const el = document.querySelector("[data-budget-bar] *[style*='width']") ?? document.querySelector("button"); return getComputedStyle(el).transitionDuration; });
     record("dashboard readout", "with reduced motion asked for, transitions settle at once", motion.split(",").every((d) => parseFloat(d) < 0.001), motion);

@@ -3621,3 +3621,27 @@ test("the header's period runs to the month's last counted day; a finished month
   }
   assert.equal(monthThroughDay("2025-02"), 28, "a finished month is the whole month");
 });
+
+test("a stray is offered to a plan when it echoes any name the plan's vendor goes by", () => {
+  // "Every Media" (a new Plaid name) scored 0.796 against the plan's key
+  // "Every Every.to-chargbrooklyn" but 0.82 against the vendor's combined
+  // "Every Every.to Charg": same card, $20, the 4th. Compared with the key
+  // alone it was offered nowhere and sat uncategorized outside its plan.
+  const last = daysAgo(30);
+  const rid = Number(getDb().prepare(`INSERT INTO recurrings (merchant, categoryId, avgAmount, cadence, lastDate, nextDate, count) VALUES (?,?,?,?,?,?,?)`)
+    .run("Every Every.to-chargbrooklyn", CAT, -20, "monthly", last, daysAgo(0), 3).lastInsertRowid);
+  added("Every Every.to-chargbrooklyn");
+  for (const d of [daysAgo(90), daysAgo(60)]) tx("Every Every.to-chargbrooklyn", { amount: -20, date: d, categoryId: CAT, recurringId: rid });
+  tx("Every Every.to Charg", { amount: -20, date: last, categoryId: CAT, recurringId: rid });
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Every Every.to Charg', 'Every Every.to-chargbrooklyn')").run();
+  tx("Every Media", { amount: -20, date: daysAgo(0), categoryId: null });
+  // The guard: a name that echoes none of a vendor's names stays unoffered.
+  tx("Chatham", { amount: -20, date: daysAgo(0), categoryId: null });
+  // A short other name ("Adt", ADT's) isn't evidence: "Pad Thai" contains it.
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Adt', 'Every Every.to-chargbrooklyn')").run();
+  tx("Pad Thai", { amount: -20, date: daysAgo(0), categoryId: null });
+  const offered = (m: string) => recurringMatchSuggestions(new Set()).find((g) => g.variants.some((v) => v.merchant === m))?.canonical ?? null;
+  assert.equal(offered("Every Media"), "Every Every.to-chargbrooklyn");
+  assert.equal(offered("Chatham"), null);
+  assert.equal(offered("Pad Thai"), null);
+});
