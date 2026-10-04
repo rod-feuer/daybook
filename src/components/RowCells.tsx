@@ -144,6 +144,7 @@ export function AmountCell({
   unsigned = false,
   sign = true,
   quiet = false,
+  cents = true,
   className = "",
 }: {
   value: number;
@@ -154,6 +155,7 @@ export function AmountCell({
   unsigned?: boolean; // a bill's amount: magnitude only — no sign, and never green
   sign?: boolean;
   quiet?: boolean; // a list where every amount is settled: medium, not semibold
+  cents?: boolean; // false: whole dollars (Accounts, where balances run to six and seven figures)
   className?: string;
 }) {
   const shown = unsigned ? Math.abs(value) : value;
@@ -183,9 +185,9 @@ export function AmountCell({
         </span>
       ) : null}
       {state === "settled" && !unsigned ? (
-        <Money value={shown} sign={sign} excluded={excluded} />
+        <Money value={shown} sign={sign} cents={cents} excluded={excluded} />
       ) : (
-        <span className={state === "settled" ? "text-[var(--foreground)]" : ""}>{usd(shown, { sign: sign && !unsigned })}</span>
+        <span className={state === "settled" ? "text-[var(--foreground)]" : ""}>{usd(shown, { sign: sign && !unsigned, cents })}</span>
       )}
     </span>
   );

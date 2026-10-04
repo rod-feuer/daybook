@@ -49,7 +49,7 @@ export function AccountBody({
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2">
         <PropertyCard label={owed ? "owed" : manual ? "value" : "balance"} detail={latest?.source === "estimate" ? "an estimate" : manual ? "set by you" : "from the bank"}>
-          <div className="text-[15px] font-semibold tabular-nums">{latest ? usd(latest.amount) : "—"}</div>
+          <div className="text-[15px] font-semibold tabular-nums">{latest ? usd(latest.amount, { cents: false }) : "—"}</div>
         </PropertyCard>
         <PropertyCard label="as of">
           <div className="text-[15px] font-semibold tabular-nums">{latest ? shortDate(latest.asOf) : "—"}</div>
@@ -73,7 +73,7 @@ export function AccountBody({
                   Remove
                 </button>
               )}
-              <AmountCell value={h.amount} sign={false} excluded quiet className="w-24 shrink-0" />
+              <AmountCell value={h.amount} sign={false} excluded quiet cents={false} className="w-24 shrink-0" />
             </li>
           ))}
         </ul>
