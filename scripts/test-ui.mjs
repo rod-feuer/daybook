@@ -779,6 +779,46 @@ async function queueButtons(browser) {
   });
 }
 
+// Picks survive a reload: a category picked on a row is the user's answer
+// until that row is applied or dismissed. Applying one row reloads the queue
+// (the page refreshes behind it), and the reload put every other picked row
+// back to its proposal. Every request is answered here; no API is called.
+async function queuePicksSurvive(browser) {
+  await withPage(browser, async (page) => {
+    const cats = await (await fetch(BASE + "/api/categories")).json();
+    const exp = cats.filter((c) => c.kind === "expense");
+    const sug = (merchant, c) => ({ merchant, categoryId: c.id, categoryName: c.name, categoryIcon: c.icon, count: 1, source: "history" });
+    let list = [sug("Alpha Grill", exp[0]), sug("Beta Books", exp[0]), sug("Gamma Garden", exp[0])];
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (!req.url().endsWith("/api/category-suggestions")) return req.continue();
+      if (req.method() === "POST") {
+        const body = JSON.parse(req.postData() ?? "{}");
+        if (body.action === "apply") list = list.filter((x) => x.merchant !== body.merchant);
+        return req.respond({ status: 200, contentType: "application/json", body: "{\"ok\":true}" });
+      }
+      return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ suggestions: list, needsModelCount: 0, dismissedCount: 0, modelEnabled: false }) });
+    });
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-suggestion] [data-category-property] select");
+    // Pick a different category on the first two rows, then Apply the third.
+    const picked = await page.evaluate((other) => {
+      const rows = [...document.querySelectorAll("[data-suggestion]")];
+      for (const name of ["Alpha Grill", "Beta Books"]) {
+        const s = rows.find((li) => li.textContent.includes(name)).querySelector("[data-category-property] select");
+        s.value = String(other); s.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return String(other);
+    }, exp[1].id);
+    await sleep(300);
+    await page.evaluate(() => [...document.querySelectorAll("[data-suggestion]")].find((li) => li.textContent.includes("Gamma Garden")).querySelector("[data-queue-accept]").click());
+    await page.waitForFunction(() => ![...document.querySelectorAll("[data-suggestion]")].some((li) => li.textContent.includes("Gamma Garden")), { timeout: 8000 });
+    await sleep(800); // the page's refresh, and the queue's reload behind it
+    const after = await page.evaluate(() => [...document.querySelectorAll("[data-suggestion]")].map((li) => ({ name: li.querySelector(".truncate").textContent, value: li.querySelector("[data-category-property] select").value, edited: /edited/.test(li.textContent) })));
+    record("queue picks", "categories picked on rows not yet applied survive another row's Apply", after.length === 2 && after.every((r) => r.value === picked && r.edited), JSON.stringify(after));
+  });
+}
+
 // Model suggestions: the queue asks on its own when the page loads (a suggestion
 // you must press a button to see is one you mostly don't see), and shows the
 // answer by confidence — sure ones as suggestions, middling ones tagged
@@ -2186,7 +2226,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }

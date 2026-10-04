@@ -26,7 +26,13 @@ export function CategorizeQueue({
   onShowUncategorized?: () => void; // filter the list below to the uncategorized charges
   version?: number; // the page's refresh counter: a charge categorized in the list below empties this queue too
 }) {
-  const [items, setItems] = useState<Proposal[]>([]);
+  // What the server proposes, and the categories the user picked on rows not
+  // yet applied (vendor -> category). Picks are kept apart so that a reload —
+  // after another row's Apply, a Combine, a sync — can't wipe them: it
+  // replaced the whole list, and every unapplied pick went back to the
+  // proposal.
+  const [loaded, setItems] = useState<Proposal[]>([]);
+  const [picks, setPicks] = useState<Record<string, number>>({});
   const [cats, setCats] = useState<Category[]>([]);
   const [needsModel, setNeedsModel] = useState(0);
   // The model is asked without a press: a suggestion you have to click to see
@@ -74,10 +80,16 @@ export function CategorizeQueue({
   // and Apply (or Apply all) commits that choice. Uncategorized is not a
   // choice here — that is Dismiss.
   function redirect(merchant: string, categoryId: number | null) {
-    const c = cats.find((x) => x.id === categoryId);
-    if (!c) return;
-    setItems((a) => a.map((x) => (x.merchant === merchant ? { ...x, categoryId: c.id, categoryName: c.name, categoryIcon: c.icon, edited: true } : x)));
+    if (!cats.some((x) => x.id === categoryId)) return;
+    setPicks((p) => ({ ...p, [merchant]: categoryId! }));
   }
+  const unpick = (merchants: string[]) =>
+    setPicks((p) => Object.fromEntries(Object.entries(p).filter(([m]) => !merchants.includes(m))));
+  // Each row as shown: the user's pick over the proposal, marked edited.
+  const items = loaded.map((x) => {
+    const c = picks[x.merchant] != null ? cats.find((k) => k.id === picks[x.merchant]) : undefined;
+    return c ? { ...x, categoryId: c.id, categoryName: c.name, categoryIcon: c.icon, edited: true } : x;
+  });
   const mutate = useMutation(load);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -92,6 +104,7 @@ export function CategorizeQueue({
   async function apply(s: CategorySuggestion) {
     setBusy(s.merchant);
     setItems((a) => a.filter((x) => x.merchant !== s.merchant)); // optimistic
+    unpick([s.merchant]);
     const ok = await mutate(
       () =>
         postJson("/api/category-suggestions", { action: "apply", merchant: s.merchant, categoryId: s.categoryId }),
@@ -104,6 +117,7 @@ export function CategorizeQueue({
 
   async function dismiss(s: CategorySuggestion) {
     setItems((a) => a.filter((x) => x.merchant !== s.merchant)); // optimistic
+    unpick([s.merchant]);
     await mutate(
       () => postJson("/api/category-suggestions", { action: "dismiss", merchant: s.merchant }),
       { error: "Couldn't dismiss — please try again" },
@@ -128,7 +142,9 @@ export function CategorizeQueue({
   async function applyAll() {
     setBusy("__all");
     const batch = sure.map((s) => ({ merchant: s.merchant, categoryId: s.categoryId }));
-    setItems((a) => a.filter((s) => (s.possible || s.guess) && !s.edited)); // optimistic
+    const done = batch.map((b) => b.merchant);
+    setItems((a) => a.filter((s) => !done.includes(s.merchant))); // optimistic
+    unpick(done);
     const ok = await mutate(
       () => postJson("/api/category-suggestions", { action: "applyAll", items: batch }),
       {
