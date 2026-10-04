@@ -201,7 +201,8 @@ export function updateAccount(id: number, patch: { name?: string; counted?: bool
   return true;
 }
 
-// Delete a hand-kept account and its values. A linked account is the bank's:
+// Delete a hand-kept account, its values and terms; a loan that was against
+// it is against nothing now. A linked account is the bank's:
 // it can be left out of net worth, not deleted (the next sync would add it back).
 export function deleteManualAccount(id: number): boolean {
   const a = account(id);
@@ -209,6 +210,8 @@ export function deleteManualAccount(id: number): boolean {
   const db = getDb();
   db.transaction(() => {
     db.prepare("DELETE FROM balances WHERE accountId = ?").run(id);
+    db.prepare("DELETE FROM loan_terms WHERE accountId = ?").run(id);
+    db.prepare("UPDATE accounts SET securedBy = NULL WHERE securedBy = ?").run(id);
     db.prepare("DELETE FROM accounts WHERE id = ?").run(id);
   })();
   return true;
@@ -225,6 +228,13 @@ export type AccountDetail = {
   mask: string | null;
   counted: boolean;
   history: { asOf: string; amount: number; source: "bank" | "owner" | "estimate" }[];
+  // A loan: its terms, the asset it's against, and the assets it could be.
+  terms: LoanTerms | null;
+  securedBy: { id: number; name: string } | null;
+  assets: { id: number; name: string }[];
+  // An asset: the loans against it, and its equity (worth less what's owed on it).
+  loans: { id: number; name: string; amount: number }[];
+  equity: number | null;
 };
 export function accountDetail(id: number): AccountDetail | null {
   const db = getDb();
@@ -237,5 +247,113 @@ export function accountDetail(id: number): AccountDetail | null {
     .prepare("SELECT asOf, amount, source FROM balances WHERE accountId = ? ORDER BY asOf DESC")
     .all(id) as AccountDetail["history"];
   const { inNetWorth, ...rest } = a;
-  return { ...rest, counted: inNetWorth === 1, history };
+  const latest = (accountId: number) =>
+    (db.prepare("SELECT amount FROM balances WHERE accountId = ? ORDER BY asOf DESC LIMIT 1").get(accountId) as { amount: number } | undefined)?.amount ?? 0;
+  const liability = a.side === "liability";
+  const sec = db.prepare("SELECT s.id, s.name FROM accounts l JOIN accounts s ON s.id = l.securedBy WHERE l.id = ?").get(id) as
+    | { id: number; name: string }
+    | undefined;
+  const loans = liability
+    ? []
+    : (db.prepare("SELECT id, name FROM accounts WHERE securedBy = ? ORDER BY name").all(id) as { id: number; name: string }[]).map(
+        (l) => ({ ...l, amount: latest(l.id) })
+      );
+  return {
+    ...rest,
+    counted: inNetWorth === 1,
+    history,
+    terms: liability ? (readTerms(id) ?? { ...EMPTY_TERMS, edited: [] }) : null,
+    securedBy: sec ?? null,
+    assets: liability
+      ? (db.prepare("SELECT id, name FROM accounts WHERE side = 'asset' AND kind IN ('property','vehicle','other') ORDER BY name").all() as { id: number; name: string }[])
+      : [],
+    loans,
+    equity: loans.length ? Number((latest(id) - loans.reduce((t, l) => t + l.amount, 0)).toFixed(2)) : null,
+  };
+}
+
+// ---- Loan terms and what a loan is against --------------------------------
+
+export const TERM_FIELDS = ["rate", "payment", "maturity", "original", "opened"] as const;
+export type TermField = (typeof TERM_FIELDS)[number];
+// rate: annual %, payment: monthly $, maturity / opened: YYYY-MM-DD, original: $.
+export type LoanTerms = {
+  rate: number | null;
+  payment: number | null;
+  maturity: string | null;
+  original: number | null;
+  opened: string | null;
+  edited: TermField[]; // the fields the owner set; the rest are the bank's, or unknown
+};
+
+function readTerms(id: number): LoanTerms | null {
+  const r = getDb().prepare("SELECT rate, payment, maturity, original, opened, edited FROM loan_terms WHERE accountId = ?").get(id) as
+    | (Omit<LoanTerms, "edited"> & { edited: string })
+    | undefined;
+  return r ? { ...r, edited: r.edited ? (r.edited.split(",") as TermField[]) : [] } : null;
+}
+function writeTerms(id: number, t: LoanTerms) {
+  getDb()
+    .prepare(
+      `INSERT INTO loan_terms (accountId, rate, payment, maturity, original, opened, edited)
+       VALUES (@id, @rate, @payment, @maturity, @original, @opened, @edited)
+       ON CONFLICT(accountId) DO UPDATE SET rate = excluded.rate, payment = excluded.payment,
+         maturity = excluded.maturity, original = excluded.original, opened = excluded.opened, edited = excluded.edited`
+    )
+    .run({ id, ...t, edited: t.edited.join(",") });
+}
+const EMPTY_TERMS: LoanTerms = { rate: null, payment: null, maturity: null, original: null, opened: null, edited: [] };
+
+// What the bank reports for a linked loan (Plaid Liabilities: a mortgage's
+// rate and next payment). It fills only the fields the owner hasn't set, and
+// a field it doesn't report keeps what it had. Returns the loans updated.
+export type BankTerms = { plaidAccountId: string; rate?: number | null; payment?: number | null };
+export function recordBankTerms(rows: BankTerms[]): number {
+  const db = getDb();
+  ensureAccounts(db);
+  const byPlaid = db.prepare("SELECT id FROM accounts WHERE plaidAccountId = ? AND side = 'liability'");
+  let n = 0;
+  db.transaction(() => {
+    for (const r of rows) {
+      const a = byPlaid.get(r.plaidAccountId) as { id: number } | undefined;
+      if (!a) continue;
+      const t = readTerms(a.id) ?? { ...EMPTY_TERMS, edited: [] };
+      if (r.rate != null && !t.edited.includes("rate")) t.rate = r.rate;
+      if (r.payment != null && !t.edited.includes("payment")) t.payment = r.payment;
+      writeTerms(a.id, t);
+      n++;
+    }
+  })();
+  return n;
+}
+
+// The owner sets a loan's terms. A value marks the field edited, so the bank
+// leaves it alone; null clears it, back to unknown until the bank reports it.
+export function setTerms(id: number, patch: Partial<Record<TermField, number | string | null>>): boolean {
+  const a = account(id);
+  if (!a || a.side !== "liability") return false;
+  const t = readTerms(id) ?? { ...EMPTY_TERMS, edited: [] };
+  const edited = new Set(t.edited);
+  for (const f of TERM_FIELDS) {
+    if (!(f in patch)) continue;
+    const v = patch[f];
+    (t as Record<TermField, unknown>)[f] = v ?? null;
+    if (v == null) edited.delete(f);
+    else edited.add(f);
+  }
+  writeTerms(id, { ...t, edited: TERM_FIELDS.filter((f) => edited.has(f)) });
+  return true;
+}
+
+// Which asset a loan is against (a mortgage's home, a boat loan's boat), or
+// none. Only a loan points, and only at something owned.
+export function setSecuredBy(loanId: number, assetId: number | null): boolean {
+  const loan = account(loanId);
+  if (!loan || loan.side !== "liability") return false;
+  if (assetId != null) {
+    const asset = account(assetId);
+    if (!asset || asset.side !== "asset") return false;
+  }
+  getDb().prepare("UPDATE accounts SET securedBy = ? WHERE id = ?").run(assetId, loanId);
+  return true;
 }

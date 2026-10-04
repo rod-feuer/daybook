@@ -259,7 +259,23 @@ export function ensureAccounts(db: Database.Database) {
       source TEXT NOT NULL CHECK (source IN ('bank','owner','estimate')),
       PRIMARY KEY (accountId, asOf)
     );
+    -- A loan's terms: the annual rate (%), the monthly payment, the payoff
+    -- date, and what was borrowed when. The bank fills what it reports (Plaid
+    -- Liabilities); a field the owner sets is listed in \`edited\` and the bank
+    -- no longer touches it. Null is unknown.
+    CREATE TABLE IF NOT EXISTS loan_terms (
+      accountId INTEGER PRIMARY KEY REFERENCES accounts(id),
+      rate REAL,
+      payment REAL,
+      maturity TEXT,
+      original REAL,
+      opened TEXT,
+      edited TEXT NOT NULL DEFAULT ''
+    );
   `);
+  // A loan's asset (a mortgage's home, a boat loan's boat), for equity.
+  const cols = db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "securedBy")) db.exec("ALTER TABLE accounts ADD COLUMN securedBy INTEGER REFERENCES accounts(id)");
 }
 
 // Merge suggestions the user rejected, keyed by the proposed canonical name, so

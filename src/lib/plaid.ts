@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureTxDescriptor } from "./db";
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
-import { recordBalances } from "./accounts";
+import { recordBalances, recordBankTerms, type BankTerms } from "./accounts";
 import { normalizeMerchant } from "./merchant";
 import { nameAffinity, NAME_MATCH } from "./merges";
 
@@ -67,6 +67,22 @@ export async function fetchPlaidTransactions(
     offset += PAGE;
   }
   return [...byItem.values()];
+}
+
+// A mortgage's rate and next payment, from Plaid Liabilities. Other loans
+// (auto, personal) aren't in Liabilities; their terms are the owner's.
+export async function fetchPlaidLiabilities(): Promise<BankTerms[]> {
+  const { stdout } = await run(CLI, ["liabilities", "--all", "--json"], { maxBuffer: 16 * 1024 * 1024 });
+  const data = JSON.parse(stdout) as {
+    items?: { liabilities?: { mortgage?: { account_id: string; interest_rate?: { percentage?: number | null }; next_monthly_payment?: number | null }[] } }[];
+  };
+  return (data.items ?? []).flatMap((it) =>
+    (it.liabilities?.mortgage ?? []).map((m) => ({
+      plaidAccountId: m.account_id,
+      rate: m.interest_rate?.percentage ?? null,
+      payment: m.next_monthly_payment ?? null,
+    }))
+  );
 }
 
 // Where to start the Plaid pull. To avoid duplicating imported back-history
@@ -343,7 +359,7 @@ export function importPlaidTransactions(items: PlaidItem[]): {
 // A whole sync, callable from anywhere (the route, the digest job): pull from
 // the bank since the last imported day, import, apply the split rules, and
 // rebuild the plans when anything changed.
-export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; balances: number; total: number }> {
+export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; balances: number; terms: number | null; total: number }> {
   const end = new Date().toISOString().slice(0, 10);
   // Start after existing history so Plaid doesn't duplicate the back-import.
   // Clamp to `end` in case prior data is future-dated (nothing to pull then).
@@ -356,7 +372,15 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   if (result.inserted > 0 || result.updated > 0) detectRecurrings();
   // The same pull carries each account's balance: one a day, dated by the sync.
   const balances = recordBalances(items, end);
+  // Terms change rarely and are a second call: a failure leaves the last
+  // ones in place and is reported as null, not as a failed sync.
+  let terms: number | null = null;
+  try {
+    terms = recordBankTerms(await fetchPlaidLiabilities());
+  } catch {
+    terms = null;
+  }
 
   const total = items.reduce((a, i) => a + i.transactions.length, 0);
-  return { ...result, split, balances, total };
+  return { ...result, split, balances, terms, total };
 }
