@@ -193,3 +193,38 @@ test("an asset's equity is its worth less what's owed on the loans against it", 
   assert.equal(deleteManualAccount(house), true, "a house a loan points at can still be deleted");
   assert.equal(accountDetail(mortgage)!.securedBy, null, "and the loan is against nothing now");
 });
+
+import { netWorthTrend } from "../src/lib/accounts";
+
+const day = (base: string, n: number) => { const d = new Date(base + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+test("the trend and the month's change wait for enough history", () => {
+  // WHY: three days of balances drawn as a line, or a "change" against a
+  // day that wasn't recorded, would show movement Daybook can't vouch for.
+  recordBalances(bank(), "2026-10-04");
+  let t = netWorthTrend("2026-10-10");
+  assert.deepEqual([t.start, t.series, t.prev], ["2026-10-04", null, null], "a week: neither");
+  t = netWorthTrend(day("2026-10-04", 14));
+  assert.equal(t.series?.length, 15, "two weeks: the line, a point a day");
+  assert.equal(t.prev, null, "but no month-ago yet");
+  t = netWorthTrend(day("2026-10-04", 30));
+  assert.equal(t.prev?.date, "2026-10-04");
+});
+
+test("adding an account later is neither drawn as a rise nor reported as a change", () => {
+  // WHY: entering a home on day 20 would otherwise add its whole worth to
+  // the line that day and to "the change since last month", though nothing
+  // was gained: only the record grew. It counts from the start at its first
+  // value; what it does after that is real change.
+  recordBalances(bank(), "2026-10-04");
+  const base = -19200;
+  createManualAccount("Sample house", "property", { asOf: "2026-10-24", amount: 80000, estimate: true });
+  const today = "2026-11-03";
+  const t = netWorthTrend(today);
+  assert.equal(t.series![0].net, base + 80000, "the house is in the first point, not a step on Oct 24");
+  assert.equal(t.prev!.net, base + 80000, "a month ago, like for like");
+  assert.equal(netWorth(today).net - t.prev!.net, 0, "so no change is reported");
+  const house = (getDb().prepare("SELECT id FROM accounts WHERE name = 'Sample house'").get() as { id: number }).id;
+  setValue(house, { asOf: today, amount: 85000, estimate: true });
+  assert.equal(netWorth(today).net - netWorthTrend(today).prev!.net, 5000, "a revaluation after it was added is change");
+});
