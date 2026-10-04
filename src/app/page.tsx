@@ -369,12 +369,13 @@ export default function DashboardPage() {
                               label={{ value: `Budget ${usd(budgetLine, { cents: false })}`, position: "insideTopRight", fontSize: 11, fill: "var(--muted)" }}
                             />
                           )}
-                          {/* Faint prior-month curve, drawn first so it sits beneath. */}
+                          {/* Prior-month curve, drawn first so it sits beneath: muted,
+                              not the hairline grey, which vanished on the card. */}
                           <Area
                             type="monotone"
                             dataKey="prev"
                             isAnimationActive={!still}
-                            stroke="var(--border)"
+                            stroke="var(--muted)"
                             strokeWidth={1.5}
                             fill="none"
                             connectNulls
@@ -543,7 +544,7 @@ function ChartLegend({
       )}
       {showPrev && (
         <span className="flex items-center gap-2">
-          <span className="inline-block h-0.5 w-3.5 rounded-full bg-[var(--border)]" />
+          <span className="inline-block h-0.5 w-3.5 rounded-full bg-[var(--muted)]" />
           Last month
         </span>
       )}
