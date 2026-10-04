@@ -819,6 +819,34 @@ async function queuePicksSurvive(browser) {
   });
 }
 
+// Similar names on the vendor shelf: one place's other bank spellings,
+// combined in one step instead of one Combine each. Nothing starts ticked
+// (names sharing a first word can be different places); Select all is one
+// click; Combine folds the ticked names in and the list empties.
+async function similarNames(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/transactions?vendor=" + encodeURIComponent("Jimmy Johns"), { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    await page.$eval("[data-drawer-row]", (r) => r.click()); await shelfIs(page, true); await shelfSettled(page);
+    await page.click(`${shelfSel} [data-open-vendor]`);
+    const shown = await page.waitForSelector(`${shelfSel} [data-similar-names]`, { timeout: 8000 }).then(() => true, () => false);
+    const before = await page.evaluate((sel) => {
+      const box = document.querySelector(`${sel} [data-similar-names]`);
+      return box ? { names: [...box.querySelectorAll("li")].map((li) => li.innerText.replace(/\s+/g, " ").trim()), ticked: box.querySelectorAll("input:checked").length, button: box.querySelector("[data-combine-similar]").disabled } : null;
+    }, shelfSel);
+    record("similar names", "a vendor's shelf lists its other spellings, none ticked, with Combine waiting for a tick", shown && before && before.names.some((t) => /Jimmy John's/.test(t)) && before.ticked === 0 && before.button, JSON.stringify(before));
+    if (!shown) return;
+    await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-similar-names] button`)].find((b) => /Select all/.test(b.textContent)).click(), shelfSel);
+    const label = await page.$eval(`${shelfSel} [data-combine-similar]`, (b) => b.textContent.trim());
+    await page.click(`${shelfSel} [data-combine-similar]`);
+    const gone = await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-similar-names]`), { timeout: 8000 }, shelfSel).then(() => true, () => false);
+    record("similar names", "Select all and Combine fold the other spellings in, in one press, and the list empties", gone && /^Combine \d+ into /.test(label), `${label}; list gone=${gone}`);
+    // restore, so later groups see the fixture's two spellings
+    await page.evaluate(async () => fetch("/api/recurrings/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alias: "Jimmy John's", unlink: true }) }));
+    if (errs.length) record("similar names", "page errors", false, errs[0]);
+  });
+}
+
 // Model suggestions: the queue asks on its own when the page loads (a suggestion
 // you must press a button to see is one you mostly don't see), and shows the
 // answer by confidence — sure ones as suggestions, middling ones tagged
@@ -2226,7 +2254,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }

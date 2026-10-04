@@ -36,6 +36,7 @@ import {
   getBudgetsFull,
   deleteBudget,
   setMonthBudget,
+  similarVendors,
   budgetPlan,
   setTransactionNote,
   setTransactionExcluded,
@@ -3533,4 +3534,21 @@ test("a regular bill keeps its plan beside one or two odd charges, even after it
   tx("Southern", { amount: -1800, date: "2026-10-15", categoryId: CAT });
   detectRecurrings();
   assert.equal((getDb().prepare("SELECT COUNT(*) n FROM transactions WHERE merchant = 'Southern' AND recurringId IS NOT NULL").get() as { n: number }).n, 0);
+});
+
+test("similar names: one place's bank spellings match; a shared short start doesn't", () => {
+  // Puccini's posts as "Puccini S Pizza", "Puccinis Smilcarmel In" and
+  // "Puccini'spizzapacarmel In": one restaurant, offered to combine at once.
+  // Chatham and Charleston's share only "Cha"; Southern and South Central
+  // only "South": never offered.
+  for (const m of ["Puccini S Pizza", "Puccinis Smilcarmel In", "Puccini'spizzapacarmel In", "Chatham", "Charlestons Carmel", "Southern", "South Central Inmartinsville In"])
+    tx(m, { amount: -20, date: "2026-09-01", categoryId: CAT });
+  getDb().prepare("INSERT INTO recurring_settings (merchant, alias) VALUES ('Puccini S Pizza', 'Puccini''s')").run();
+  const names = (m: string) => similarVendors(m).map((v) => v.merchant).sort();
+  assert.deepEqual(names("Puccini S Pizza"), ["Puccini'spizzapacarmel In", "Puccinis Smilcarmel In"]);
+  assert.deepEqual(names("Chatham"), [], "Chatham is not Charleston's");
+  assert.deepEqual(names("Southern"), [], "Southern is not South Central");
+  // A name already combined is part of its vendor, not a candidate.
+  getDb().prepare("INSERT INTO merchant_links (alias, primaryMerchant) VALUES ('Puccinis Smilcarmel In', 'Puccini S Pizza')").run();
+  assert.deepEqual(names("Puccini S Pizza"), ["Puccini'spizzapacarmel In"]);
 });

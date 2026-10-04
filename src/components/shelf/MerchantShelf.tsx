@@ -154,6 +154,77 @@ export function monthsSince(firstSeen: string | null): number {
 // The row's membership control: a labelled pill that says its state and
 // toggles it. "charge": this charge in or out of its plan (the vendor shelf).
 
+// Other vendors named like this one (Puccini's, Puccinis Smilcarmel In,
+// Puccini'spizzapacarmel In: one restaurant, three bank spellings), to combine
+// in one step instead of one Combine each. Nothing starts ticked: names that
+// share a first word can be different places (Chatham Bars Inn, Chatham
+// Crew), so each carries its count and category as the evidence, and Select
+// all is one click when they are one place. Separate undoes any of them.
+function SimilarNames({
+  similar,
+  into,
+  onCombine,
+}: {
+  similar: Summary["similar"];
+  into: string;
+  onCombine: (merchants: string[]) => void;
+}) {
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const all = ticked.size === similar.length;
+  const toggle = (m: string) =>
+    setTicked((t) => {
+      const n = new Set(t);
+      if (n.has(m)) n.delete(m);
+      else n.add(m);
+      return n;
+    });
+  return (
+    <div data-similar-names>
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="stat-label">Similar names</span>
+        <button
+          type="button"
+          className="tap text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+          onClick={() => setTicked(all ? new Set() : new Set(similar.map((v) => v.merchant)))}
+        >
+          {all ? "Clear" : "Select all"}
+        </button>
+      </div>
+      <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]" data-edge-list>
+        {similar.map((v) => (
+          <li key={v.merchant}>
+            <label className="tap flex cursor-pointer items-center gap-3 py-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={ticked.has(v.merchant)}
+                onChange={() => toggle(v.merchant)}
+                className="tap-native size-4 accent-[var(--accent)]"
+              />
+              <span className="min-w-0 flex-1 truncate font-medium">{v.displayName}</span>
+              <span className="shrink-0 text-xs text-[var(--muted)]">
+                {v.count} charge{v.count === 1 ? "" : "s"}
+                {v.categoryName ? ` · ${v.categoryName}` : ""}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        disabled={ticked.size === 0}
+        onClick={() => {
+          onCombine([...ticked]);
+          setTicked(new Set());
+        }}
+        className="btn-ghost mt-2 w-full text-xs disabled:opacity-50"
+        data-combine-similar
+      >
+        {ticked.size === 0 ? `Tick the ones that are ${into}` : `Combine ${ticked.size} into ${into}`}
+      </button>
+    </div>
+  );
+}
+
 // Merge this vendor with another. The only decision surfaced is the resulting
 // NAME — which silently determines the survivor (canonical), so the user never
 // reasons about "primary". Defaults to the cleaner name; a preview shows the
@@ -500,6 +571,7 @@ export function MerchantBody({
   amountHint,
   vendors,
   onCombine,
+  onCombineMany,
   onRemoveSplit,
 }: {
   data: Summary;
@@ -513,6 +585,7 @@ export function MerchantBody({
   amountHint?: number | null;
   vendors: Vendor[];
   onCombine: (loser: string, primary: string, alias?: string, categoryId?: number | null) => void;
+  onCombineMany: (losers: string[]) => void; // several similar names into this vendor
   onRemoveSplit: (id: number, applied: number) => void;
   onOpenPlan: (series: string) => void; // one of this vendor's plans, with Back
 }) {
@@ -881,6 +954,9 @@ export function MerchantBody({
           <p data-suggested-plan className="text-xs text-[var(--muted)]">
             Suggested plan, not counted yet. Add it to count it as a bill; Not recurring dismisses it.
           </p>
+        )}
+        {data.similar.length > 0 && (
+          <SimilarNames similar={data.similar} into={data.displayName} onCombine={onCombineMany} />
         )}
         {/* One actions row, one style: the §2 verbs. Combine is a disclosure —
             its panel drops below the row only while in use. */}
