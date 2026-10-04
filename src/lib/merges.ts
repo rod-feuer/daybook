@@ -245,9 +245,12 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
       variants,
       total: variants.reduce((s, v) => s + v.count, 0),
       note: lowConfidence
-        ? `Possibly the same as your ${r.cadence} “${r.merchant}” bill — similar name, posts in the same slot at a similar amount. Combine only if it's the same vendor${
-            r.categoryName ? `; combining sets its category to ${r.categoryName}` : ""
-          }.`
+        ? // Says the whole of what Combine does: it joins the bill as well as
+          // the vendor. The note named only the category, so a Combine that
+          // matched the charge into its plan read as a rename.
+          `Possibly the same as your ${r.cadence} “${r.merchant}” bill — similar name, posts in the same slot at a similar amount. Combine only if it's the same vendor: ${
+            orphans.length > 1 ? "they join" : "it joins"
+          } that bill${r.categoryName ? ` and ${orphans.length > 1 ? "take" : "takes"} its category, ${r.categoryName}` : ""}.`
         : `Lands in your ${r.cadence} “${r.merchant}” slot at a similar amount — likely the same vendor renamed. Combining makes ${
             orphans.length > 1 ? "them" : "it"
           } recurring${r.categoryId != null ? " and sets the category" : ""}.`,
