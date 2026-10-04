@@ -590,7 +590,10 @@ async function partialMonthQualifiers(browser) {
     }
     // Comparisons from day one, on the same days.
     const dash = await read("/", CUR);
-    record("qualifiers", "the dashboard's figures carry comparisons against the same days of last month", /vs [a-z]{3}( 1(–\d+)?)?/.test(dash.card), dash.card.replace(/\s+/g, " ").slice(0, 140));
+    // The basis is said once, in the header ("Oct 1–4 · vs Sep 1–4"); each
+    // figure carries only its change.
+    const head = await page.evaluate(() => document.querySelector("header")?.innerText.replace(/\s+/g, " ") ?? "");
+    record("qualifiers", "the dashboard's figures carry their changes, and the header says once what they're against", /▲|▼|no change/.test(dash.card) && !/ vs /.test(dash.card) && /[A-Z][a-z]{2} 1(–\d+)? · vs [A-Z][a-z]{2}( 1(–\d+)?)?/.test(head), `${head.slice(0, 60)} | ${dash.card.replace(/\s+/g, " ").slice(0, 100)}`);
     // A finished month's card is plain actuals: no forward-looking word.
     const pastCard = (await read("/", PAST)).card;
     record("qualifiers", `/ ${PAST} summary card is plain actuals`, pastCard.length > 0 && !/so far|projected|expected|on pace/.test(pastCard), pastCard.replace(/\s+/g, " ").slice(0, 120));

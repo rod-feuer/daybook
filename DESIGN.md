@@ -118,8 +118,10 @@ and §3 carry over unchanged.
 - **The period is said once; figures are what has happened.** The header states
   the days the page's figures cover, beside the month picker ("Oct 1–4"; "Sep
   1–30" once the month is done), so no figure, card or row says "so far". The
-  summary card's figures are actuals over that period, each against the same
-  days of last month ("▲ $1,204 vs Sep 1–4"), from the first day. A projection
+  summary card's figures are actuals over that period, each with its change
+  against the same days of last month ("▲ $1,204 (8%)"), from the first day;
+  the basis is said once, after the period, on the header's line ("Oct 1–4 ·
+  vs Sep 1–4"), not under each figure (IBCS UN 2.2: time, then scenario). A projection
   is forward-looking and says so in words, in its two places only: the verdict
   ("on pace to finish $4,732 under budget", withheld until enough of the month
   has elapsed) and the chart's dashed line. A sheet that covers the header (the
