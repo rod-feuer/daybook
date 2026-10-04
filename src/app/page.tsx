@@ -177,11 +177,10 @@ export default function DashboardPage() {
       {status === "loading" && !data && <LoadingRows />}
       {status !== "error" && data && (
         <div className="flex flex-col gap-6">
-          {/* One summary card, as on Categories and Recurrings: the projected
-              net leads (the one figure that answers "how am I doing"), income
-              and expenses beside it, the budget bar, and the verdict as the
-              status line. The three tiles and the standalone verdict sentence
-              this replaces were the last of the dashboard's own dialect. */}
+          {/* One summary card, as on Categories and Recurrings: net first,
+              income and expenses beside it (actuals over the header's period,
+              each with its change), the budget bar, and the verdict as the
+              status line. */}
           {(() => {
             const current = isCurrentMonth(month);
             const b = data.budget;
@@ -201,10 +200,8 @@ export default function DashboardPage() {
             const prevLabel = prevPeriodLabel(data.prev);
             return (
               <SummaryCard
-                // The month is the header picker. Three labels each used to
-                // carry the frame ("net cash flow, projected") and the card
-                // read as a paragraph. Too early to project, the labels say
-                // "so far"; with a projection, the line under each figure does.
+                // The labels are one word; the period and the comparison basis
+                // are the header's ("Oct 1–4 · vs Sep 1–4").
                 primary={{
                   value: usd(net, { sign: true, cents: false }),
                   label: "net",
@@ -560,13 +557,9 @@ function ChartLegend({
   );
 }
 
-// Pace metrics under the chart — fills the height the category card forces on this
-// card with useful context (and gives the chart card a reason to be this tall).
 // Persistent-but-faint affordance marking a row/card as drillable. Visible at
 // rest (so the interaction is discoverable, not hover-only) and strengthens +
 // nudges right on hover. Parent must carry `group`.
-// Secondary header actions behind a "⋯" on mobile (rendered inline on desktop by
-// the caller). Lightweight dropdown — mirrors the transactions "+ Filter" menu.
 function DrillChevron({ className = "" }: { className?: string }) {
   return (
     <svg
@@ -626,14 +619,11 @@ function chartScale(
   return { top, ticks: Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step), budgetOnChart };
 }
 
-// Month-over-month delta shown under a stat, as "$abs (%)" — dollars answer
-// "how much", percent answers "how unusual". Color reflects whether the move is
-// favorable, which depends on the metric — hence `higherIsGood`. The percent is
-// omitted when the base is zero or the sign flips (where a % would mislead);
-// that only arises for net cash flow, since income/expenses are non-negative.
-// One colour signal per card, and it is the verdict's (DESIGN.md §2): the
-// deltas were red or green under every figure, three signals beside the
-// verdict. They read in the muted text; the arrow says the direction.
+// Month-over-month change under a figure, as "▲ $abs (%)": dollars answer "how
+// much", percent answers "how unusual". The percent is omitted when the base is
+// zero or the sign flips (where a % would mislead), which only arises for net.
+// Muted, since the verdict is the card's one colour signal (DESIGN.md §2); the
+// arrow says the direction, and the basis is the header's.
 function DeltaLine({
   cur,
   prev,
@@ -665,7 +655,6 @@ function DeltaLine({
         {up ? "▲" : "▼"} {dollars}
         {pct}
       </span>
-
     </div>
   );
 }
@@ -673,8 +662,9 @@ function DeltaLine({
 // Header delta for the pace chart: projected month-end vs last month's full
 // total (the gray curve's endpoint = the max of its cumulative series). States
 // the trend the chart shows visually, instead of repeating the projected dollar
-// figure that already appears in the summary card. Mirrors DeltaLine's idiom
-// (▲/▼ · dollars · "vs <month>") for consistency; spending less is favorable.
+// figure that already appears in the summary card. ▲/▼ and dollars as DeltaLine,
+// plus its own "vs <month>", since it compares with a different total; spending
+// less is favorable.
 function PaceDelta({
   projected,
   series,
