@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Shell from "@/components/Shell";
 import { AmountCell } from "@/components/RowCells";
 import { SummaryCard } from "@/components/SummaryCard";
@@ -69,15 +69,19 @@ export default function AccountsPage() {
   // the debt alone, so it waits, and says why (Honest: withhold, don't overstate).
   const waitsForHomes =
     counted.some((a) => a.kind === "mortgage") && !counted.some((a) => a.kind === "property");
-  const row = (a: Account) => (
+  const row = (a: Account, handle?: React.ReactNode) => (
     <AccountRow
       key={a.id}
       a={a}
       when={accountWhen(a, latest, today)}
       active={shelf.isAccount(a.id)}
       onOpen={() => openAccount(a.id, { onChange: () => void load() })}
+      handle={handle}
     />
   );
+  // A section's new order: saved, then the page re-reads. It's on screen, so no toast.
+  const saveOrder = (ids: number[]) =>
+    void mutate(() => postJson("/api/net-worth/order", { ids }), { error: "Couldn't save the order — please try again" });
 
   return (
     <Shell
@@ -126,7 +130,7 @@ export default function AccountsPage() {
             return rows.length === 0 ? null : (
               <section key={s.title} className="flex flex-col gap-2" data-account-section>
                 <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">{s.title}</h3>
-                <div className="card divide-y divide-[var(--border)] overflow-hidden">{rows.map(row)}</div>
+                <SortableRows rows={rows} render={row} onOrder={saveOrder} />
               </section>
             );
           })}
@@ -134,7 +138,7 @@ export default function AccountsPage() {
           {uncounted.length > 0 && (
             <section className="flex flex-col gap-2" data-account-section="uncounted">
               <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Not counted</h3>
-              <div className="card divide-y divide-[var(--border)] overflow-hidden">{uncounted.map(row)}</div>
+              <SortableRows rows={uncounted} render={row} onOrder={saveOrder} />
             </section>
           )}
         </div>
@@ -143,15 +147,17 @@ export default function AccountsPage() {
   );
 }
 
-function AccountRow({ a, when, active, onOpen }: { a: Account; when: string | null; active: boolean; onOpen: () => void }) {
+function AccountRow({ a, when, active, onOpen, handle }: { a: Account; when: string | null; active: boolean; onOpen: () => void; handle?: React.ReactNode }) {
   const meta = [accountKind(a), when].filter(Boolean).join(" · ");
   return (
     <div
       data-drawer-row
       data-account-row
+      data-id={a.id}
       {...rowButtonProps(onOpen)}
-      className={`flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-[var(--hover)] sm:py-2 ${ROW_FOCUS} ${active ? "bg-[var(--accent)]/10" : ""}`}
+      className={`flex cursor-pointer items-center gap-3 py-3 pr-4 hover:bg-[var(--hover)] sm:py-2 ${handle ? "pl-1" : "pl-4"} ${ROW_FOCUS} ${active ? "bg-[var(--accent)]/10" : ""}`}
     >
+      {handle}
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium">{a.name}</div>
         {meta && <div className="truncate text-xs text-[var(--muted)]">{meta}</div>}
@@ -263,6 +269,123 @@ function TrendCard({ trend }: { trend: NetWorthTrend }) {
         </ResponsiveContainer>
       </div>
       <p className="mt-2 text-xs text-[var(--muted)]">An account added later counts from the start at its first value, so adding one isn&apos;t drawn as a rise.</p>
+    </div>
+  );
+}
+
+// A section's rows in the owner's order. Each row has a grip: drag it (mouse
+// or touch) and the row moves as the pointer passes its neighbours' middles;
+// let go and the order is saved. With the grip focused, ↑ and ↓ move the row
+// instead, so the order isn't reachable by pointer alone. A section of one
+// has nothing to order and no grip.
+function SortableRows({
+  rows,
+  render,
+  onOrder,
+}: {
+  rows: Account[];
+  render: (a: Account, handle?: React.ReactNode) => React.ReactNode;
+  onOrder: (ids: number[]) => void;
+}) {
+  const [order, setOrder] = useState<number[]>(() => rows.map((r) => r.id));
+  const [dragging, setDragging] = useState<number | null>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const refocus = useRef<number | null>(null);
+  const key = rows.map((r) => r.id).join(",");
+  // The page re-read (after a save, a sync, an edit): start from its order.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setOrder(key ? key.split(",").map(Number) : []), [key]);
+  useEffect(() => {
+    if (refocus.current == null) return;
+    list.current?.querySelector<HTMLElement>(`[data-grip="${refocus.current}"]`)?.focus();
+    refocus.current = null;
+  });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const shown = order.map((id) => byId.get(id)).filter((r): r is Account => !!r);
+  const move = (ids: number[], id: number, to: number) => {
+    const next = ids.filter((x) => x !== id);
+    next.splice(Math.max(0, Math.min(to, next.length)), 0, id);
+    return next;
+  };
+
+  function onPointerDown(e: React.PointerEvent<HTMLButtonElement>, id: number) {
+    e.stopPropagation();
+    e.preventDefault();
+    setDragging(id);
+  }
+  // While dragging, the window follows the pointer: rows move in the DOM as
+  // the order changes, and a listener on the grip lost the drag when its row
+  // moved. The latest order is read through a ref, so the listeners stay put.
+  const orderRef = useRef(order);
+  useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
+  useEffect(() => {
+    if (dragging == null) return;
+    const id = dragging;
+    const onMove = (e: PointerEvent) => {
+      if (!list.current) return;
+      // The row's new place: before the first other row whose middle is below the pointer.
+      const others = [...list.current.querySelectorAll<HTMLElement>("[data-account-row]")].filter((el) => el.dataset.id !== String(id));
+      const to = others.findIndex((el) => {
+        const r = el.getBoundingClientRect();
+        return e.clientY < r.top + r.height / 2;
+      });
+      const next = move(orderRef.current, id, to < 0 ? others.length : to);
+      if (next.join(",") === orderRef.current.join(",")) return;
+      orderRef.current = next; // before the re-render, so the next move starts from it
+      setOrder(next);
+    };
+    const onUp = () => {
+      setDragging(null);
+      if (orderRef.current.join(",") !== key) onOrder(orderRef.current);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [dragging, key, onOrder]);
+  function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, id: number) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const i = order.indexOf(id);
+    const next = move(order, id, i + (e.key === "ArrowUp" ? -1 : 1));
+    if (next.join(",") === order.join(",")) return; // already at the top or bottom
+    refocus.current = id;
+    setOrder(next);
+    onOrder(next);
+  }
+
+  return (
+    <div ref={list} className="card divide-y divide-[var(--border)] overflow-hidden" data-sortable>
+      {shown.map((a) =>
+        render(
+          a,
+          shown.length > 1 ? (
+            <button
+              type="button"
+              data-grip={a.id}
+              aria-label={`Move ${a.name} (drag, or ↑ ↓)`}
+              title="Drag to reorder (or focus and press ↑ ↓)"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => onPointerDown(e, a.id)}
+              onKeyDown={(e) => onKeyDown(e, a.id)}
+              className={`tap flex w-6 shrink-0 touch-none items-center justify-center self-stretch text-[var(--muted)] opacity-60 hover:opacity-100 focus-visible:opacity-100 ${dragging === a.id ? "cursor-grabbing opacity-100" : "cursor-grab"}`}
+            >
+              <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden>
+                <circle cx="3" cy="3" r="1.3" /><circle cx="7" cy="3" r="1.3" />
+                <circle cx="3" cy="8" r="1.3" /><circle cx="7" cy="8" r="1.3" />
+                <circle cx="3" cy="13" r="1.3" /><circle cx="7" cy="13" r="1.3" />
+              </svg>
+            </button>
+          ) : undefined
+        )
+      )}
     </div>
   );
 }

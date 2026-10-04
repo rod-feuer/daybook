@@ -279,6 +279,8 @@ export function ensureAccounts(db: Database.Database) {
   // A loan kept by hand, paid from a linked account: the vendor its payments
   // post under ("Hyundai Motor Finance"), so each one lowers the balance.
   if (!cols.some((c) => c.name === "paidBy")) db.exec("ALTER TABLE accounts ADD COLUMN paidBy TEXT");
+  // The owner's order within an Accounts section (dragged); null sorts after, by kind and name.
+  if (!cols.some((c) => c.name === "position")) db.exec("ALTER TABLE accounts ADD COLUMN position INTEGER");
 }
 
 // Merge suggestions the user rejected, keyed by the proposed canonical name, so

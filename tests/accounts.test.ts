@@ -296,3 +296,17 @@ test("a loan's payments under a second, combined name count too", () => {
   setPaidBy(loan, "Lender Finance");
   assert.equal(accountDetail(loan)!.history[0].amount, 9000, "both payments, at 0%");
 });
+
+import { setAccountOrder } from "../src/lib/accounts";
+
+test("an order the owner sets holds, through the next sync", () => {
+  // WHY: a dragged order that the daily sync quietly reset would have to be
+  // redone every morning; and accounts never ordered keep their old place.
+  recordBalances(bank(), "2026-10-04");
+  const id = (p: string) => (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = ?").get(p) as { id: number }).id;
+  const names = () => netWorth("2026-10-05").accounts.filter((a) => a.side === "liability").map((a) => a.kind);
+  assert.deepEqual(names(), ["card", "mortgage"], "by kind before any order");
+  setAccountOrder([id("home"), id("card")]);
+  recordBalances(bank(), "2026-10-05");
+  assert.deepEqual(names(), ["mortgage", "card"], "the owner's order, after a sync");
+});

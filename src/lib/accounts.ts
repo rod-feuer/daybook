@@ -124,7 +124,7 @@ export function netWorth(asOf: string): NetWorth {
          JOIN balances b ON b.accountId = a.id
           AND b.asOf = (SELECT MAX(asOf) FROM balances WHERE accountId = a.id AND asOf <= @asOf)
          WHERE a.hidden = 0
-         ORDER BY a.side, a.kind, a.name`
+         ORDER BY a.side, a.position IS NULL, a.position, a.kind, a.name`
       )
       .all({ asOf }) as (Omit<NetWorth["accounts"][number], "counted"> & { counted: number })[]
   ).map((a) => ({ ...a, counted: a.counted === 1 }));
@@ -515,4 +515,14 @@ function payersFor(payment: number | null): string[] {
       )
       .all(-payment * 1.05, -payment * 0.95, since) as { merchant: string }[]
   ).map((r) => r.merchant);
+}
+
+// The owner's order for a section's accounts, top to bottom (dragged on the
+// Accounts page). Only the order within a section matters, so each gets its
+// index there; accounts never ordered sort after, as before (kind, then name).
+export function setAccountOrder(ids: number[]): void {
+  const db = getDb();
+  ensureAccounts(db);
+  const set = db.prepare("UPDATE accounts SET position = ? WHERE id = ?");
+  db.transaction(() => ids.forEach((id, i) => set.run(i, id)))();
 }
