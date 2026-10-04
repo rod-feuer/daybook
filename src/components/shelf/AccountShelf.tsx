@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { CategoryName } from "@/components/CategoryIdentity";
 import { PropertyCard } from "@/components/shelf/parts";
+import { CommitInput } from "@/components/InlineEdit";
 import { AmountCell } from "@/components/RowCells";
 import { accountKind } from "@/components/accountLabels";
 import { usd, shortDate } from "@/lib/format";
-import type { AccountDetail, OwnerValue } from "@/lib/accounts";
+import type { AccountDetail, OwnerValue, TermField } from "@/lib/accounts";
 
 // The account shelf (layer 1): one account, its value and where it came
 // from, its history, and the verbs it takes. A linked account's balance is
@@ -32,6 +33,8 @@ export function AccountBody({
   onSetValue,
   onRemoveValue,
   onSetCounted,
+  onSetTerms,
+  onSetSecuredBy,
   onDelete,
   confirmingDelete,
 }: {
@@ -39,6 +42,8 @@ export function AccountBody({
   onSetValue: (v: OwnerValue) => void;
   onRemoveValue: (asOf: string) => void;
   onSetCounted: (counted: boolean) => void;
+  onSetTerms: (patch: Partial<Record<TermField, number | string | null>>) => void;
+  onSetSecuredBy: (assetId: number | null) => void;
   onDelete: () => void;
   confirmingDelete: boolean;
 }) {
@@ -57,7 +62,19 @@ export function AccountBody({
       </div>
       <p className="-mt-2 text-[11px] text-[var(--muted)]" data-account-caption>
         {data.counted ? (owed ? "Counted in what's owed" : "Counted in what's owned") : "Not counted in net worth"}
+        {data.equity != null && (
+          <>
+            {" · "}
+            <span data-equity>
+              equity {usd(data.equity, { cents: false })}, after {data.loans.map((l) => `${usd(l.amount, { cents: false })} owed on ${l.name}`).join(" and ")}
+            </span>
+          </>
+        )}
       </p>
+
+      {data.terms && (data.kind === "loan" || data.kind === "mortgage") && (
+        <LoanTermsPanel data={data} onSetTerms={onSetTerms} onSetSecuredBy={onSetSecuredBy} />
+      )}
 
       {manual && <ValueForm key={latest?.asOf ?? "new"} estimate={latest?.source === "estimate"} onSave={onSetValue} />}
 
@@ -161,5 +178,73 @@ export function ValueForm({
         </button>
       </div>
     </form>
+  );
+}
+
+// A loan's terms, each its own editor. The bank fills what it reports (a
+// mortgage's rate and payment), marked auto; what the owner sets is marked
+// edited and the bank leaves it alone. Clearing a field returns it to the
+// bank's, or to unknown. Then the asset the loan is against, for equity.
+function LoanTermsPanel({
+  data,
+  onSetTerms,
+  onSetSecuredBy,
+}: {
+  data: AccountDetail;
+  onSetTerms: (patch: Partial<Record<TermField, number | string | null>>) => void;
+  onSetSecuredBy: (assetId: number | null) => void;
+}) {
+  const t = data.terms!;
+  const tag = (f: TermField) => (t.edited.includes(f) ? true : t[f] != null ? false : undefined);
+  const num = (f: TermField) => (raw: string) => {
+    const clean = raw.replace(/[$,%\s]/g, "");
+    const next = clean === "" ? null : Number(clean);
+    if (next !== null && !Number.isFinite(next)) return;
+    if (next !== t[f]) onSetTerms({ [f]: next });
+  };
+  const field = "min-w-0 w-full bg-transparent text-[15px] font-semibold tabular-nums outline-none placeholder:font-normal placeholder:text-[var(--muted)]";
+  const date = (f: "maturity" | "opened") => (
+    <input
+      type="date"
+      aria-label={f === "maturity" ? "Payoff date" : "Opened"}
+      defaultValue={t[f] ?? ""}
+      key={`${f}-${t[f]}`}
+      onBlur={(e) => e.target.value !== (t[f] ?? "") && onSetTerms({ [f]: e.target.value || null })}
+      className={`tap-native ${field}`}
+    />
+  );
+  return (
+    <div className="flex flex-col gap-2" data-loan-terms>
+      <div className="stat-label">Terms</div>
+      <div className="grid grid-cols-2 gap-2">
+        <PropertyCard label="rate" edited={tag("rate")}>
+          <div className="flex items-baseline">
+            <CommitInput key={`rate-${t.rate}`} aria-label="Rate" inputMode="decimal" placeholder="Add" defaultValue={t.rate == null ? "" : String(t.rate)} onCommit={num("rate")} className={field} />
+            {t.rate != null && <span className="text-xs text-[var(--muted)]">%</span>}
+          </div>
+        </PropertyCard>
+        <PropertyCard label="payment" edited={tag("payment")} detail={t.payment != null ? "a month" : undefined}>
+          <CommitInput key={`pay-${t.payment}`} aria-label="Monthly payment" inputMode="decimal" placeholder="Add" defaultValue={t.payment == null ? "" : usd(t.payment)} onCommit={num("payment")} className={field} />
+        </PropertyCard>
+        <PropertyCard label="paid off" edited={tag("maturity")}>{date("maturity")}</PropertyCard>
+        <PropertyCard label="borrowed" edited={tag("original") ?? tag("opened")} detail={date("opened")}>
+          <CommitInput key={`orig-${t.original}`} aria-label="Amount borrowed" inputMode="decimal" placeholder="Add" defaultValue={t.original == null ? "" : usd(t.original, { cents: false })} onCommit={num("original")} className={field} />
+        </PropertyCard>
+      </div>
+      <label className="flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
+        <span>Against</span>
+        <select
+          aria-label="What this loan is against"
+          value={data.securedBy?.id ?? ""}
+          onChange={(e) => onSetSecuredBy(e.target.value ? Number(e.target.value) : null)}
+          className="select-caret tap-native cursor-pointer appearance-none rounded-lg border border-[var(--border)] bg-card py-2 pl-3 pr-8 text-[13px] text-[var(--foreground)]"
+        >
+          <option value="">Nothing</option>
+          {data.assets.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }

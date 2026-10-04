@@ -436,7 +436,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   // Account writes. A rename or a value shows on the shelf and the row, so
   // they say nothing; a delete closes the shelf, so it says what happened.
   const [confirmingAccountDelete, setConfirmingAccountDelete] = useState<number | null>(null);
-  const accountPatch = (id: number, patch: { name?: string; counted?: boolean }) =>
+  const accountPatch = (id: number, patch: { name?: string; counted?: boolean; terms?: object; securedBy?: number | null }) =>
     write(() => patchJson(`/api/net-worth/accounts/${id}`, patch), { error: UPDATE_ERROR });
   const accountSetValue = (id: number, v: OwnerValue) =>
     write(() => postJson(`/api/net-worth/accounts/${id}/values`, v), { error: "Couldn't save the value — please try again" });
@@ -612,6 +612,8 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 onSetValue={(v) => accountSetValue(aData.id, v)}
                 onRemoveValue={(asOf) => accountRemoveValue(aData.id, asOf)}
                 onSetCounted={(counted) => accountPatch(aData.id, { counted })}
+                onSetTerms={(terms) => accountPatch(aData.id, { terms })}
+                onSetSecuredBy={(securedBy) => accountPatch(aData.id, { securedBy })}
                 onDelete={() => accountDelete(aData)}
                 confirmingDelete={confirmingAccountDelete === aData.id}
               />

@@ -1,4 +1,4 @@
-import { MANUAL_KINDS, type ManualKind, type OwnerValue } from "@/lib/accounts";
+import { MANUAL_KINDS, TERM_FIELDS, type ManualKind, type OwnerValue, type TermField } from "@/lib/accounts";
 
 // Shared checks for the account routes. Each returns the clean value or an
 // error string the route sends back as a 400.
@@ -24,3 +24,26 @@ export function cleanValue(body: { amount?: unknown; asOf?: unknown; estimate?: 
 }
 
 export const isError = (v: unknown): v is { error: string } => typeof v === "object" && v !== null && "error" in v;
+
+// A loan's terms patch: each field a value, or null to clear it. A rate is an
+// annual percentage (0–100), money is zero or more, dates are YYYY-MM-DD.
+export function cleanTerms(v: unknown): Partial<Record<TermField, number | string | null>> | { error: string } {
+  if (typeof v !== "object" || v === null) return { error: "terms must be an object" };
+  const out: Partial<Record<TermField, number | string | null>> = {};
+  for (const [k, raw] of Object.entries(v)) {
+    if (!(TERM_FIELDS as readonly string[]).includes(k)) return { error: `unknown term: ${k}` };
+    const f = k as TermField;
+    if (raw === null || raw === "") {
+      out[f] = null;
+    } else if (f === "maturity" || f === "opened") {
+      const d = String(raw);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(d + "T00:00:00Z"))) return { error: `${f} must be YYYY-MM-DD` };
+      out[f] = d;
+    } else {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || (f === "rate" && n > 100)) return { error: f === "rate" ? "the rate is a percentage, 0 to 100" : `${f} must be zero or more` };
+      out[f] = Math.round(n * (f === "rate" ? 1000 : 100)) / (f === "rate" ? 1000 : 100);
+    }
+  }
+  return out;
+}

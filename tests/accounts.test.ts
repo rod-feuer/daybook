@@ -144,3 +144,52 @@ test("a hand-kept account's values: the same day replaces, a value can be remove
   assert.equal(accountDetail(car), null);
   assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM balances WHERE accountId = ?").get(car) as { n: number }).n, 0, "its values went with it");
 });
+
+import { recordBankTerms, setTerms, setSecuredBy } from "../src/lib/accounts";
+
+test("the bank fills a loan's terms, but never over a term the owner set; clearing hands it back", () => {
+  // WHY: Plaid reports a mortgage's rate and payment. An owner who corrects
+  // one (a rate the bank reports stale) must not see it reverted overnight;
+  // and an owner who clears their figure wants the bank's back.
+  recordBalances(bank(), "2026-10-04");
+  const home = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'home'").get() as { id: number }).id;
+  recordBankTerms([{ plaidAccountId: "home", rate: 3.125, payment: 4861.04 }]);
+  let t = accountDetail(home)!.terms!;
+  assert.deepEqual([t.rate, t.payment, t.edited], [3.125, 4861.04, []], "the bank's, auto");
+  setTerms(home, { rate: 3.0, maturity: "2051-06-01" });
+  recordBankTerms([{ plaidAccountId: "home", rate: 3.125, payment: 4900 }]);
+  t = accountDetail(home)!.terms!;
+  assert.deepEqual([t.rate, t.payment, t.maturity, t.edited], [3.0, 4900, "2051-06-01", ["rate", "maturity"]], "the owner's rate stands; the bank's payment updates");
+  setTerms(home, { rate: null });
+  recordBankTerms([{ plaidAccountId: "home", rate: 3.125 }]);
+  assert.equal(accountDetail(home)!.terms!.rate, 3.125, "cleared, the bank's comes back");
+});
+
+test("only a loan has terms, and it can only be against something owned", () => {
+  // WHY: terms on a checking account, or a loan "against" another loan,
+  // would put nonsense into the pay-down figures and the equity line.
+  recordBalances(bank(), "2026-10-04");
+  const chk = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'chk'").get() as { id: number }).id;
+  const card = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'card'").get() as { id: number }).id;
+  const home = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'home'").get() as { id: number }).id;
+  assert.equal(setTerms(chk, { rate: 1 }), false);
+  assert.equal(accountDetail(chk)!.terms, null);
+  assert.equal(setSecuredBy(home, card), false, "not against a liability");
+  assert.equal(setSecuredBy(chk, home), false, "an asset doesn't point");
+});
+
+test("an asset's equity is its worth less what's owed on the loans against it", () => {
+  // WHY: the pay-down question is asked per asset ("how much of the boat do
+  // we own?"); equity must subtract exactly the loans pointed at it, today.
+  recordBalances(bank(), "2026-10-04");
+  const mortgage = (getDb().prepare("SELECT id FROM accounts WHERE plaidAccountId = 'home'").get() as { id: number }).id;
+  const house = createManualAccount("Sample house", "property", { asOf: "2026-10-04", amount: 80000, estimate: true });
+  assert.equal(accountDetail(house)!.equity, null, "no loan against it: no equity line");
+  setSecuredBy(mortgage, house);
+  const d = accountDetail(house)!;
+  assert.equal(d.equity, 80000 - 50000);
+  assert.deepEqual(d.loans.map((l) => [l.amount]), [[50000]]);
+  assert.equal(accountDetail(mortgage)!.securedBy?.id, house);
+  assert.equal(deleteManualAccount(house), true, "a house a loan points at can still be deleted");
+  assert.equal(accountDetail(mortgage)!.securedBy, null, "and the loan is against nothing now");
+});

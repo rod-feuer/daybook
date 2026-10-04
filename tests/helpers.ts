@@ -39,6 +39,7 @@ export const TABLES = [
   "split_rules",
   "budget_entries",
   "categories",
+  "loan_terms",
   "balances",
   "accounts",
 ];
