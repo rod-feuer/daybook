@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { accountDetail, deleteManualAccount, setSecuredBy, setTerms, updateAccount } from "@/lib/accounts";
+import { accountDetail, deleteManualAccount, setPaidBy, setSecuredBy, setTerms, updateAccount } from "@/lib/accounts";
 import { cleanName, cleanTerms, isError } from "../validate";
 
 export const runtime = "nodejs";
@@ -33,6 +33,10 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   if (body.securedBy !== undefined) {
     const asset = body.securedBy === null ? null : Number(body.securedBy);
     if (!setSecuredBy(id, asset)) return NextResponse.json({ error: "a loan can only be against something owned" }, { status: 400 });
+  }
+  if (body.paidBy !== undefined) {
+    const vendor = body.paidBy === null ? null : String(body.paidBy).slice(0, 120);
+    if (!setPaidBy(id, vendor)) return NextResponse.json({ error: "only a loan you added is lowered by its payments" }, { status: 400 });
   }
   return NextResponse.json({ ok: true });
 }

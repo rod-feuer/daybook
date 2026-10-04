@@ -200,6 +200,7 @@ function AddAccount({ onAdd, onClose }: { onAdd: (body: { name: string; kind: Ma
       <ValueForm
         key={kind}
         estimate={kind === "property" || kind === "vehicle"}
+        estimateOption={kind !== "loan"}
         submitLabel="Add"
         ready={!!name.trim()}
         onSave={(v) => onAdd({ name: name.trim(), kind, ...v })}

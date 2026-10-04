@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureTxDescriptor } from "./db";
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
-import { recordBalances, recordBankTerms, type BankTerms } from "./accounts";
+import { recordBalances, recordBankTerms, projectAllLoanPayments, type BankTerms } from "./accounts";
 import { normalizeMerchant } from "./merchant";
 import { nameAffinity, NAME_MATCH } from "./merges";
 
@@ -372,6 +372,8 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   if (result.inserted > 0 || result.updated > 0) detectRecurrings();
   // The same pull carries each account's balance: one a day, dated by the sync.
   const balances = recordBalances(items, end);
+  // Payments just imported lower the loans kept by hand.
+  projectAllLoanPayments();
   // Terms change rarely and are a second call: a failure leaves the last
   // ones in place and is reported as null, not as a failed sync.
   let terms: number | null = null;
