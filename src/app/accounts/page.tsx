@@ -13,10 +13,13 @@ import { rowButtonProps, ROW_FOCUS } from "@/components/rowButton";
 import { useMutation } from "@/components/useMutation";
 import { getJson, postJson } from "@/lib/http";
 import { usd, shortDate } from "@/lib/format";
-import type { NetWorth } from "@/lib/accounts";
+import type { NetWorth, NetWorthTrend } from "@/lib/accounts";
+import { TREND_MIN_DAYS } from "@/lib/accountKinds";
+import { DeltaLine } from "@/components/DeltaLine";
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MANUAL_KINDS, type ManualKind } from "@/lib/accountKinds";
 
-type Data = NetWorth & { today: string };
+type Data = NetWorth & { today: string; trend: NetWorthTrend };
 type Account = NetWorth["accounts"][number];
 
 // Assets first, then what's owed, the order net worth subtracts in.
@@ -59,6 +62,8 @@ export default function AccountsPage() {
   const latest = data?.accounts.reduce((m, a) => (a.asOf > m ? a.asOf : m), "") || null;
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
   const counted = data?.accounts.filter((a) => a.counted) ?? [];
+  const prev = data?.trend.prev ?? null;
+  const prevLabel = prev ? shortDate(prev.date) : null;
   const uncounted = data?.accounts.filter((a) => !a.counted) ?? [];
   // A mortgage counts but its home has no value yet: net worth would read as
   // the debt alone, so it waits, and says why (Honest: withhold, don't overstate).
@@ -77,7 +82,8 @@ export default function AccountsPage() {
   return (
     <Shell
       title="Accounts"
-      subtitle={latest ? `As of ${shortDate(latest)}` : undefined}
+      // The comparison's basis is said once, here, as the dashboard does.
+      subtitle={latest ? `As of ${shortDate(latest)}${data?.trend.prev ? ` · vs ${shortDate(data.trend.prev.date)}` : ""}` : undefined}
       actions={<button type="button" onClick={() => setAdding((v) => !v)} className="btn-ghost">Add account</button>}
     >
       {adding && (
@@ -102,14 +108,19 @@ export default function AccountsPage() {
       ) : (
         <div className="flex flex-col gap-6">
           <SummaryCard
-            primary={{ value: waitsForHomes ? "—" : usd(data.net, { cents: false }), label: "Net worth" }}
+            primary={{
+              value: waitsForHomes ? "—" : usd(data.net, { cents: false }),
+              label: "Net worth",
+              sub: waitsForHomes ? undefined : <DeltaLine cur={data.net} prev={prev?.net} prevLabel={prevLabel} />,
+            }}
             secondary={[
-              { value: usd(data.owned, { cents: false }), label: "Owned" },
-              { value: usd(data.owed, { cents: false }), label: "Owed" },
+              { value: usd(data.owned, { cents: false }), label: "Owned", sub: <DeltaLine cur={data.owned} prev={prev?.owned} prevLabel={prevLabel} /> },
+              { value: usd(data.owed, { cents: false }), label: "Owed", sub: <DeltaLine cur={data.owed} prev={prev?.owed} prevLabel={prevLabel} /> },
             ]}
             status={waitsForHomes ? "Waiting for home values" : undefined}
             statusDetail={waitsForHomes ? <span className="text-[var(--muted)]">the mortgages count; the homes don&apos;t yet</span> : undefined}
           />
+          {!waitsForHomes && <TrendCard trend={data.trend} />}
           {SECTIONS.map((s) => {
             const rows = counted.filter((a) => s.kinds.includes(a.kind));
             return rows.length === 0 ? null : (
@@ -193,6 +204,64 @@ function AddAccount({ onAdd, onClose }: { onAdd: (body: { name: string; kind: Ma
         ready={!!name.trim()}
         onSave={(v) => onAdd({ name: name.trim(), kind, ...v })}
       />
+    </div>
+  );
+}
+
+// Net worth day by day. It waits for two weeks of balances, and says when it
+// will start; until then a line of a few points would read as a trend.
+function TrendCard({ trend }: { trend: NetWorthTrend }) {
+  if (!trend.series) {
+    if (!trend.start) return null;
+    const d = new Date(trend.start + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + TREND_MIN_DAYS);
+    return (
+      <div className="card p-4 text-[13px] text-[var(--muted)]" data-trend-pending>
+        The net worth trend starts once Daybook has two weeks of balances, on {shortDate(d.toISOString().slice(0, 10))}.
+      </div>
+    );
+  }
+  const s = trend.series;
+  const first = s[0], last = s[s.length - 1];
+  // Round steps (1, 2, 2.5 or 5 × a power of ten), about four of them, so
+  // the axis reads $1.95M, $1.96M… rather than wherever the padding fell.
+  const lo0 = Math.min(...s.map((p) => p.net)), hi0 = Math.max(...s.map((p) => p.net));
+  const span = Math.max(hi0 - lo0, Math.abs(hi0) * 0.01, 1);
+  const mag = 10 ** Math.floor(Math.log10(span / 4));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= span / 4)!;
+  const lo = Math.floor(lo0 / step) * step, hi = Math.ceil(hi0 / step) * step;
+  const ticks = Array.from({ length: Math.round((hi - lo) / step) + 1 }, (_, i) => lo + i * step);
+  const short = (v: number) => (Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(step >= 1e5 ? 1 : 2)}M` : `$${Math.round(v / 1000)}k`);
+  return (
+    <div className="card p-4" data-trend>
+      <div className="stat-label mb-2">Net worth</div>
+      <div
+        className="h-48"
+        role="img"
+        aria-label={`Net worth from ${usd(first.net, { cents: false })} on ${shortDate(first.date)} to ${usd(last.net, { cents: false })} on ${shortDate(last.date)}.`}
+      >
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={s} margin={{ left: -8, right: 8, top: 4 }}>
+            <defs>
+              <linearGradient id="nw" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.25} />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} minTickGap={32} />
+            <YAxis domain={[lo, hi]} ticks={ticks} tickFormatter={short} tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} width={52} />
+            <Tooltip
+              formatter={(v) => [usd(Number(v), { cents: false }), "Net worth"] as [string, string]}
+              labelFormatter={(l) => shortDate(String(l))}
+              contentStyle={{ borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)", fontSize: 12 }}
+              labelStyle={{ color: "var(--foreground)" }}
+            />
+            {/* Still: no draw-in animation, so nothing moves for anyone who asked for less. */}
+            <Area type="monotone" dataKey="net" stroke="var(--accent)" strokeWidth={2} fill="url(#nw)" isAnimationActive={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="mt-2 text-xs text-[var(--muted)]">An account added later counts from the start at its first value, so adding one isn&apos;t drawn as a rise.</p>
     </div>
   );
 }

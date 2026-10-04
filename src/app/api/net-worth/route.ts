@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { netWorth } from "@/lib/accounts";
+import { netWorth, netWorthTrend } from "@/lib/accounts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,5 +8,5 @@ export const dynamic = "force-dynamic";
 // Dated the way the sync dates a balance, so today's sync counts as today.
 export async function GET() {
   const today = new Date().toISOString().slice(0, 10);
-  return NextResponse.json({ today, ...netWorth(today) });
+  return NextResponse.json({ today, ...netWorth(today), trend: netWorthTrend(today) });
 }

@@ -82,6 +82,13 @@ export function SummaryCard({
   // Three columns on every page, so two figures sit as a pair on the left
   // instead of spreading across the panel.
   const figureCols = "lg:grid-cols-3";
+  // A card with no bar and nothing to say under it (Accounts, once net worth
+  // has its figure) has no right panel: an empty one behind a hairline read as
+  // something missing. The figures keep their columns.
+  const panel = progress != null || !!status || !!barTitle || !!barCaption;
+  const hairline = panel
+    ? "lg:after:absolute lg:after:-right-3 lg:after:top-0 lg:after:bottom-0 lg:after:border-l lg:after:border-[var(--border)] lg:after:content-['']"
+    : "";
   return (
     <div className={`card p-6 ${className}`.trim()} data-summary>
       {/* Two panels: the month's figures on the left, the budget on the right,
@@ -98,7 +105,7 @@ export function SummaryCard({
             128px wide (a long label such as Recurrings' "paid so far of
             $19,688 expected" may widen its column to 192px rather than wrap
             into three lines). */}
-        <div className={`relative flex flex-wrap items-start gap-x-8 gap-y-4 lg:col-span-3 lg:grid ${figureCols} lg:gap-x-6 lg:pl-6 lg:after:absolute lg:after:-right-3 lg:after:top-0 lg:after:bottom-0 lg:after:border-l lg:after:border-[var(--border)] lg:after:content-['']`}>
+        <div className={`relative flex flex-wrap items-start gap-x-8 gap-y-4 lg:col-span-3 lg:grid ${figureCols} lg:gap-x-6 lg:pl-6 ${hairline}`}>
           <div className="min-w-0 max-sm:flex-1 sm:min-w-32 sm:max-w-48 lg:max-w-none">
             <Fig f={primary} />
           </div>
@@ -128,7 +135,7 @@ export function SummaryCard({
         {/* The two panels centre on one line: the figures' mass is the numbers,
             the panel's is its bar and verdict, and top-aligned the numbers sat
             level with the panel's small label over empty card. */}
-        <div data-budget-panel className="min-w-0 lg:col-span-2 lg:pl-4 lg:pr-6">
+        {panel && <div data-budget-panel className="min-w-0 lg:col-span-2 lg:pl-4 lg:pr-6">
           {(barTitle || barCaption) && (
             <div className="mb-2 flex items-baseline justify-between gap-3">
               <div className="stat-label">{barTitle}</div>
@@ -175,7 +182,7 @@ export function SummaryCard({
               {statusDetail && <span data-status-detail className="flex flex-wrap items-baseline gap-x-2 text-xs font-normal">{statusDetail}</span>}
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );

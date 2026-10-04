@@ -1,6 +1,7 @@
 import { getDb, ensureAccounts } from "./db";
 import type { PlaidAccount, PlaidItem } from "./plaid";
 import type { ManualKind } from "./accountKinds";
+import { TREND_MIN_DAYS } from "./accountKinds";
 
 type Side = "asset" | "liability";
 type Kind = "cash" | "card" | "loan" | "mortgage" | "investment" | "property" | "vehicle" | "other";
@@ -356,4 +357,61 @@ export function setSecuredBy(loanId: number, assetId: number | null): boolean {
   }
   getDb().prepare("UPDATE accounts SET securedBy = ? WHERE id = ?").run(assetId, loanId);
   return true;
+}
+
+// ---- Net worth over time ---------------------------------------------------
+
+// The trend and the change against a month ago. History begins the first day
+// Daybook recorded a balance, so both wait: the line until two weeks of it
+// (fewer points read as noise), the change until a month of it. An account
+// added later (a new link, a home entered by hand) counts from the start at
+// its first value: otherwise adding it would draw a rise that never happened
+// and report it as a change, when only the record grew. Like for like.
+export { TREND_MIN_DAYS };
+export const CHANGE_DAYS = 30;
+export type NetWorthTrend = {
+  start: string | null; // the first day with a balance
+  series: { date: string; net: number }[] | null; // daily, once TREND_MIN_DAYS have passed
+  prev: { date: string; owned: number; owed: number; net: number } | null; // CHANGE_DAYS ago, once reached
+};
+const addDays = (iso: string, n: number) => {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+export function netWorthTrend(today: string): NetWorthTrend {
+  const db = getDb();
+  ensureAccounts(db);
+  const rows = db
+    .prepare(
+      `SELECT a.id, a.side, b.asOf, b.amount FROM accounts a JOIN balances b ON b.accountId = a.id
+       WHERE a.hidden = 0 AND a.inNetWorth = 1 AND b.asOf <= ? ORDER BY a.id, b.asOf`
+    )
+    .all(today) as { id: number; side: Side; asOf: string; amount: number }[];
+  if (rows.length === 0) return { start: null, series: null, prev: null };
+  const byAccount = new Map<number, { side: Side; points: { asOf: string; amount: number }[] }>();
+  for (const r of rows) {
+    const a = byAccount.get(r.id) ?? { side: r.side, points: [] };
+    a.points.push({ asOf: r.asOf, amount: r.amount });
+    byAccount.set(r.id, a);
+  }
+  // Each account's value on a day: its latest on or before it, else its first.
+  const at = (day: string) => {
+    let owned = 0, owed = 0;
+    for (const a of byAccount.values()) {
+      let v = a.points[0].amount;
+      for (const p of a.points) if (p.asOf <= day) v = p.amount; else break;
+      if (a.side === "asset") owned += v; else owed += v;
+    }
+    const r2 = (n: number) => Number(n.toFixed(2));
+    return { owned: r2(owned), owed: r2(owed), net: r2(owned - owed) };
+  };
+  const start = rows.reduce((m, r) => (r.asOf < m ? r.asOf : m), rows[0].asOf);
+  let series: NetWorthTrend["series"] = null;
+  if (addDays(start, TREND_MIN_DAYS) <= today) {
+    series = [];
+    for (let d = start; d <= today; d = addDays(d, 1)) series.push({ date: d, net: at(d).net });
+  }
+  const back = addDays(today, -CHANGE_DAYS);
+  return { start, series, prev: start <= back ? { date: back, ...at(back) } : null };
 }
