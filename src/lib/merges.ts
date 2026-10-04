@@ -8,6 +8,7 @@ import {
   isRecurringActive,
   getRecurringOverrides,
   getRecurringSettings,
+  merchantDisplayName,
   confirmedKey,
 } from "./queries";
 import { CADENCE_DAYS, type Cadence } from "./cadence";
@@ -53,6 +54,9 @@ export type MergeSuggestion = {
   note?: string; // why it's suggested (recurring-match only)
   categoryId?: number; // recurring-match: set uncategorized variant charges to this
   lowConfidence?: boolean; // 0.8–0.9 name band — surface for confirmation, not certain
+  // The bill a recurring-match card folds into, as a row elsewhere can say it
+  // to decide there: "Same as Every ($20 monthly, the 4th)?".
+  bill?: { name: string; amount: number; cadence: string; day: number };
 };
 
 function dismissedKeys(db: ReturnType<typeof getDb>): Set<string> {
@@ -141,6 +145,7 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
       categoryName: string | null;
       cadence: string;
       lastDate: string;
+      avgAmount: number;
       lo: number;
       hi: number;
     }[]
@@ -256,6 +261,12 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
           } recurring${r.categoryId != null ? " and sets the category" : ""}.`,
       categoryId: r.categoryId ?? undefined,
       lowConfidence,
+      bill: {
+        name: merchantDisplayName(r.merchant, getRecurringSettings(), links),
+        amount: Math.abs(r.avgAmount),
+        cadence: r.cadence,
+        day: Number(r.lastDate.slice(8, 10)),
+      },
     });
   }
   // Confident matches first, borderline ones last.

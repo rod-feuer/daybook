@@ -2268,11 +2268,14 @@ async function deferToMerge(browser) {
     const d = await page.evaluate(() => {
       const li = [...document.querySelectorAll("[data-uncategorized] [data-drawer-row]")].find((x) => x.innerText.includes("Marlows Deli"));
       if (!li) return null;
-      const link = [...li.querySelectorAll("a[data-deferred]")].find((a) => a.getBoundingClientRect().width > 0);
+      const ask = [...li.querySelectorAll("[data-deferred]")].find((a) => a.getBoundingClientRect().width > 0);
       const sel = li.querySelector("[data-category-property] select");
-      return { link: link?.textContent.trim() ?? null, href: link?.getAttribute("href"), picked: sel?.options[sel.selectedIndex]?.textContent.trim(), apply: [...li.querySelectorAll("[data-queue-accept]")].filter((b) => b.getBoundingClientRect().width > 0).length };
+      return { ask: ask?.textContent.replace(/\s+/g, " ").trim() ?? null, combine: !!ask?.querySelector("[data-inline-combine]"), picked: sel?.options[sel.selectedIndex]?.textContent.trim(), apply: [...li.querySelectorAll("[data-queue-accept]")].filter((b) => b.getBoundingClientRect().width > 0).length };
     });
-    record("defer to merge", "the dashboard row points at the merge and keeps the plain picker, with no Apply", d?.link === "possibly Marlow's Deli →" && d.href === "/transactions" && /Uncategorized/.test(d.picked) && d.apply === 0, JSON.stringify(d));
+    // The row asks the merge card's question (with the bill's amount and day
+    // when the card is a bill match; Marlow's is a same-name card) and answers
+    // it in place: Combine. It keeps the plain picker and no Apply.
+    record("defer to merge", "the dashboard row asks the merge question with the bill's evidence and its own Combine, and keeps the plain picker, with no Apply", !!d && /^Same as Marlow's Deli( \(\$[\d,.]+ \w+, the \d+(st|nd|rd|th)\))?\? ?Combine$/.test(d.ask ?? "") && d.combine && /Uncategorized/.test(d.picked) && d.apply === 0, JSON.stringify(d));
     // Dismiss the merge: the vendor is a category question again.
     const merges = await (await fetch(BASE + "/api/merges")).json();
     const g = merges.find((x) => x.variants?.some((v) => v.merchant === "Marlows Deli"));
