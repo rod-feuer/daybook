@@ -2826,7 +2826,7 @@ test("an uncategorized duplicate candidate is deferred to the merge, which names
   const merge = allMergeSuggestions().find((g) => g.variants.some((v) => v.merchant === "Dga"));
   assert.ok(merge && merge.canonical === "Dgappcare Chicago", "the merge queue holds Dga as a candidate for the bill");
   assert.ok(merge!.lowConfidence, "a borderline name: the card is a possible match");
-  assert.match(merge!.note ?? "", /combining sets its category to Carmel Home \(defer\)/, "the possible-match card says what Combine sets");
+  assert.match(merge!.note ?? "", /it joins that bill and takes its category, Carmel Home \(defer\)/, "the possible-match card says what Combine does: joins the bill, sets the category");
 
   const before = categorizeSuggestions();
   assert.deepEqual(before.deferred, [{ merchant: "Dga", count: 1, to: "Dgappcare Chicago" }], "the category queue defers Dga to the merge");
