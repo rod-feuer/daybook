@@ -310,3 +310,36 @@ test("an order the owner sets holds, through the next sync", () => {
   recordBalances(bank(), "2026-10-05");
   assert.deepEqual(names(), ["mortgage", "card"], "the owner's order, after a sync");
 });
+
+import { needsALook } from "../src/lib/accounts";
+
+test("an old estimate, a link silent for a week and a mortgage tied to no home each ask for a look; a fresh account asks nothing", () => {
+  // WHY: these are the figures in net worth most likely to be wrong, and
+  // each one is silent on its row (an "as of" date, an estimate's age, a
+  // missing equity). Listing them is what gets them fixed; listing anything
+  // else would teach the owner to ignore the list.
+  recordBalances(bank(), "2026-10-01");
+  recordBalances([bank()[0]], "2026-10-09"); // the brokerage's bank stops reporting
+  const home = createManualAccount("Sample home", "property", { asOf: "2025-09-01", amount: 80000, estimate: true });
+  createManualAccount("Sample car", "vehicle", { asOf: "2026-09-01", amount: 9000, estimate: true });
+  const look = () => {
+    const nw = netWorth("2026-10-09");
+    const name = new Map(nw.accounts.map((a) => [a.id, a.name]));
+    return needsALook(nw.accounts, "2026-10-09").map((i) => `${name.get(i.id)}: ${i.reason} ${i.days}`).sort();
+  };
+  assert.deepEqual(look(), ["Sample home: old-estimate 403", "brokerage 4444: silent 8", "mortgage 3333: untied-mortgage 0"]);
+  // Tying the mortgage to its home fixes that item, and only that one.
+  const mortgage = netWorth("2026-10-09").accounts.find((a) => a.kind === "mortgage")!.id;
+  assert.ok(setSecuredBy(mortgage, home));
+  assert.deepEqual(look(), ["Sample home: old-estimate 403", "brokerage 4444: silent 8"]);
+});
+
+test("nothing asks for a look when every figure is fresh, a link is under a week quiet, or the account is left out of net worth", () => {
+  // WHY: an empty list hides the card, so it never becomes furniture. A day
+  // or two without a sync is normal, and an account the owner set aside
+  // can't mislead net worth, so neither is worth a nag.
+  recordBalances(bank(), "2026-10-03");
+  recordBalances([bank()[0]], "2026-10-09"); // the brokerage six days quiet
+  getDb().prepare("UPDATE accounts SET inNetWorth = 0 WHERE plaidAccountId = 'home'").run(); // the untied mortgage, set aside
+  assert.deepEqual(needsALook(netWorth("2026-10-09").accounts, "2026-10-09"), []);
+});

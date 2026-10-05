@@ -12,14 +12,14 @@ import { KIND_LABEL, accountKind, accountWhen } from "@/components/accountLabels
 import { rowButtonProps, ROW_FOCUS } from "@/components/rowButton";
 import { useMutation } from "@/components/useMutation";
 import { getJson, postJson } from "@/lib/http";
-import { usd, shortDate } from "@/lib/format";
-import type { NetWorth, NetWorthTrend } from "@/lib/accounts";
+import { usd, shortDate, monthDayYear } from "@/lib/format";
+import type { LookItem, NetWorth, NetWorthTrend } from "@/lib/accounts";
 import { TREND_MIN_DAYS } from "@/lib/accountKinds";
 import { DeltaLine } from "@/components/DeltaLine";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MANUAL_KINDS, type ManualKind } from "@/lib/accountKinds";
 
-type Data = NetWorth & { today: string; trend: NetWorthTrend };
+type Data = NetWorth & { today: string; trend: NetWorthTrend; look: LookItem[] };
 type Account = NetWorth["accounts"][number];
 
 // Assets first, then what's owed, the order net worth subtracts in.
@@ -111,6 +111,7 @@ export default function AccountsPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-6">
+          <NeedsALook items={data.look} accounts={data.accounts} onOpen={(id) => openAccount(id, { onChange: () => void load() })} />
           <SummaryCard
             primary={{
               value: waitsForHomes ? "—" : usd(data.net, { cents: false }),
@@ -165,6 +166,50 @@ function AccountRow({ a, when, active, onOpen, handle }: { a: Account; when: str
       {/* A card's or loan's balance is what's owed; none of these is an inflow. */}
       <AmountCell value={a.amount} sign={false} excluded quiet cents={false} className="w-28 shrink-0" />
     </div>
+  );
+}
+
+// What needs a look, above the figures it would correct: each item names the
+// account and why, and opens its shelf, where the fix is. Absent when nothing
+// does, so it never becomes furniture.
+function NeedsALook({ items, accounts, onOpen }: { items: LookItem[]; accounts: Account[]; onOpen: (id: number) => void }) {
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const shown = items.flatMap((i) => {
+    const a = byId.get(i.id);
+    return a ? [{ ...i, a }] : [];
+  });
+  if (shown.length === 0) return null;
+  const amount = (a: Account) => usd(a.amount, { cents: false });
+  const copy = ({ reason, days, a }: (typeof shown)[number]) =>
+    reason === "untied-mortgage"
+      ? { what: `${a.name} isn't tied to a home`, why: `${amount(a)} owed, so the home's equity can't be shown`, action: "Tie to a home" }
+      : reason === "silent"
+        ? { what: `${a.name} hasn't reported in ${days} days`, why: `Showing its ${shortDate(a.asOf)} balance of ${amount(a)}`, action: "Open" }
+        : { what: `${a.name}'s value is over a year old`, why: `Estimate of ${amount(a)}, set ${monthDayYear(a.asOf)}`, action: "Update value" };
+  return (
+    <section className="flex flex-col gap-2" data-needs-a-look>
+      <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Needs a look</h3>
+      <div className="card divide-y divide-[var(--border)] overflow-hidden">
+        {shown.map((i) => {
+          const c = copy(i);
+          return (
+            <div
+              key={i.id}
+              data-drawer-row
+              data-look={i.reason}
+              {...rowButtonProps(() => onOpen(i.id))}
+              className={`flex cursor-pointer items-center gap-3 py-3 pl-4 pr-4 hover:bg-[var(--hover)] sm:py-2 ${ROW_FOCUS}`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium">{c.what}</div>
+                <div className="truncate text-xs text-[var(--muted)]">{c.why}</div>
+              </div>
+              <span className="shrink-0 text-xs text-[var(--accent)]">{c.action} →</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

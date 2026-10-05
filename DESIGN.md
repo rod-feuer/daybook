@@ -244,7 +244,9 @@ statement; every header is the same height, so switching tabs doesn't jump.
 Accounts is the other exception: a position, not a month, so it has no
 picker, its header says the day its balances are as of ("As of Oct 4") where
 other pages say the period, and its summary card has the figures (Net worth,
-Owned, Owed) and no bar.
+Owned, Owed) and no bar. Above that card, **Needs a look** lists the figures in net worth most
+likely to be wrong (an estimate over a year old, a link silent for a week, a mortgage tied to
+no home), each a row that opens the account's shelf; it is absent when nothing needs a look.
 The month picker steps with ‹ › and reads the month in full ("Oct 2026" on a
 phone, where the full name left no room for the title). Then the toolbar — search, filters, sort — sitting directly
 above the list it acts on, never in the header and never above the summary.

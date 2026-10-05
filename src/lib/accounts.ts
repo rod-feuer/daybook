@@ -1,7 +1,7 @@
 import { getDb, ensureAccounts } from "./db";
 import type { PlaidAccount, PlaidItem } from "./plaid";
 import type { ManualKind } from "./accountKinds";
-import { TREND_MIN_DAYS } from "./accountKinds";
+import { TREND_MIN_DAYS, olderThanAYear } from "./accountKinds";
 
 type Side = "asset" | "liability";
 type Kind = "cash" | "card" | "loan" | "mortgage" | "investment" | "property" | "vehicle" | "other";
@@ -110,6 +110,7 @@ export type NetWorth = {
     amount: number;
     asOf: string;
     source: "bank" | "owner" | "estimate";
+    securedBy: number | null; // a loan: the asset it's against
   }[];
 };
 export function netWorth(asOf: string): NetWorth {
@@ -118,7 +119,7 @@ export function netWorth(asOf: string): NetWorth {
   const accounts = (
     db
       .prepare(
-        `SELECT a.id, a.name, a.side, a.kind, a.source AS origin, a.subtype, a.mask, a.inNetWorth AS counted,
+        `SELECT a.id, a.name, a.side, a.kind, a.source AS origin, a.subtype, a.mask, a.inNetWorth AS counted, a.securedBy,
                 b.amount, b.asOf, b.source
          FROM accounts a
          JOIN balances b ON b.accountId = a.id
@@ -132,6 +133,29 @@ export function netWorth(asOf: string): NetWorth {
   const owned = Number(sum("asset").toFixed(2));
   const owed = Number(sum("liability").toFixed(2));
   return { owned, owed, net: Number((owned - owed).toFixed(2)), accounts };
+}
+
+// What needs a look: the figures in net worth most likely to be wrong, each
+// fixed from its account's shelf. An estimate over a year old; a linked
+// account that hasn't reported for a week (its row has said "as of" since the
+// first missed day); a mortgage tied to no home, whose equity can't be shown.
+// Accounts left out of net worth are skipped: they can't mislead it. A plain
+// loan against nothing isn't listed, since many are (a student loan).
+export const SILENT_DAYS = 7;
+export type LookItem = { id: number; reason: "untied-mortgage" | "silent" | "old-estimate"; days: number };
+const daysBetween = (from: string, to: string) => Math.round((Date.parse(to + "T00:00:00Z") - Date.parse(from + "T00:00:00Z")) / 864e5);
+export function needsALook(accounts: NetWorth["accounts"], today: string): LookItem[] {
+  const counted = accounts.filter((a) => a.counted);
+  // The page's day: the newest balance. A link is silent against that, not
+  // against the clock, so a day without a sync doesn't flag every account.
+  const latest = counted.reduce((m, a) => (a.asOf > m ? a.asOf : m), "");
+  const items: LookItem[] = [];
+  for (const a of counted) {
+    if (a.kind === "mortgage" && a.securedBy == null) items.push({ id: a.id, reason: "untied-mortgage", days: 0 });
+    else if (a.origin === "plaid" && daysBetween(a.asOf, latest) >= SILENT_DAYS) items.push({ id: a.id, reason: "silent", days: daysBetween(a.asOf, latest) });
+    else if (a.source === "estimate" && a.side === "asset" && olderThanAYear(a.asOf, today)) items.push({ id: a.id, reason: "old-estimate", days: daysBetween(a.asOf, today) });
+  }
+  return items;
 }
 
 // The side each hand-kept kind sits on. A home or a vehicle is what the
