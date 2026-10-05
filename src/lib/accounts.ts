@@ -146,9 +146,11 @@ export type LookItem = { id: number; reason: "untied-mortgage" | "silent" | "old
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(to + "T00:00:00Z") - Date.parse(from + "T00:00:00Z")) / 864e5);
 export function needsALook(accounts: NetWorth["accounts"], today: string): LookItem[] {
   const counted = accounts.filter((a) => a.counted);
-  // The page's day: the newest balance. A link is silent against that, not
-  // against the clock, so a day without a sync doesn't flag every account.
-  const latest = counted.reduce((m, a) => (a.asOf > m ? a.asOf : m), "");
+  // The bank's day: the newest balance a link reported. A link is silent
+  // against that, not against the clock, so a day without a sync doesn't flag
+  // every account; and not against a value typed by hand today, which would
+  // flag every link after a pause in syncing.
+  const latest = counted.filter((a) => a.origin === "plaid").reduce((m, a) => (a.asOf > m ? a.asOf : m), "");
   const items: LookItem[] = [];
   for (const a of counted) {
     if (a.kind === "mortgage" && a.securedBy == null) items.push({ id: a.id, reason: "untied-mortgage", days: 0 });

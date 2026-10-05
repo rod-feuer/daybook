@@ -343,3 +343,14 @@ test("nothing asks for a look when every figure is fresh, a link is under a week
   getDb().prepare("UPDATE accounts SET inNetWorth = 0 WHERE plaidAccountId = 'home'").run(); // the untied mortgage, set aside
   assert.deepEqual(needsALook(netWorth("2026-10-09").accounts, "2026-10-09"), []);
 });
+
+test("a value typed today doesn't make every link look silent", () => {
+  // WHY: links are measured against the newest bank balance. Measured against
+  // any balance, a home revalued today after a week without syncing flagged
+  // every linked account at once, though none fell behind the others.
+  recordBalances(bank(), "2026-10-01");
+  const home = createManualAccount("Sample home", "property", { asOf: "2026-10-09", amount: 80000, estimate: true });
+  const mortgage = netWorth("2026-10-09").accounts.find((a) => a.kind === "mortgage")!.id;
+  setSecuredBy(mortgage, home);
+  assert.deepEqual(needsALook(netWorth("2026-10-09").accounts, "2026-10-09"), []);
+});
