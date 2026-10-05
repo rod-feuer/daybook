@@ -133,9 +133,10 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
     db
       .prepare(
         `SELECT r.id, r.merchant, r.categoryId, c.name AS categoryName, r.cadence, r.lastDate, r.avgAmount,
-                MIN(ABS(t.amount)) lo, MAX(ABS(t.amount)) hi
+                MIN(ABS(t.amount)) lo, MAX(ABS(t.amount)) hi, GROUP_CONCAT(DISTINCT t.account) accounts, p.day
          FROM recurrings r JOIN transactions t ON t.recurringId = r.id
          LEFT JOIN categories c ON c.id = r.categoryId
+         LEFT JOIN plans p ON p.key = r.merchant
          WHERE r.avgAmount < 0 AND ${confirmedKey("r.merchant")}
          GROUP BY r.id`
       )
@@ -148,6 +149,8 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
       avgAmount: number;
       lo: number;
       hi: number;
+      accounts: string | null;
+      day: number | null;
     }[]
   )
     .filter((r) => isRecurringActive(r.lastDate, r.cadence))
@@ -163,11 +166,11 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
   // All currently non-recurring expense charges of rare merchants, grouped.
   const charges = db
     .prepare(
-      `SELECT merchant, COALESCE(effectiveDate, date) AS d, amount, categoryId
+      `SELECT merchant, COALESCE(effectiveDate, date) AS d, amount, categoryId, account
        FROM transactions
        WHERE recurringId IS NULL AND amount < 0 AND excluded = 0`
     )
-    .all() as { merchant: string; d: string; amount: number; categoryId: number | null }[];
+    .all() as { merchant: string; d: string; amount: number; categoryId: number | null; account: string }[];
   const byMerchant: Record<string, typeof charges> = {};
   for (const c of charges) {
     if (!rare.has(c.merchant)) continue;
@@ -216,7 +219,20 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
         if (canonicalMerchant(r.merchant, links) === cm) continue; // already same vendor
         const affinity = affinityTo(merchant, r.merchant);
         if (affinity < LOW_MATCH) continue; // names must at least echo each other
-        if (mag < r.lo * 0.5 || mag > r.hi * 1.5) continue; // amount implausible
+        // The same evidence plan matching asks for (planMatch.ts), since a
+        // Combine joins the bill too. Within 10% of the bill's own amounts:
+        // at half to one and a half times, a $3,900 Amex payment passed for
+        // the $4,861 Chase mortgage (2026-10-05).
+        if (mag < r.lo * 0.9 || mag > r.hi * 1.1) continue;
+        // A monthly bill's day, within three: that payment posted four days
+        // after the mortgage's 1st.
+        if (r.cadence === "monthly") {
+          const day = r.day ?? Number(r.lastDate.slice(8, 10)); // a plan without a stored day: its last charge's
+          const d = Math.abs(Number(c.d.slice(8, 10)) - day);
+          if (Math.min(d, 31 - d) > 3) continue;
+        }
+        // The card the bill is paid from, unless the names agree outright.
+        if (affinity < NAME_MATCH && r.accounts != null && !r.accounts.split(",").includes(c.account)) continue;
         const period = PERIOD[r.cadence] ?? 30;
         const gap = (Date.parse(c.d) - Date.parse(r.lastDate)) / 86_400_000;
         if (gap < -period || gap > period * 2) continue; // not a current/forward charge
