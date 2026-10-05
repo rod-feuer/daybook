@@ -364,16 +364,25 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     );
   }
   // Several similar names into this vendor at once (the shelf's Similar
-  // names). Each is the same link a single Combine makes; the shelf stays
-  // open on the vendor, now holding their charges.
-  function combineMany(losers: string[]) {
+  // names), or this vendor and the rest into the ticked name the owner chose
+  // to keep. Each is the same link a single Combine makes; the shelf stays
+  // open on the survivor, now holding their charges.
+  function combineMany(losers: string[], into?: string) {
     if (target?.kind !== "merchant" || !mData) return;
-    const primary = mData.merchant;
+    const primary = into ?? mData.merchant;
+    const aliases = into ? [mData.merchant, ...losers.filter((m) => m !== into)] : losers;
+    const name = into ? (mData.similar.find((v) => v.merchant === into)?.displayName ?? into) : mData.displayName;
     return write(
       async () => {
-        for (const alias of losers) await postJson("/api/recurrings/link", { alias, primary });
+        for (const alias of aliases) await postJson("/api/recurrings/link", { alias, primary });
       },
-      { success: `Combined ${losers.length} name${losers.length === 1 ? "" : "s"} into ${mData.displayName}`, error: "Couldn't combine — please try again" }
+      { success: `Combined ${aliases.length} name${aliases.length === 1 ? "" : "s"} into ${name}`, error: "Couldn't combine — please try again" },
+      into
+        ? () => {
+            setTarget({ kind: "merchant", merchant: primary });
+            fetchMerchant(primary);
+          }
+        : undefined
     );
   }
   // One category for several similar names that stay separate vendors (the

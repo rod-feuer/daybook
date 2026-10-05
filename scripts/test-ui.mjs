@@ -838,7 +838,7 @@ async function queuePicksSurvive(browser) {
 // Similar names on the vendor shelf: one place's other bank spellings,
 // combined in one step instead of one Combine each. Nothing starts ticked
 // (names sharing a first word can be different places); Select all is one
-// click; Combine folds the ticked names in and the list empties.
+// click; Combine folds them together under the name the owner picks.
 async function similarNames(browser) {
   await withPage(browser, async (page, errs) => {
     await page.goto(BASE + "/transactions?vendor=" + encodeURIComponent("Jimmy Johns"), { waitUntil: "networkidle2" });
@@ -872,12 +872,20 @@ async function similarNames(browser) {
     // restore the fixture's category
     await page.evaluate(async (c) => fetch("/api/recurrings/recategorize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: "Jimmy John's", categoryId: c }) }), was[0] ?? null);
     await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-similar-names] button`)].find((b) => /Select all/.test(b.textContent)).click(), shelfSel);
-    const label = await page.$eval(`${shelfSel} [data-combine-similar]`, (b) => b.textContent.trim());
-    await page.click(`${shelfSel} [data-combine-similar]`);
+    // The owner picks the name that survives: here the other spelling, so
+    // this vendor folds into it and the shelf moves to it.
+    const pick = await page.$eval(`${shelfSel} [data-combine-similar]`, (s) => {
+      const o = [...s.options].find((x) => /Jimmy John's/.test(x.textContent));
+      return { label: s.options[0].textContent.trim(), names: [...s.options].slice(1).map((x) => x.textContent.trim()), value: o?.value };
+    });
+    await page.select(`${shelfSel} [data-combine-similar]`, pick.value);
     const gone = await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-similar-names]`), { timeout: 8000 }, shelfSel).then(() => true, () => false);
-    record("similar names", "Select all and Combine fold the other spellings in, in one press, and the list empties", gone && /^Combine \d+ into /.test(label), `${label}; list gone=${gone}`);
+    const heading = await page.$eval(shelfSel, (el) => el.innerText.split("\n").slice(0, 3).join(" ")).catch(() => "");
+    record("similar names", "Combine offers this vendor's name and each ticked one; choosing a ticked name folds this vendor into it, and the shelf follows", gone && /^Combine \d+ into/.test(pick.label) && pick.names.length >= 2 && /Jimmy John's/.test(heading), `${JSON.stringify(pick)}; list gone=${gone}; shelf=${heading}`);
     // restore, so later groups see the fixture's two spellings
-    await page.evaluate(async () => fetch("/api/recurrings/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alias: "Jimmy John's", unlink: true }) }));
+    await page.evaluate(async () => {
+      for (const alias of ["Jimmy John's", "Jimmy Johns"]) await fetch("/api/recurrings/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alias, unlink: true }) });
+    });
     if (errs.length) record("similar names", "page errors", false, errs[0]);
   });
 }
