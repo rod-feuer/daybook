@@ -42,6 +42,11 @@ test("a bill's charge under a sibling vendor's name joins that bill on its own, 
   assert.equal(planOf(id), "Google One");
   const ws = getDb().prepare("SELECT avgAmount FROM recurrings WHERE merchant = 'Google'").get() as { avgAmount: number };
   assert.equal(ws.avgAmount, -8.4, "and Workspace's bill is its own price again");
+  // The charge left Workspace's plan as it joined Google One: counted once.
+  const plan = getDb().prepare("SELECT count, lastDate FROM recurrings WHERE merchant = 'Google'").get() as { count: number; lastDate: string };
+  assert.deepEqual(plan, { count: 5, lastDate: "2026-10-01" }, "Workspace keeps its own five charges, last on the 1st");
+  const day = (getDb().prepare("SELECT day FROM plans WHERE key = 'Google'").get() as { day: number }).day;
+  assert.equal(day, 1, "and its billing day stays the 1st");
   const t = transactionById(id)!;
   assert.equal(t.recurringIncluded, 0, "not the owner's pin: no edited tag");
 });
