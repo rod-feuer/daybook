@@ -414,7 +414,9 @@ export const CHANGE_DAYS = 30;
 export type NetWorthTrend = {
   start: string | null; // the first day with a balance
   series: { date: string; net: number }[] | null; // daily, once TREND_MIN_DAYS have passed
-  prev: { date: string; owned: number; owed: number; net: number } | null; // CHANGE_DAYS ago, once reached
+  // CHANGE_DAYS ago, once reached: the totals, and each account's value then
+  // (like for like: an account added since is at its first value).
+  prev: { date: string; owned: number; owed: number; net: number; accounts: { id: number; amount: number }[] } | null;
 };
 const addDays = (iso: string, n: number) => {
   const d = new Date(iso + "T00:00:00Z");
@@ -438,11 +440,15 @@ export function netWorthTrend(today: string): NetWorthTrend {
     byAccount.set(r.id, a);
   }
   // Each account's value on a day: its latest on or before it, else its first.
+  const valueOn = (a: { points: { asOf: string; amount: number }[] }, day: string) => {
+    let v = a.points[0].amount;
+    for (const p of a.points) if (p.asOf <= day) v = p.amount; else break;
+    return v;
+  };
   const at = (day: string) => {
     let owned = 0, owed = 0;
     for (const a of byAccount.values()) {
-      let v = a.points[0].amount;
-      for (const p of a.points) if (p.asOf <= day) v = p.amount; else break;
+      const v = valueOn(a, day);
       if (a.side === "asset") owned += v; else owed += v;
     }
     const r2 = (n: number) => Number(n.toFixed(2));
@@ -455,7 +461,14 @@ export function netWorthTrend(today: string): NetWorthTrend {
     for (let d = start; d <= today; d = addDays(d, 1)) series.push({ date: d, net: at(d).net });
   }
   const back = addDays(today, -CHANGE_DAYS);
-  return { start, series, prev: start <= back ? { date: back, ...at(back) } : null };
+  return {
+    start,
+    series,
+    prev:
+      start <= back
+        ? { date: back, ...at(back), accounts: [...byAccount].map(([id, a]) => ({ id, amount: valueOn(a, back) })) }
+        : null,
+  };
 }
 
 // ---- Loans kept by hand, lowered by their payments ---------------------------

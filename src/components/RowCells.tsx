@@ -177,7 +177,7 @@ export function AmountCell({
       {delta != null ? (
         <span className="text-[11px] font-medium text-[var(--muted)] max-sm:leading-3 sm:mr-2">
           {delta > 0 ? "+" : "−"}
-          {usd(Math.abs(delta))}
+          {usd(Math.abs(delta), { cents })}
         </span>
       ) : note ? (
         <span data-amount-note className="text-[11px] font-medium text-[var(--muted)] max-sm:leading-3 sm:mr-2">

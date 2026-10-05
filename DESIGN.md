@@ -244,7 +244,11 @@ statement; every header is the same height, so switching tabs doesn't jump.
 Accounts is the other exception: a position, not a month, so it has no
 picker, its header says the day its balances are as of ("As of Oct 4") where
 other pages say the period, and its summary card has the figures (Net worth,
-Owned, Owed) and no bar. Above that card, **Needs a look** lists the figures in net worth most
+Owned, Owed) and no bar; once a month of balances exists, its right panel says **what moved**
+net worth since the comparison day: one sentence naming the largest movers, the five largest
+as bars on one scale (gains right of zero, losses left), and the rest folded into "N smaller
+changes · show". Each row shows its own change on the same basis (an equity row, its equity's),
+and the movers add up to the change in net worth. Above that card, **Needs a look** lists the figures in net worth most
 likely to be wrong (an estimate over a year old, a link silent for a week, a mortgage tied to
 no home), each a row that opens the account's shelf; it is absent when nothing needs a look.
 The month picker steps with ‹ › and reads the month in full ("Oct 2026" on a
