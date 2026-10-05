@@ -39,6 +39,8 @@ export const TABLES = [
   "split_rules",
   "budget_entries",
   "categories",
+  "plan_matches",
+  "plan_match_dismissals",
   "loan_terms",
   "balances",
   "accounts",
