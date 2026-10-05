@@ -873,7 +873,9 @@ test("a borderline name match surfaces as a low-confidence suggestion", () => {
 });
 
 test("multiple stray descriptors of one vendor collapse into a single suggestion", () => {
-  const last = daysAgo(28);
+  // The bill's charges on today's day of month, so the strays (today and
+  // yesterday) post on its day, as a renamed bill does, in any month.
+  const [, last, prior] = lastMonthlyDates(3, Number(daysAgo(0).slice(8, 10)));
   const rid = Number(
     getDb()
       .prepare(
@@ -882,11 +884,11 @@ test("multiple stray descriptors of one vendor collapse into a single suggestion
       )
       .run("Upgrade, Inc. Payment", CAT, -100, "monthly", last, daysAgo(-2), 3).lastInsertRowid
   );
-  tx("Upgrade, Inc. Payment", { amount: -100, date: daysAgo(58), categoryId: CAT, recurringId: rid });
+  tx("Upgrade, Inc. Payment", { amount: -100, date: prior, categoryId: CAT, recurringId: rid });
   tx("Upgrade, Inc. Payment", { amount: -100, date: last, categoryId: CAT, recurringId: rid });
   // Two different stray descriptors, both Upgrade, both posting this cycle.
-  tx("Upgrade", { amount: -100, date: daysAgo(1), categoryId: null });
-  tx("Upgrade, Inc. Co Entry Descr", { amount: -100, date: daysAgo(2), categoryId: null });
+  tx("Upgrade", { amount: -100, date: daysAgo(0), categoryId: null });
+  tx("Upgrade, Inc. Co Entry Descr", { amount: -100, date: daysAgo(1), categoryId: null });
 
   added("Upgrade, Inc. Payment");
   const s = recurringMatchSuggestions(new Set());
@@ -3708,4 +3710,48 @@ test("a stray is offered to a plan when it echoes any name the plan's vendor goe
   assert.equal(offered("Every Media"), "Every Every.to-chargbrooklyn");
   assert.equal(offered("Chatham"), null);
   assert.equal(offered("Pad Thai"), null);
+});
+
+// The merge queue's stray check asks for the evidence plan matching does: a
+// Combine joins the bill as well as the vendor. Each case below passed the
+// old check (amounts from half to one and a half times, no day, no card).
+function strayBill(name: string) {
+  const last = daysAgo(28);
+  const rid = Number(
+    getDb()
+      .prepare(`INSERT INTO recurrings (merchant, categoryId, avgAmount, cadence, lastDate, nextDate, count) VALUES (?,?,?,?,?,?,?)`)
+      .run(name, CAT, -100, "monthly", last, daysAgo(-2), 3).lastInsertRowid
+  );
+  for (const d of [daysAgo(88), daysAgo(58), last]) tx(name, { amount: -100, date: d, categoryId: CAT, recurringId: rid, account: "Checking" });
+  added(name);
+}
+const offeredFor = (stray: string) => recurringMatchSuggestions(new Set()).some((g) => g.variants.some((v) => v.merchant === stray));
+
+test("Combine isn't offered for a stray far from the bill's amount", () => {
+  // WHY: a $3,900 Amex payment was offered as the $4,861 Chase mortgage
+  // (80% of it) and combined; the payment then read as the mortgage.
+  strayBill("Metro Fibernet L Metfibenet");
+  tx("Metronet", { amount: -80, date: daysAgo(0), categoryId: null, account: "Checking" });
+  assert.equal(offeredFor("Metronet"), false, "80% of the bill");
+  tx("Metronet", { amount: -98, date: daysAgo(0), categoryId: null, account: "Checking" });
+  assert.equal(offeredFor("Metronet"), true, "within 10%: still offered");
+});
+
+test("Combine isn't offered for a stray off a monthly bill's day", () => {
+  // WHY: that payment also posted four days from the mortgage's day; a bill
+  // renamed by the bank still posts on its day.
+  strayBill("Metro Fibernet L Metfibenet");
+  tx("Metronet", { amount: -100, date: daysAgo(10), categoryId: null, account: "Checking" });
+  assert.equal(offeredFor("Metronet"), false, "a week and more off the bill's day");
+});
+
+test("Combine isn't offered for a borderline name on another card; a near-certain name still is", () => {
+  // WHY: a similar name at the bill's price, paid from a card the bill never
+  // used, is more likely a different payee than the bill renamed.
+  strayBill("Metro Fibernet L Metfibenet");
+  tx("Metronet", { amount: -100, date: daysAgo(0), categoryId: null, account: "Other card" });
+  assert.equal(offeredFor("Metronet"), false, "0.8–0.9 name, other card");
+  strayBill("Acme Power Bill");
+  tx("Acme Power Bil", { amount: -100, date: daysAgo(0), categoryId: null, account: "Other card" });
+  assert.equal(offeredFor("Acme Power Bil"), true, "the names agree outright: the card doesn't matter");
 });
