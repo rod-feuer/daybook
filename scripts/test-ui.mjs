@@ -392,13 +392,15 @@ async function pageHeader(browser) {
         const newCat = [...header.querySelectorAll("button")].find((b) => /New category/.test(b.textContent || ""));
         const fig = header.querySelector("[data-header-figure] [data-header-net]");
         const caption = header.querySelector("[data-header-caption]")?.textContent ?? "";
-        return { monthFirst, inputsInHeader, primaries, rareVisible, newCatGhost: newCat ? newCat.classList.contains("btn-ghost") && !newCat.classList.contains("btn-primary") : null, figPx: fig ? getComputedStyle(fig).fontSize : null, figText: fig ? fig.textContent : null, caption };
+        const hasMenu = !!header.querySelector("button[aria-label='More actions']");
+        return { monthFirst, inputsInHeader, primaries, rareVisible, hasMenu, newCatGhost: newCat ? newCat.classList.contains("btn-ghost") && !newCat.classList.contains("btn-primary") : null, figPx: fig ? getComputedStyle(fig).fontSize : null, figText: fig ? fig.textContent : null, caption };
       });
       record("page header", `${route} month picker leads the header's right cluster; no search in the header; ≤1 primary button`, r.monthFirst && r.inputsInHeader === 0 && r.primaries <= 1, `monthFirst=${r.monthFirst}, inputs=${r.inputsInHeader}, primaries=${r.primaries}`);
       // Sync, Import, and Re-scan are rare. Inline, they shared the month
       // picker's weight and, on Categories, a filled button outranked the
-      // spent figure. They live in ⋯; New category stays, bordered.
-      record("page header", `${route} rare actions stay in ⋯, and New category is not a filled button`, !r.rareVisible && (route === "/categories" ? r.newCatGhost === true : r.newCatGhost === null), `rare visible=${r.rareVisible}, new category ghost=${r.newCatGhost}`);
+      // spent figure. They live in ⋯. New category joined them (2026-10-05):
+      // beside the month picker on a phone it left the title "Catego".
+      record("page header", `${route} rare actions and New category stay in ⋯`, !r.rareVisible && r.newCatGhost === null && (route !== "/categories" || r.hasMenu), `rare visible=${r.rareVisible}, new category in header=${r.newCatGhost !== null}, ⋯=${r.hasMenu}`);
       if (route === "/transactions") {
         // The statement has no summary card, so the net sits in the header:
         // on the title's line at the card-title size, so the header is the
