@@ -245,7 +245,8 @@ Accounts is the other exception: a position, not a month, so it has no
 picker, its header says the day its balances are as of ("As of Oct 4") where
 other pages say the period, and its summary card has the figures (Net worth,
 Owned, Owed) and no bar.
-The month picker steps with ‹ › and reads the month in full. Then the toolbar — search, filters, sort — sitting directly
+The month picker steps with ‹ › and reads the month in full ("Oct 2026" on a
+phone, where the full name left no room for the title). Then the toolbar — search, filters, sort — sitting directly
 above the list it acts on, never in the header and never above the summary.
 Then the list, in one of two patterns: **sections** for a handful of groups
 (a small-caps title on the page above one card of rows — Recurrings, the

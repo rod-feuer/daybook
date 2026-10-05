@@ -1,7 +1,22 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { useToast } from "@/components/Toast";
+
+// A phone: below the sm breakpoint, where the header holds the title and the
+// picker on one row. Rendered as not-a-phone on the server, then corrected.
+const PHONE = "(max-width: 639px)";
+function usePhone() {
+  return useSyncExternalStore(
+    (on) => {
+      const q = window.matchMedia(PHONE);
+      q.addEventListener("change", on);
+      return () => q.removeEventListener("change", on);
+    },
+    () => window.matchMedia(PHONE).matches,
+    () => false
+  );
+}
 
 export function MonthPicker({
   months,
@@ -14,6 +29,9 @@ export function MonthPicker({
   onChange: (m: string) => void;
   allowAll?: boolean;
 }) {
+  // On a phone the month is short ("Oct 2026"): a select is as wide as its
+  // longest option ("September 2026"), and at 375px that cut the page title.
+  const phone = usePhone();
   if (months.length === 0) return null;
   // The month is the page's frame (the summary card no longer repeats it), so
   // it reads in full and steps with ‹ ›: the norm for a month you move through
@@ -38,7 +56,7 @@ export function MonthPicker({
         {months.map((m) => (
           <option key={m} value={m}>
             {new Date(m + "-01T00:00:00Z").toLocaleDateString("en-US", {
-              month: "long",
+              month: phone ? "short" : "long",
               year: "numeric",
               timeZone: "UTC",
             })}

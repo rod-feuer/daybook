@@ -4,6 +4,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useCategoryShelf } from "@/components/TransactionDrawer";
 import { rowButtonProps, ROW_FOCUS } from "@/components/rowButton";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
+import { HeaderMenu } from "@/components/HeaderMenu";
 import Shell from "@/components/Shell";
 import { MonthPicker } from "@/components/Actions";
 import { useToast } from "@/components/Toast";
@@ -118,10 +119,14 @@ export default function CategoriesPage() {
       title="Categories"
       subtitle={period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
+      // Behind ⋯ like the other pages' rarer actions: beside the month picker
+      // on a phone, the button left the title a few pixels ("Catego").
       actions={
-        <button onClick={() => setShowAddForm((v) => !v)} className="btn-ghost">
-          New category
-        </button>
+        <HeaderMenu>
+          <button onClick={() => setShowAddForm((v) => !v)} className="btn-ghost">
+            New category
+          </button>
+        </HeaderMenu>
       }
     >
       <BudgetSummary

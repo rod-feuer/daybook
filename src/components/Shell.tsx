@@ -71,7 +71,9 @@ export default function Shell({
         <div className={figure || subtitle ? "contents sm:flex sm:items-baseline sm:gap-3" : "contents sm:block"}>
           <h1 className="min-w-0 flex-1 text-lg font-semibold tracking-tight sm:flex-none">{title}</h1>
           {figure && (
-            <p className="order-last w-full sm:order-none sm:w-auto" data-header-figure>
+            // On a phone the line under the title is as tall as the other
+            // pages' subtitle (16px), so switching tabs doesn't jump 8px.
+            <p className="order-last w-full max-sm:h-4 max-sm:leading-4 sm:order-none sm:w-auto" data-header-figure>
               <span data-header-net className="text-[15px] font-semibold tabular-nums">{figure.value}</span>{" "}
               <span className="text-xs text-[var(--muted)]" data-header-caption>{figure.caption}</span>
             </p>
