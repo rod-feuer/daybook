@@ -70,6 +70,8 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   const [xData, setXData] = useState<ChargeDetail | null>(null);
   const [aData, setAData] = useState<AccountDetail | null>(null);
   const [back, setBack] = useState<Target | null>(null);
+  // An account drilled into from another (a home's mortgage): Back names it.
+  const [backName, setBackName] = useState<string | null>(null);
   const [amountHint, setAmountHint] = useState<number | null>(null);
   const [cats, setCats] = useState<Cat[]>([]);
   // A category created from a shelf dropdown joins the pickers at once.
@@ -149,6 +151,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   const close = useCallback(() => {
     setTarget(null);
     setBack(null);
+    setBackName(null);
     setAmountHint(null);
   }, []);
 
@@ -164,6 +167,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
       onChange.current = opts?.onChange;
       setAmountHint(opts?.amountHint ?? null);
       setBack(null);
+      setBackName(null);
       setCData(null);
       setTarget({ kind: "merchant", merchant: m, series: opts?.series });
       fetchMerchant(m, opts?.series);
@@ -183,6 +187,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
       onChange.current = opts?.onChange;
       setAmountHint(null);
       setBack(null);
+      setBackName(null);
       setMData(null);
       setCData(null);
       setTarget({ kind: "charge", id });
@@ -204,6 +209,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
       onChange.current = opts?.onChange;
       setAmountHint(null);
       setBack(null);
+      setBackName(null);
       setMData(null);
       setTarget({ kind: "category", categoryId, month });
       fetchCategory(categoryId, month);
@@ -222,6 +228,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
       onChange.current = opts?.onChange;
       setAmountHint(null);
       setBack(null);
+      setBackName(null);
       setTarget({ kind: "account", id });
       fetchAccount(id);
     },
@@ -233,16 +240,26 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   const drillToMerchant = (m: string, series?: string) => {
     holdSheet();
     setBack(target);
+    setBackName(null);
     setAmountHint(null);
     setCData(null);
     setTarget({ kind: "merchant", merchant: m, series });
     fetchMerchant(m, series);
+  };
+  // From a home's shelf to the loan against it, with Back to the home.
+  const drillToAccount = (id: number) => {
+    holdSheet();
+    setBack(target);
+    setBackName(target?.kind === "account" ? (aData?.name ?? null) : null);
+    setTarget({ kind: "account", id });
+    fetchAccount(id);
   };
   const goBack = () => {
     const b = back;
     if (!b) return;
     holdSheet();
     setBack(null);
+    setBackName(null);
     setTarget(b);
     if (b.kind === "category") fetchCategory(b.categoryId, b.month);
     else if (b.kind === "charge") fetchCharge(b.id);
@@ -520,7 +537,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                   onClick={goBack}
                   className="mb-1 text-xs text-[var(--accent)] hover:underline"
                 >
-                  ← Back
+                  {backName ? `← Back to ${backName}` : "← Back"}
                 </button>
               )}
               {target.kind === "merchant" ? (
@@ -615,6 +632,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 onSetTerms={(terms) => accountPatch(aData.id, { terms })}
                 onSetSecuredBy={(securedBy) => accountPatch(aData.id, { securedBy })}
                 onSetPaidBy={(paidBy) => accountPatch(aData.id, { paidBy })}
+                onOpenAccount={drillToAccount}
                 onDelete={() => accountDelete(aData)}
                 confirmingDelete={confirmingAccountDelete === aData.id}
               />

@@ -15,6 +15,7 @@ import { getJson, postJson } from "@/lib/http";
 import { usd, shortDate, monthDayYear } from "@/lib/format";
 import type { LookItem, NetWorth, NetWorthTrend } from "@/lib/accounts";
 import { TREND_MIN_DAYS } from "@/lib/accountKinds";
+import { pairLoans, equityOf } from "@/lib/accountPairs";
 import { DeltaLine } from "@/components/DeltaLine";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MANUAL_KINDS, type ManualKind } from "@/lib/accountKinds";
@@ -69,7 +70,22 @@ export default function AccountsPage() {
   // the debt alone, so it waits, and says why (Honest: withhold, don't overstate).
   const waitsForHomes =
     counted.some((a) => a.kind === "mortgage") && !counted.some((a) => a.kind === "property");
-  const row = (a: Account, handle?: React.ReactNode) => (
+  // Loans sit with what they're against: a home's row shows its equity, and
+  // its mortgage leaves the Loans section. Owned, owed and net worth don't move.
+  const { loansOf, paired } = pairLoans(counted);
+  const equityRow = (a: Account) => a.side === "asset" && (a.kind === "property" || a.kind === "vehicle" || loansOf.has(a.id));
+  const row = (a: Account, handle?: React.ReactNode) =>
+    equityRow(a) ? (
+      <EquityRow
+        key={a.id}
+        a={a}
+        loans={loansOf.get(a.id) ?? []}
+        when={accountWhen(a, latest, today)}
+        active={shelf.isAccount(a.id)}
+        onOpen={() => openAccount(a.id, { onChange: () => void load() })}
+        handle={handle}
+      />
+    ) : (
     <AccountRow
       key={a.id}
       a={a}
@@ -127,10 +143,18 @@ export default function AccountsPage() {
           />
           {!waitsForHomes && <TrendCard trend={data.trend} />}
           {SECTIONS.map((s) => {
-            const rows = counted.filter((a) => s.kinds.includes(a.kind));
+            const rows = counted.filter((a) => s.kinds.includes(a.kind) && !paired.has(a.id));
+            // Homes & vehicles says what they're worth and what of it is yours.
+            const assets = rows.filter(equityRow);
+            const tot = assets.length
+              ? `${usd(assets.reduce((t, a) => t + a.amount, 0), { cents: false })} · ${usd(assets.reduce((t, a) => t + equityOf(a, loansOf.get(a.id)), 0), { cents: false })} equity`
+              : null;
             return rows.length === 0 ? null : (
               <section key={s.title} className="flex flex-col gap-2" data-account-section>
-                <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">{s.title}</h3>
+                <div className="flex items-baseline justify-between gap-3 px-1">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">{s.title}</h3>
+                  {tot && <span className="text-xs tabular-nums text-[var(--muted)]" data-section-total>{tot}</span>}
+                </div>
                 <SortableRows rows={rows} render={row} onOrder={saveOrder} />
               </section>
             );
@@ -165,6 +189,47 @@ function AccountRow({ a, when, active, onOpen, handle }: { a: Account; when: str
       </div>
       {/* A card's or loan's balance is what's owed; none of these is an inflow. */}
       <AmountCell value={a.amount} sign={false} excluded quiet cents={false} className="w-28 shrink-0" />
+    </div>
+  );
+}
+
+// A home or vehicle with what's owed on it, as one row: equity is the figure,
+// and the line under the name is the arithmetic ("$1,346,000 est. − $812,476
+// Lake Home mortgage", or "· nothing owed"). The loan itself is a tap away in
+// the asset's shelf.
+function EquityRow({
+  a,
+  loans,
+  when,
+  active,
+  onOpen,
+  handle,
+}: {
+  a: Account;
+  loans: Account[];
+  when: string | null;
+  active: boolean;
+  onOpen: () => void;
+  handle?: React.ReactNode;
+}) {
+  const worth = `${usd(a.amount, { cents: false })}${a.source === "estimate" ? " est." : ""}`;
+  const owed = loans.length ? loans.map((l) => ` − ${usd(l.amount, { cents: false })} ${l.name}`).join("") : " · nothing owed";
+  const meta = [`${worth}${owed}`, when].filter(Boolean).join(" · ");
+  return (
+    <div
+      data-drawer-row
+      data-account-row
+      data-equity-row
+      data-id={a.id}
+      {...rowButtonProps(onOpen)}
+      className={`flex cursor-pointer items-center gap-3 py-3 pr-4 hover:bg-[var(--hover)] sm:py-2 ${handle ? "pl-1" : "pl-4"} ${ROW_FOCUS} ${active ? "bg-[var(--accent)]/10" : ""}`}
+    >
+      {handle}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium">{a.name}</div>
+        <div className="truncate text-xs tabular-nums text-[var(--muted)]">{meta}</div>
+      </div>
+      <AmountCell value={equityOf(a, loans)} sign={false} excluded quiet cents={false} className="w-28 shrink-0" />
     </div>
   );
 }

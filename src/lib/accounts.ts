@@ -269,7 +269,7 @@ export type AccountDetail = {
   securedBy: { id: number; name: string } | null;
   assets: { id: number; name: string }[];
   // An asset: the loans against it, and its equity (worth less what's owed on it).
-  loans: { id: number; name: string; amount: number }[];
+  loans: { id: number; name: string; amount: number; asOf: string; origin: "plaid" | "manual" }[];
   equity: number | null;
   // A hand-kept loan: the vendor its payments post under, and likely ones
   // (vendors charged within 5% of its payment in the last six months).
@@ -287,16 +287,17 @@ export function accountDetail(id: number): AccountDetail | null {
     .prepare("SELECT asOf, amount, source FROM balances WHERE accountId = ? ORDER BY asOf DESC")
     .all(id) as AccountDetail["history"];
   const { inNetWorth, ...rest } = a;
-  const latest = (accountId: number) =>
-    (db.prepare("SELECT amount FROM balances WHERE accountId = ? ORDER BY asOf DESC LIMIT 1").get(accountId) as { amount: number } | undefined)?.amount ?? 0;
+  const newest = (accountId: number) =>
+    (db.prepare("SELECT amount, asOf FROM balances WHERE accountId = ? ORDER BY asOf DESC LIMIT 1").get(accountId) as { amount: number; asOf: string } | undefined) ?? { amount: 0, asOf: "" };
+  const latest = (accountId: number) => newest(accountId).amount;
   const liability = a.side === "liability";
   const sec = db.prepare("SELECT s.id, s.name FROM accounts l JOIN accounts s ON s.id = l.securedBy WHERE l.id = ?").get(id) as
     | { id: number; name: string }
     | undefined;
   const loans = liability
     ? []
-    : (db.prepare("SELECT id, name FROM accounts WHERE securedBy = ? ORDER BY name").all(id) as { id: number; name: string }[]).map(
-        (l) => ({ ...l, amount: latest(l.id) })
+    : (db.prepare("SELECT id, name, source AS origin FROM accounts WHERE securedBy = ? ORDER BY name").all(id) as { id: number; name: string; origin: "plaid" | "manual" }[]).map(
+        (l) => ({ ...l, ...newest(l.id) })
       );
   return {
     ...rest,
