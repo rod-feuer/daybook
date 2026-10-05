@@ -13,6 +13,13 @@ const lanOrigins = [
     .filter((i): i is os.NetworkInterfaceInfo => !!i && i.family === "IPv4" && !i.internal)
     .map((i) => i.address),
   "*.local", // the Bonjour name (Rods-MacBook-Pro.local); os.hostname() can be the router's name for us instead
+  // Over Tailscale the phone uses the machine's bare name ("rods-macbook-pro",
+  // MagicDNS) or its full one (*.ts.net); unlisted, Next blocked the dev
+  // resources and the phone got the page shell with gray placeholders. The
+  // Tailscale address (100.x) is an interface above, once Tailscale is up
+  // before the server starts.
+  os.hostname().replace(/\.local$/i, "").toLowerCase(),
+  "*.ts.net",
 ];
 
 const nextConfig: NextConfig = {
