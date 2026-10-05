@@ -2291,6 +2291,29 @@ async function deferToMerge(browser) {
   });
 }
 
+// Needs a look: a home valued over a year ago is listed above the figures, and
+// the item is a keyboard row that opens that home's shelf, where the value is
+// updated. Runs last: it adds an account, and the load-states case expects none.
+async function needsALook(browser) {
+  await withPage(browser, async (page, errs) => {
+    const old = new Date(Date.UTC(now.getUTCFullYear() - 1, now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
+    await fetch(BASE + "/api/net-worth/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Sample home", kind: "property", amount: 80000, asOf: old, estimate: true }) });
+    await page.goto(BASE + "/accounts", { waitUntil: "networkidle2" });
+    await page.waitForSelector('[data-needs-a-look] [data-look="old-estimate"]', { timeout: 8000 });
+    const item = await page.$eval('[data-needs-a-look] [data-look="old-estimate"]', (el) => el.innerText.replace(/\s+/g, " ").trim());
+    const above = await page.evaluate(() => {
+      const look = document.querySelector("[data-needs-a-look]"), fig = document.querySelector("[data-figure]");
+      return !!look && !!fig && look.getBoundingClientRect().top < fig.getBoundingClientRect().top;
+    });
+    await page.focus('[data-needs-a-look] [data-look="old-estimate"]');
+    await page.keyboard.press("Enter");
+    await shelfIs(page, true);
+    await shelfSettled(page);
+    const shelf = await page.$eval(shelfSel, (el) => el.innerText);
+    record("needs a look", "an estimate over a year old is listed above net worth, and Enter opens its shelf", /^Sample home's value is over a year old Estimate of \$80,000, set .+ Update value →$/.test(item) && above && shelf.includes("Sample home") && errs.length === 0, `${item}; above=${above}; shelf=${shelf.includes("Sample home")}${errs[0] ? "; " + errs[0] : ""}`);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2301,7 +2324,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

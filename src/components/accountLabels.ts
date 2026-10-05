@@ -1,5 +1,6 @@
 import type { NetWorth } from "@/lib/accounts";
 import { shortDate } from "@/lib/format";
+import { olderThanAYear } from "@/lib/accountKinds";
 
 type Account = Pick<NetWorth["accounts"][number], "kind" | "origin" | "subtype" | "mask" | "source" | "asOf">;
 
@@ -10,9 +11,7 @@ export const KIND_LABEL: Record<string, string> = {
   property: "Home", vehicle: "Vehicle", cash: "Cash", investment: "Investment", loan: "Loan", other: "Other",
 };
 
-const YEAR_MS = 365 * 24 * 3600 * 1000;
-export const olderThanAYear = (asOf: string, today: string) =>
-  Date.parse(today + "T00:00:00Z") - Date.parse(asOf + "T00:00:00Z") > YEAR_MS;
+export { olderThanAYear };
 
 // "IRA ··1234" for a linked account; "Home · estimate" for one kept by hand.
 export function accountKind(a: Account): string {
