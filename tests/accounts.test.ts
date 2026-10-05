@@ -390,3 +390,34 @@ test("a loan against an asset that isn't counted stays listed on its own", () =>
   const { paired } = pairLoans(netWorth("2026-10-04").accounts.filter((a) => a.counted));
   assert.equal(paired.has(mortgage), false);
 });
+
+import { movers } from "../src/lib/accountPairs";
+
+test("what moved adds up to the change in net worth, to the cent", () => {
+  // WHY: the summary names which accounts made the change. If any account
+  // were dropped or counted twice, or a debt's rise read as a gain, the
+  // sentence would explain a change that didn't happen.
+  recordBalances(bank(undefined, { chk: 1000, card: 200, home: 50000, brk: 30000 }), "2026-09-01");
+  recordBalances(bank(undefined, { chk: 1500.25, card: 900, home: 49400.4, brk: 31234.56 }), "2026-10-05");
+  const today = "2026-10-05";
+  const t = netWorthTrend(today);
+  const nw = netWorth(today);
+  const ms = movers(nw.accounts, t.prev!.accounts);
+  const sum = Number(ms.reduce((s, m) => s + m.effect, 0).toFixed(2));
+  assert.equal(sum, Number((nw.net - t.prev!.net).toFixed(2)));
+  const card = ms.find((m) => m.side === "liability" && m.change > 0)!;
+  assert.equal(card.effect, -700, "a card balance rising takes from net worth");
+  assert.deepEqual(ms.map((m) => Math.abs(m.effect)), [...ms.map((m) => Math.abs(m.effect))].sort((a, b) => b - a), "largest first");
+});
+
+test("an account added since the comparison day moves nothing", () => {
+  // WHY: entering a home (or linking a bank) after the comparison day must
+  // not read as the household gaining its whole value; only what it does
+  // after it's added is change. Mirrors the trend's like-for-like rule.
+  recordBalances(bank(), "2026-09-01");
+  recordBalances(bank(), "2026-10-05");
+  createManualAccount("Sample house", "property", { asOf: "2026-09-20", amount: 80000, estimate: true });
+  const today = "2026-10-05";
+  const ms = movers(netWorth(today).accounts, netWorthTrend(today).prev!.accounts);
+  assert.deepEqual(ms, [], "nothing changed; the house was only added");
+});

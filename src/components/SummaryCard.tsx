@@ -50,6 +50,7 @@ export function SummaryCard({
   status,
   statusDetail,
   note,
+  aside,
   className = "",
 }: {
   primary: Figure;
@@ -70,6 +71,7 @@ export function SummaryCard({
   // so a caption beside it. At the verdict's size they outranked the figures.
   statusDetail?: ReactNode;
   note?: string; // a caveat on what the bar measures: a "?" beside the caption, so it costs no line
+  aside?: ReactNode; // a page's own panel content where it has no bar (Accounts: what moved)
   className?: string;
 }) {
   const pct = Math.max(0, Math.min(progress ?? 0, 1)) * 100;
@@ -85,7 +87,7 @@ export function SummaryCard({
   // A card with no bar and nothing to say under it (Accounts, once net worth
   // has its figure) has no right panel: an empty one behind a hairline read as
   // something missing. The figures keep their columns.
-  const panel = progress != null || !!status || !!barTitle || !!barCaption;
+  const panel = progress != null || !!status || !!barTitle || !!barCaption || !!aside;
   const hairline = panel
     ? "lg:after:absolute lg:after:-right-3 lg:after:top-0 lg:after:bottom-0 lg:after:border-l lg:after:border-[var(--border)] lg:after:content-['']"
     : "";
@@ -176,6 +178,7 @@ export function SummaryCard({
               budget" — so it sits under it, the panel's conclusion. Above the
               figures it claimed a headline role it didn't have, and on
               Recurrings read as a stray line of counts over the money. */}
+          {aside}
           {status && (
             <div data-status className={`${progress != null ? "mt-3 " : ""}flex flex-wrap items-baseline gap-x-2 text-[15px] font-semibold`}>
               {status}

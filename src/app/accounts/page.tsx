@@ -15,7 +15,7 @@ import { getJson, postJson } from "@/lib/http";
 import { usd, shortDate, monthDayYear } from "@/lib/format";
 import type { LookItem, NetWorth, NetWorthTrend } from "@/lib/accounts";
 import { TREND_MIN_DAYS } from "@/lib/accountKinds";
-import { pairLoans, equityOf } from "@/lib/accountPairs";
+import { pairLoans, equityOf, movers, type Mover } from "@/lib/accountPairs";
 import { DeltaLine } from "@/components/DeltaLine";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MANUAL_KINDS, type ManualKind } from "@/lib/accountKinds";
@@ -73,12 +73,23 @@ export default function AccountsPage() {
   // Loans sit with what they're against: a home's row shows its equity, and
   // its mortgage leaves the Loans section. Owned, owed and net worth don't move.
   const { loansOf, paired } = pairLoans(counted);
+  // What moved since the comparison day, once there is one: the movers, and
+  // each account's value then for its row's change.
+  const then = new Map((prev?.accounts ?? []).map((p) => [p.id, p.amount]));
+  const moved = prev && data ? movers(counted, prev.accounts) : [];
+  const changeOf = (a: Account): number | null => {
+    if (!prev || !then.has(a.id)) return null;
+    const loans = loansOf.get(a.id) ?? [];
+    const was = then.get(a.id)! - loans.reduce((t, l) => t + (then.get(l.id) ?? l.amount), 0);
+    return Number((equityOf(a, loans) - was).toFixed(2));
+  };
   const equityRow = (a: Account) => a.side === "asset" && (a.kind === "property" || a.kind === "vehicle" || loansOf.has(a.id));
   const row = (a: Account, handle?: React.ReactNode) =>
     equityRow(a) ? (
       <EquityRow
         key={a.id}
         a={a}
+        change={changeOf(a)}
         loans={loansOf.get(a.id) ?? []}
         when={accountWhen(a, latest, today)}
         active={shelf.isAccount(a.id)}
@@ -89,6 +100,7 @@ export default function AccountsPage() {
     <AccountRow
       key={a.id}
       a={a}
+      change={changeOf(a)}
       when={accountWhen(a, latest, today)}
       active={shelf.isAccount(a.id)}
       onOpen={() => openAccount(a.id, { onChange: () => void load() })}
@@ -140,6 +152,7 @@ export default function AccountsPage() {
             ]}
             status={waitsForHomes ? "Waiting for home values" : undefined}
             statusDetail={waitsForHomes ? <span className="text-[var(--muted)]">the mortgages count; the homes don&apos;t yet</span> : undefined}
+            aside={!waitsForHomes && prev ? <WhatMoved change={data.net - prev.net} since={prev.date} moved={moved} /> : undefined}
           />
           {!waitsForHomes && <TrendCard trend={data.trend} />}
           {SECTIONS.map((s) => {
@@ -172,7 +185,7 @@ export default function AccountsPage() {
   );
 }
 
-function AccountRow({ a, when, active, onOpen, handle }: { a: Account; when: string | null; active: boolean; onOpen: () => void; handle?: React.ReactNode }) {
+function AccountRow({ a, change = null, when, active, onOpen, handle }: { a: Account; change?: number | null; when: string | null; active: boolean; onOpen: () => void; handle?: React.ReactNode }) {
   const meta = [accountKind(a), when].filter(Boolean).join(" · ");
   return (
     <div
@@ -188,7 +201,7 @@ function AccountRow({ a, when, active, onOpen, handle }: { a: Account; when: str
         {meta && <div className="truncate text-xs text-[var(--muted)]">{meta}</div>}
       </div>
       {/* A card's or loan's balance is what's owed; none of these is an inflow. */}
-      <AmountCell value={a.amount} sign={false} excluded quiet cents={false} className="w-28 shrink-0" />
+      <AmountCell value={a.amount} sign={false} excluded quiet cents={false} delta={change ? Math.round(change) || null : null} className="w-28 shrink-0 sm:w-40" />
     </div>
   );
 }
@@ -199,6 +212,7 @@ function AccountRow({ a, when, active, onOpen, handle }: { a: Account; when: str
 // the asset's shelf.
 function EquityRow({
   a,
+  change = null,
   loans,
   when,
   active,
@@ -206,6 +220,7 @@ function EquityRow({
   handle,
 }: {
   a: Account;
+  change?: number | null;
   loans: Account[];
   when: string | null;
   active: boolean;
@@ -229,7 +244,7 @@ function EquityRow({
         <div className="truncate text-[13px] font-medium">{a.name}</div>
         <div className="truncate text-xs tabular-nums text-[var(--muted)]">{meta}</div>
       </div>
-      <AmountCell value={equityOf(a, loans)} sign={false} excluded quiet cents={false} className="w-28 shrink-0" />
+      <AmountCell value={equityOf(a, loans)} sign={false} excluded quiet cents={false} delta={change ? Math.round(change) || null : null} className="w-28 shrink-0 sm:w-40" />
     </div>
   );
 }
@@ -495,6 +510,70 @@ function SortableRows({
             </button>
           ) : undefined
         )
+      )}
+    </div>
+  );
+}
+
+// What moved net worth since the comparison day: one sentence naming the
+// largest movers, then the five largest as bars on one scale (gains to the
+// right of zero, losses to the left), and the rest folded into one line.
+const TOP_MOVERS = 5;
+function WhatMoved({ change, since, moved }: { change: number; since: string; moved: Mover[] }) {
+  const [all, setAll] = useState(false);
+  const money = (n: number) => usd(Math.abs(n), { cents: false });
+  const up = change >= 0;
+  const withIt = moved.filter((m) => (up ? m.effect > 0 : m.effect < 0));
+  const against = moved.filter((m) => (up ? m.effect < 0 : m.effect > 0));
+  const lead = withIt.slice(0, 2);
+  const parts = [
+    lead.length ? `${lead.map((m) => m.name).join(" and ")} ${up ? "gave" : "took"} ${money(lead.reduce((t, m) => t + m.effect, 0))} of it` : null,
+    against.length ? `${against[0].name} ${up ? "took back" : "gave back"} ${money(against[0].effect)}` : null,
+  ].filter(Boolean);
+  const sentence =
+    Math.round(change) === 0
+      ? `No change since ${shortDate(since)}.`
+      : `${up ? "Up" : "Down"} ${money(change)} since ${shortDate(since)}.${parts.length ? ` ${parts.join("; ")}.` : ""}`;
+  const shown = all ? moved : moved.slice(0, TOP_MOVERS);
+  const rest = moved.slice(TOP_MOVERS);
+  const restSum = rest.reduce((t, m) => t + m.effect, 0);
+  const max = Math.max(1, ...moved.map((m) => Math.abs(m.effect)));
+  const ZERO = 40; // gains get the longer side
+  // A debt's move reads as what happened to it: paid down, or up.
+  const label = (m: Mover) => (m.side === "liability" ? (m.effect > 0 ? `${m.name} paid down` : `${m.name} balance up`) : m.name);
+  return (
+    <div className="flex flex-col gap-2" data-what-moved>
+      <p className="text-[13px]">{sentence}</p>
+      {shown.length > 0 && (
+        <ul className="flex flex-col gap-1 text-xs" aria-label="What moved net worth">
+          {shown.map((m) => {
+            const w = (Math.abs(m.effect) / max) * (m.effect > 0 ? 100 - ZERO : ZERO);
+            return (
+              <li key={m.id} className="flex items-center gap-3" data-mover>
+                <span className="w-36 shrink-0 truncate sm:w-48" title={label(m)}>
+                  {label(m)}
+                </span>
+                <span className="relative h-2 flex-1" aria-hidden>
+                  <span className="absolute -bottom-0.5 -top-0.5 w-px bg-[var(--border)]" style={{ left: `${ZERO}%` }} />
+                  <span
+                    className={`absolute top-0 h-2 rounded-full ${m.effect > 0 ? "bg-[var(--accent)]/80" : "bg-[var(--muted)]/60"}`}
+                    style={{ left: `${m.effect > 0 ? ZERO : ZERO - w}%`, width: `${w}%` }}
+                  />
+                </span>
+                <span className="w-20 shrink-0 text-right tabular-nums">
+                  {m.effect > 0 ? "+" : "−"}
+                  {money(m.effect)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!all && rest.length > 0 && (
+        <button type="button" className="tap self-start text-xs text-[var(--muted)] hover:text-[var(--foreground)] hover:underline" onClick={() => setAll(true)}>
+          {rest.length} smaller change{rest.length === 1 ? "" : "s"}, {restSum >= 0 ? "+" : "−"}
+          {money(restSum)} together · show
+        </button>
       )}
     </div>
   );
