@@ -27,6 +27,7 @@ import { useToast } from "@/components/Toast";
 import { useMutation } from "@/components/useMutation";
 import { useChargeShelf, useShelfActive } from "@/components/TransactionDrawer";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
+import { PlanMatchQueue } from "@/components/PlanMatchQueue";
 import { MergeQueue } from "@/components/MergeQueue";
 import { NameCleanupQueue } from "@/components/NameCleanupQueue";
 import { CategorizeQueue } from "@/components/CategorizeQueue";
@@ -572,6 +573,8 @@ function TransactionsView() {
           <NameCleanupQueue version={refreshKey} onChange={() => loadStatic().then(() => setRefreshKey((k) => k + 1))} />
 
           <MergeQueue version={refreshKey} onChange={() => loadStatic().then(() => setRefreshKey((k) => k + 1))} />
+
+          <PlanMatchQueue version={refreshKey} onChange={() => loadStatic().then(() => setRefreshKey((k) => k + 1))} />
         </>
       )}
 

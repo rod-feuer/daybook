@@ -144,6 +144,16 @@ function init(db: Database.Database) {
   ensurePlans(db);
   ensurePlanCharges(db);
   ensureAccounts(db);
+  ensurePlanMatches(db);
+}
+
+// Charges joined to another vendor's plan by score (planMatch.ts), and the
+// suggestions the owner dismissed.
+export function ensurePlanMatches(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plan_matches (hash TEXT PRIMARY KEY, plan TEXT NOT NULL, score REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS plan_match_dismissals (hash TEXT PRIMARY KEY);
+  `);
 }
 
 // Individual charges the user flagged as one-offs, excluded from their

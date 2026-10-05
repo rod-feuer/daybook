@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureTxDescriptor } from "./db";
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
+import { applyPlanMatches } from "./planMatch";
 import { recordBalances, recordBankTerms, projectAllLoanPayments, type BankTerms } from "./accounts";
 import { normalizeMerchant } from "./merchant";
 import { nameAffinity, NAME_MATCH } from "./merges";
@@ -369,7 +370,11 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   const items = await fetchPlaidTransactions(start, end);
   const result = importPlaidTransactions(items);
   const split = applySplitRules();
-  if (result.inserted > 0 || result.updated > 0) detectRecurrings();
+  if (result.inserted > 0 || result.updated > 0) {
+    detectRecurrings();
+    // New charges a sibling vendor's plan claims by score; rebuild once to join them.
+    if (applyPlanMatches() > 0) detectRecurrings();
+  }
   // The same pull carries each account's balance: one a day, dated by the sync.
   const balances = recordBalances(items, end);
   // Payments just imported lower the loans kept by hand.

@@ -18,6 +18,7 @@ import {
   countedPlanId,
 } from "./queries";
 import type { Recurring } from "./types";
+import { getPlanMatches } from "./planMatch";
 import { CADENCE_DAYS, medianGap } from "./cadence";
 import { MIN_ELAPSED_DAYS } from "./budgetOutlook";
 
@@ -649,6 +650,9 @@ function rebuildRecurrings(): Recurring[] {
   }
   const excluded = getRecurringTxExclusions(); // charges the user took out
   const included = getRecurringTxInclusions(); // charges the user put in: hash → plan
+  // Charges matched to another vendor's plan by score (planMatch.ts), joined
+  // like a pin; the owner's own pin or exclusion of the same charge wins.
+  for (const [hash, plan] of getPlanMatches()) if (!included.has(hash) && !excluded.has(hash)) included.set(hash, plan);
   const rowByHash = new Map(rows.map((r) => [r.hash, r]));
   const settings = getRecurringSettings();
   const created = new Set<string>();
@@ -854,6 +858,38 @@ function rebuildRecurrings(): Recurring[] {
     return plans;
   };
 
+  // One row per plan key. A charge pinned (or matched) into another vendor's
+  // plan starts that key inside its own vendor's pass, while the plan's own
+  // vendor may write the same key: the second write joins the first row
+  // instead of making a twin (two "Fandangoclub" rows, 2026-10-05).
+  const committed = new Map<string, { id: number; events: { date: string; amount: number }[]; hashes: Set<string> }>();
+  const update = db.prepare(
+    "UPDATE recurrings SET avgAmount = @avgAmount, lastDate = @lastDate, nextDate = @nextDate, count = @count WHERE id = @id"
+  );
+  // A key already written this rebuild: its charges join that row, which is
+  // re-figured from all of them. False when the key is new.
+  const joinTwin = (key: string, txs: { hash: string; date: string; amount: number }[]): boolean => {
+    const twin = committed.get(key);
+    if (!twin) return false;
+    for (const t of txs) {
+      if (twin.hashes.has(t.hash)) continue;
+      twin.hashes.add(t.hash);
+      twin.events.push({ date: t.date, amount: t.amount });
+      linkByHash.run(twin.id, t.hash);
+    }
+    twin.events.sort((a, b) => a.date.localeCompare(b.date));
+    const at = out.findIndex((r) => r.id === twin.id);
+    const last = twin.events[twin.events.length - 1].date;
+    const merged = {
+      avgAmount: Number(currentAmount(twin.events.map((e) => e.amount)).toFixed(2)),
+      lastDate: last,
+      nextDate: addCadence(last, out[at].cadence),
+      count: twin.events.length,
+    };
+    update.run({ id: twin.id, ...merged });
+    out[at] = { ...out[at], ...merged };
+    return true;
+  };
   const commit = (p: Plan) => {
     if (p.inherit && settings[p.inherit] && !settings[p.key]) setRecurringSetting(p.key, settings[p.inherit]);
     // A charge the user put into this plan joins it as its own event, wherever
@@ -865,6 +901,7 @@ function rebuildRecurrings(): Recurring[] {
       p.events.push({ date: r.date, amount: r.amount });
     }
     p.events.sort((a, b) => a.date.localeCompare(b.date));
+    if (joinTwin(p.key, p.txs)) return;
     const lastDate = p.events[p.events.length - 1].date;
     const categoryId = p.categoryId ?? modalCategory(p.txs);
     const rec = {
@@ -877,6 +914,7 @@ function rebuildRecurrings(): Recurring[] {
       count: p.events.length,
     };
     const info = insert.run(rec);
+    committed.set(p.key, { id: Number(info.lastInsertRowid), events: [...p.events], hashes: new Set(p.txs.map((t) => t.hash)) });
     for (const t of p.txs) linkByHash.run(info.lastInsertRowid, t.hash);
     if (p.categoryId != null) planCategory.run(p.categoryId, info.lastInsertRowid, p.categoryId);
     else if (categoryId != null) backfillCategory.run(categoryId, info.lastInsertRowid);
@@ -1108,6 +1146,7 @@ function rebuildRecurrings(): Recurring[] {
     if (!all || all.length === 0) continue;
     const txs = all.filter((t) => !excluded.has(t.hash));
     if (txs.length === 0) continue;
+    if (joinTwin(merchant, txs)) continue; // another vendor's pinned charges already started this key
     const amounts = txs.map((t) => t.amount);
     let cadence: Recurring["cadence"] = "monthly";
     if (txs.length >= 2) {
