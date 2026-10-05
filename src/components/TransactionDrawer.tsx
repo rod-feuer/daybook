@@ -557,7 +557,16 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
               ) : target.kind === "account" ? (
                 <AccountHeader data={aData} onRename={(name) => aData && accountPatch(aData.id, { name })} />
               ) : (
-                <ChargeHeader data={xData} onOpenVendor={() => xData && drillToMerchant(xData.merchant)} />
+                <ChargeHeader
+                  data={xData}
+                  onOpenVendor={() => xData && drillToMerchant(xData.merchant)}
+                  onSeparate={() =>
+                    xData &&
+                    write(() => postJson("/api/recurrings/link", { alias: xData.merchant, unlink: true }), {
+                      error: "Couldn't separate — please try again",
+                    })
+                  }
+                />
               )}
             </div>
             <button

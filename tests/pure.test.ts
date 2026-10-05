@@ -322,3 +322,34 @@ test("spendTrend: last month over the same days, and only once five days of the 
   assert.equal(spendTrend(50, 0, 1, "2026-10"), "new this month", "nothing last month is said even early");
   assert.equal(spendTrend(0, 0, 1, "2026-10"), null);
 });
+
+import { achToLegacy } from "../src/lib/merchant";
+import { nameAffinity as affinity, LOW_MATCH as LOW, NAME_MATCH as HIGH } from "../src/lib/similarity";
+
+test("Chase's newer ACH text names the payee the way its older text did", () => {
+  // WHY: the new layout ("ORIG CO NAME:… CO ENTRY DESCR:… SEC:… ORIG ID:…")
+  // named every payment by its labels, so each became a new vendor; rewritten
+  // into the older layout, it lands in the vendor the household already has.
+  const cases: [string, string][] = [
+    ["ORIG CO NAME:JPMORGAN CHASE CO ENTRY DESCR:CHASE ACH SEC:PPD ORIG ID:1000008113", "Jpmorgan Chase Chase Ach"],
+    ["ORIG CO NAME:IN 529 DIR ACH CO ENTRY DESCR:CONTRIB SEC:WEB IND ID:000031915153015 ORIG ID:1356651600", "In 529 Dir Ach Contrib"],
+    ["ORIG CO NAME:HUNTINGTON BANKS CO ENTRY DESCR:IL PAYMENT SEC:WEB IND ID:20069384048 ORIG ID:9000044231", "Huntington Banks Il Payment"],
+    ["ORIG CO NAME:DANIEL J EDELMAN CO ENTRY DESCR:PAYMENTS SEC:CCD IND ID:EFT- ORIG ID:1234567890", "Daniel J Edelman Payments Eft"],
+  ];
+  for (const [raw, want] of cases) assert.equal(normalizeMerchant(raw), want, raw);
+  assert.equal(
+    merchantKey(normalizeMerchant("ORIG CO NAME:AMERICAN EXPRESS CO ENTRY DESCR:ACH PMT SEC:WEB IND ID:M6710 ORIG ID:2005032111")),
+    merchantKey("American Express Ach"),
+    "an Amex payment joins the American Express vendor"
+  );
+  assert.equal(achToLegacy("Spotify USA"), "Spotify USA", "other text passes through");
+});
+
+test("two payees don't look alike just because Chase labels both the same way", () => {
+  // WHY: on the labels, an Amex payment scored as the Chase mortgage's vendor,
+  // the merge queue offered Combine, and the payment read as the mortgage.
+  const amex = "Orig Co Name:american Express Co Entry Descr:ach Pmt Sec:web Ind Id:m6710 Orig Id";
+  const chase = "Orig Co Name:jpmorgan Chase Co Entry Descr:chase Ach Sec:ppd Orig Id";
+  assert.ok(affinity(amex, chase) < LOW, `amex vs chase ${affinity(amex, chase)}`);
+  assert.ok(affinity(chase, "Jpmorgan Chase Chase Ach") >= HIGH, "the same payee, old and new text, still matches");
+});

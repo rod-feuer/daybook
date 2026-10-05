@@ -3,6 +3,7 @@
 // signals (prefix-containment, Jaro-Winkler, token-set overlap) — see
 // nameAffinity. Thresholds: NAME_MATCH = confident (auto), LOW_MATCH = a
 // borderline band surfaced for confirmation.
+import { achToLegacy } from "./merchant"; // pure, no imports of its own
 
 // Lowercase, strip to alphanumerics — collapses punctuation/spacing/case so
 // "Jimmy John's" and "Jimmy Johns" both become "jimmyjohns".
@@ -61,8 +62,9 @@ function tokenize(name: string): Set<string> {
 // max(0..1) of three signals — covers truncation/junk suffixes (prefix), typos
 // (Jaro-Winkler), and reordering/subset tokens (token-set).
 export function nameAffinity(a: string, b: string): number {
-  const na = normName(a);
-  const nb = normName(b);
+  // Compared on the payee, not Chase's ACH labels (see achToLegacy).
+  const na = normName(achToLegacy(a));
+  const nb = normName(achToLegacy(b));
   if (!na || !nb) return 0;
   const [shortS, longS] = na.length <= nb.length ? [na, nb] : [nb, na];
 
