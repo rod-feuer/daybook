@@ -558,6 +558,10 @@ function spendByYear(scope: string, args: (string | number)[]): { year: string; 
 // is linked to, else the vendor's most recently charged plan (the one "In
 // plan" would put it into) — and the plan's display name.
 export type ChargeDetail = TransactionRow & {
+  // The vendor this charge's name was combined into, when it was (its display
+  // name): the shelf offers Separate right there, not only in the vendor's
+  // names list. Null for a name that is its own vendor.
+  combinedInto: string | null;
   // The bank's own text for the charge, when it says more than the name it
   // is filed under: Plaid's `name` for a Plaid charge, the original
   // descriptor for an imported one. Null when unknown.
@@ -639,6 +643,7 @@ export function transactionById(id: number): ChargeDetail | null {
   return {
     ...row,
     displayName: chargeDisplayName(row, settings, links, planNames(settings)),
+    combinedInto: links[row.merchant] ? merchantDisplayName(links[row.merchant], settings, links) : null,
     bankText: raw.descriptor ?? (raw.source !== "plaid" ? raw.rawMerchant : null),
     planKey: plan?.merchant ?? null,
     planName: plan ? (settings[plan.merchant]?.alias ?? displayMerchant(plan.merchant)) : null,

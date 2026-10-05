@@ -11,8 +11,28 @@
 // Payroll") stay separate. The original descriptor is preserved in
 // transactions.rawMerchant, so this is fully reversible. Idempotent:
 // normalizeMerchant(normalizeMerchant(x)) === normalizeMerchant(x).
+// Chase's newer ACH text: "ORIG CO NAME:AMERICAN EXPRESS CO ENTRY DESCR:ACH
+// PMT SEC:WEB IND ID:M6710 ORIG ID:2005032111". Its labels outweigh the payee:
+// every ACH debit shared "Orig Co Name … Entry Descr … Sec … Orig Id", so two
+// payees compared as one (an Amex payment was combined into the Chase
+// mortgage, 2026-10-05), and each new text named a new vendor. Rewritten into
+// the older layout the same payees used ("AMERICAN EXPRESS ACH PMT M6710 WEB
+// ID: 2005032111"), it normalizes to the names the household's vendors already
+// have. Anything else passes through unchanged.
+export function achToLegacy(text: string): string {
+  const co = text.match(/ORIG CO NAME:\s*(.*?)\s+CO ENTRY DESCR:/i);
+  const descr = text.match(/CO ENTRY DESCR:\s*(.*?)\s+SEC:/i);
+  if (!co || !descr) return text;
+  const field = (label: string) => text.match(new RegExp(`${label}:\\s*(\\S*)`, "i"))?.[1] ?? "";
+  const sec = field("SEC");
+  // A reference with digits in it ("M6710") is a code, not the payee; a word
+  // ("EFT") is part of how the household's vendors are named.
+  const ind = /\d/.test(field("IND ID")) ? "" : field("IND ID");
+  return [co[1], descr[1], ind, sec ? `${sec} ID: ${field("ORIG ID")}` : ""].filter(Boolean).join(" ").trim();
+}
+
 export function normalizeMerchant(raw: string): string {
-  const original = (raw ?? "").trim();
+  const original = achToLegacy((raw ?? "").trim());
   let s = original;
 
   // Leading wallet / processor prefixes (may stack, e.g. "Aplpay Sp Rothys"):

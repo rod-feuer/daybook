@@ -19,7 +19,7 @@ import {
   ShelfRow,
 } from "@/components/shelf/parts";
 
-export function ChargeHeader({ data, onOpenVendor }: { data: ChargeDetail | null; onOpenVendor: () => void }) {
+export function ChargeHeader({ data, onOpenVendor, onSeparate }: { data: ChargeDetail | null; onOpenVendor: () => void; onSeparate: () => void }) {
   if (!data) return <div className="truncate text-[15px] font-semibold">…</div>;
   return (
     <>
@@ -46,6 +46,17 @@ export function ChargeHeader({ data, onOpenVendor }: { data: ChargeDetail | null
       {data.bankText && ![data.displayName, data.merchant].some((n) => n.toLowerCase() === data.bankText!.toLowerCase()) && (
         <div className="truncate text-[11px] text-[var(--muted)]" data-bank-text title={data.bankText}>
           Bank: {data.bankText}
+        </div>
+      )}
+      {/* A combine is undone where its mistake shows: on the charge it renamed
+          (an Amex payment read as the Chase mortgage), not only in the
+          vendor's names list. */}
+      {data.combinedInto && (
+        <div className="flex items-center gap-1 text-[11px] text-[var(--muted)]" data-combined-into>
+          <span className="truncate">Combined into {data.combinedInto} ·</span>
+          <button type="button" onClick={onSeparate} className="tap shrink-0 underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)]">
+            Separate
+          </button>
         </div>
       )}
       <div className="text-xs text-[var(--muted)]">
