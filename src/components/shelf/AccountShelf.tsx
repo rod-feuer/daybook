@@ -6,6 +6,8 @@ import { PropertyCard } from "@/components/shelf/parts";
 import { CommitInput } from "@/components/InlineEdit";
 import { AmountCell } from "@/components/RowCells";
 import { accountKind } from "@/components/accountLabels";
+import { olderThanAYear } from "@/lib/accountKinds";
+import { ROW_FOCUS } from "@/components/rowButton";
 import { usd, shortDate } from "@/lib/format";
 import type { AccountDetail, OwnerValue, TermField } from "@/lib/accounts";
 
@@ -36,6 +38,7 @@ export function AccountBody({
   onSetTerms,
   onSetSecuredBy,
   onSetPaidBy,
+  onOpenAccount,
   onDelete,
   confirmingDelete,
 }: {
@@ -46,14 +49,21 @@ export function AccountBody({
   onSetTerms: (patch: Partial<Record<TermField, number | string | null>>) => void;
   onSetSecuredBy: (assetId: number | null) => void;
   onSetPaidBy: (vendor: string | null) => void;
+  onOpenAccount: (id: number) => void;
   onDelete: () => void;
   confirmingDelete: boolean;
 }) {
   const manual = data.origin === "manual";
   const latest = data.history[0];
   const owed = data.side === "liability";
+  // A home or vehicle (or anything with a loan against it) opens on its
+  // arithmetic: worth, each loan, equity. Its row shows the equity.
+  const ledger = !owed && (data.kind === "property" || data.kind === "vehicle" || data.loans.length > 0);
   return (
     <div className="flex flex-col gap-4">
+      {ledger ? (
+        <EquityLedger data={data} onOpenAccount={onOpenAccount} />
+      ) : (
       <div className="grid grid-cols-2 gap-2">
         <PropertyCard
           label={owed ? "owed" : manual ? "value" : "balance"}
@@ -65,16 +75,17 @@ export function AccountBody({
           <div className="text-[15px] font-semibold tabular-nums">{latest ? shortDate(latest.asOf) : "—"}</div>
         </PropertyCard>
       </div>
+      )}
       <p className="-mt-2 text-[11px] text-[var(--muted)]" data-account-caption>
-        {data.counted ? (owed ? "Counted in what's owed" : "Counted in what's owned") : "Not counted in net worth"}
-        {data.equity != null && (
-          <>
-            {" · "}
-            <span data-equity>
-              equity {usd(data.equity, { cents: false })}, after {data.loans.map((l) => `${usd(l.amount, { cents: false })} owed on ${l.name}`).join(" and ")}
-            </span>
-          </>
-        )}
+        {ledger
+          ? data.counted
+            ? "Net worth counts the worth in Owned and the loans in Owed; equity is the difference."
+            : "Not counted in net worth"
+          : data.counted
+            ? owed
+              ? "Counted in what's owed"
+              : "Counted in what's owned"
+            : "Not counted in net worth"}
       </p>
 
       {data.terms && (data.kind === "loan" || data.kind === "mortgage") && (
@@ -303,6 +314,56 @@ function LoanTermsPanel({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// Worth, less each loan against it (a row that opens that loan's shelf, with
+// Back to this one), a rule, and equity: the arithmetic behind the row's figure.
+function EquityLedger({ data, onOpenAccount }: { data: AccountDetail; onOpenAccount: (id: number) => void }) {
+  const worth = data.history[0];
+  const today = new Date().toISOString().slice(0, 10);
+  const old = worth?.source === "estimate" && olderThanAYear(worth.asOf, today);
+  const equity = data.equity ?? worth?.amount ?? 0;
+  return (
+    <div className="rounded-lg bg-[var(--background)] px-3 py-2 tabular-nums" data-ledger>
+      <div className="flex items-baseline justify-between gap-3 py-1">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium">Worth</div>
+          <div className="text-xs text-[var(--muted)]">
+            {worth ? `${worth.source === "estimate" ? "Estimate" : "Set by you"} · ${shortDate(worth.asOf)}` : "No value yet"}
+            {old && <span className="text-[var(--warn)]"> · over a year old</span>}
+          </div>
+        </div>
+        <span className="text-[13px]">{worth ? usd(worth.amount, { cents: false }) : "—"}</span>
+      </div>
+      {data.loans.map((l) => (
+        <button
+          key={l.id}
+          type="button"
+          onClick={() => onOpenAccount(l.id)}
+          className={`tap -mx-2 flex w-[calc(100%+1rem)] items-baseline justify-between gap-3 rounded-lg px-2 py-1 text-left hover:bg-[var(--hover)] ${ROW_FOCUS}`}
+          data-ledger-loan
+        >
+          <span className="min-w-0">
+            <span className="block text-[13px] font-medium">
+              {l.name} <span className="text-[var(--muted)]">›</span>
+            </span>
+            <span className="block text-xs text-[var(--muted)]">
+              {l.origin === "plaid" ? "From the bank" : "Set by you"} · {shortDate(l.asOf)}
+            </span>
+          </span>
+          <span className="text-[13px]">− {usd(l.amount, { cents: false })}</span>
+        </button>
+      ))}
+      {data.loans.length > 0 && <div className="my-1 ml-auto w-28 border-t border-[var(--foreground)]/35" aria-hidden />}
+      <div className="flex items-baseline justify-between gap-3 py-1">
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold">Equity</div>
+          {data.loans.length === 0 && <div className="text-xs text-[var(--muted)]">Nothing owed against it</div>}
+        </div>
+        <span className="text-[15px] font-semibold" data-ledger-equity>{usd(equity, { cents: false })}</span>
+      </div>
     </div>
   );
 }

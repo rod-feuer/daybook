@@ -354,3 +354,39 @@ test("a value typed today doesn't make every link look silent", () => {
   setSecuredBy(mortgage, home);
   assert.deepEqual(needsALook(netWorth("2026-10-09").accounts, "2026-10-09"), []);
 });
+
+import { pairLoans, equityOf } from "../src/lib/accountPairs";
+
+test("pairing loans with their assets leaves net worth exactly as it was", () => {
+  // WHY: the list shows a home's equity and drops its mortgage from Loans.
+  // That is a display change only: if pairing dropped a loan, or counted one
+  // against two assets, the list would no longer add up to net worth.
+  recordBalances(bank(), "2026-10-04");
+  const house = createManualAccount("Sample house", "property", { asOf: "2026-10-04", amount: 80000, estimate: true });
+  const car = createManualAccount("Sample car", "vehicle", { asOf: "2026-10-04", amount: 9000, estimate: true });
+  const carLoan = createManualAccount("Sample car loan", "loan", { asOf: "2026-10-04", amount: 4000, estimate: false });
+  const mortgage = netWorth("2026-10-04").accounts.find((a) => a.kind === "mortgage")!.id;
+  setSecuredBy(mortgage, house);
+  setSecuredBy(carLoan, car);
+  const nw = netWorth("2026-10-04");
+  const counted = nw.accounts.filter((a) => a.counted);
+  const { loansOf, paired } = pairLoans(counted);
+  assert.deepEqual([...paired].sort(), [mortgage, carLoan].sort());
+  const assets = counted.filter((a) => a.side === "asset");
+  const loose = counted.filter((a) => a.side === "liability" && !paired.has(a.id));
+  const shown = assets.reduce((t, a) => t + equityOf(a, loansOf.get(a.id)), 0) - loose.reduce((t, a) => t + a.amount, 0);
+  assert.equal(Number(shown.toFixed(2)), nw.net, "the rows still add up to net worth");
+  assert.equal(equityOf(assets.find((a) => a.id === house)!, loansOf.get(house)), 80000 - 50000);
+});
+
+test("a loan against an asset that isn't counted stays listed on its own", () => {
+  // WHY: a mortgage folded into a home that's left out of net worth would
+  // vanish from the page while still counting in Owed.
+  recordBalances(bank(), "2026-10-04");
+  const house = createManualAccount("Sample house", "property", { asOf: "2026-10-04", amount: 80000, estimate: true });
+  const mortgage = netWorth("2026-10-04").accounts.find((a) => a.kind === "mortgage")!.id;
+  setSecuredBy(mortgage, house);
+  updateAccount(house, { counted: false });
+  const { paired } = pairLoans(netWorth("2026-10-04").accounts.filter((a) => a.counted));
+  assert.equal(paired.has(mortgage), false);
+});

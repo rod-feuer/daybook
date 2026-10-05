@@ -263,6 +263,10 @@ varies row to row. Category as a quiet property with a chevron. Amount right,
 tabular, in one of three states: settled (600, foreground), provisional (500,
 muted), overdue (600, warn). No row menu anywhere: verbs live in the shelf.
 The cells are shared code (`RowCells.tsx`: `CategoryProperty`, `AmountCell`).
+On Accounts a home or vehicle is an **equity row**: its figure is equity, and the line under the
+name is the arithmetic ("$1,346,000 est. − $812,476 Lake Home mortgage", or "· nothing owed");
+the loans against it leave the Loans section, so each debt is shown once. "est." is muted text,
+not a pill (`edited` is the only tag). Owned, Owed and Net worth are summed as before.
 
 **Shelf anatomy** — header (name, descriptor, count and since); at most two
 property cards, each marked auto or edited; one caption line; evidence as a
@@ -292,6 +296,9 @@ charge).
 The charge's name in its header drills up to the vendor, with Back, and so
 does "Open vendor" under the list: one label, whatever the count. A
 transaction row opens the charge.
+An asset with an equity row opens on a **ledger** in place of the property cards: Worth, each
+loan against it as a row that opens that loan's shelf (with "Back to" the asset), a rule, then
+Equity.
 On a phone the shelf is a bottom sheet, and its handle is a promise: the
 sheet's top drags down to close.
 
