@@ -1704,10 +1704,24 @@ async function categoryShelfRecurring(browser) {
       if (!m) continue;
       await r.click(); await shelfIs(page, true); await shelfSettled(page);
       const shelf = await page.$eval(shelfSel, (el) => el.querySelector("[data-shelf-recurring]")?.textContent ?? "");
-      pair = { row: m[1], shelf };
+      // With a budget, the figure is what of it is spoken for: it sits on the
+      // Budget label line, and the Left card says only what's left of what.
+      // Give the category a budget for the look, and take it away after.
+      const field = `${shelfSel} [data-shelf-budget] input`;
+      await page.click(field, { clickCount: 3 }); await page.keyboard.type("5000"); await page.keyboard.press("Enter");
+      await page.waitForSelector(`${shelfSel} [data-shelf-left]`, { timeout: 8000 }).catch(() => {});
+      const place = await page.$eval(shelfSel, (el) => ({
+        budget: !!el.querySelector("[data-shelf-left]"),
+        onLabel: !!el.querySelector("[data-shelf-budget] > :first-child [data-shelf-recurring]"),
+        inLeft: /recurring/.test(el.querySelector("[data-shelf-left]")?.closest("[data-property-card]")?.innerText ?? ""),
+      }));
+      pair = { row: m[1], shelf, place };
+      await page.click(field, { clickCount: 3 }); await page.keyboard.press("Backspace"); await page.keyboard.press("Enter");
+      await page.waitForFunction((sel) => !document.querySelector(`${sel} [data-shelf-left]`), { timeout: 8000 }, shelfSel).catch(() => {});
       break;
     }
     record("category shelf recurring", "the shelf shows the same monthly recurring cost as the category's row", pair != null && pair.shelf.includes(`$${pair.row} recurring`), pair ? `row $${pair.row}, shelf "${pair.shelf}"` : "no row with recurring");
+    record("category shelf recurring", "with a budget, it sits on the Budget label line, not in the Left card", pair != null && pair.place.budget && pair.place.onLabel && !pair.place.inLeft, pair ? JSON.stringify(pair.place) : "no row with recurring");
     if (errs.length) record("category shelf recurring", "page errors", false, errs[0]);
   });
 }

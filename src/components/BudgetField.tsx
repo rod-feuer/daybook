@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { CommitInput } from "@/components/InlineEdit";
 import { usd, monthName } from "@/lib/format";
 
@@ -19,6 +19,7 @@ export function BudgetField({
   suggestedAnnual = 0,
   month,
   onSave,
+  aside,
 }: {
   budget: number | null;
   period?: Period;
@@ -26,6 +27,7 @@ export function BudgetField({
   suggestedAnnual?: number;
   month: string; // the month on screen: a save holds from it on
   onSave: (amount: number | null, period: Period) => void;
+  aside?: ReactNode; // on the label line, right: what the budget is set against
 }) {
   const [period, setPeriod] = useState<Period>(savedPeriod);
   // How to remove a budget is said while you're editing it, not always.
@@ -49,7 +51,10 @@ export function BudgetField({
 
   return (
     <div data-shelf-budget onFocus={() => setEditing(true)} onBlur={() => setEditing(false)}>
-      <div className="stat-label mb-2">Budget</div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className="stat-label">Budget</div>
+        {aside}
+      </div>
       <div className="flex items-center gap-2">
         <label className="flex min-w-0 flex-1 items-center rounded-lg border border-[var(--border)] bg-card px-3 focus-within:ring-2 focus-within:ring-[var(--accent)]/40">
           <span className="text-[13px] text-[var(--muted)]">$</span>
