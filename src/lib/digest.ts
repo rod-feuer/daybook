@@ -4,6 +4,7 @@ import { dashboard } from "./core";
 import {
   recurringsForMonth,
   countedPlanId,
+  counted,
   upcomingRecurringExpenses,
   categoriesWithTotals,
   isRecurringActive,
@@ -332,7 +333,7 @@ function variableSpend(fromExclusive: string, toInclusive: string): Spend[] {
     .prepare(
       `SELECT t.merchant, t.amount, COALESCE(t.effectiveDate, t.date) AS date
        FROM transactions t LEFT JOIN categories c ON c.id = t.categoryId
-       WHERE t.amount < 0 AND t.amount >= @floor AND t.excluded = 0 AND ${countedPlanId("t")} IS NULL AND COALESCE(c.excludeFromTotals, 0) = 0
+       WHERE t.amount < 0 AND t.amount >= @floor AND ${counted()} AND ${countedPlanId("t")} IS NULL
          AND COALESCE(t.effectiveDate, t.date) > @from AND COALESCE(t.effectiveDate, t.date) <= @to`
     )
     .all({ from: fromExclusive, to: toInclusive, floor: -EXTRAORDINARY }) as Spend[];

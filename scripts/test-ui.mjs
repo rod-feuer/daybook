@@ -1901,23 +1901,39 @@ async function moneyColour(browser) {
     const amt = [...li.querySelectorAll("span, div")].find((el) => /^[+−]\$[\d,]+/.test(el.textContent.trim()) && el.children.length === 0);
     return amt ? getComputedStyle(amt).color : null;
   }, who);
+  // Tailwind v4 emits emerald as lab(); older builds as rgb(). Green = negative a* (lab) or g-dominant (rgb).
+  const green = (c) => {
+    if (!c) return false;
+    const n = c.match(/-?\d+(\.\d+)?/g).map(Number);
+    if (c.startsWith("lab(")) return n[1] < -10;
+    if (c.startsWith("rgb(")) return n[1] > n[0] && n[1] > n[2];
+    return false;
+  };
   await withPage(browser, async (page) => {
     for (const route of ["/transactions", "/"]) {
       await page.goto(BASE + route, { waitUntil: "networkidle2" });
       await page.waitForSelector("[data-drawer-row]");
       const income = await colourOf(page, "Acme Corp Paycheck");
       const transfer = await colourOf(page, "Card Payment Received");
-      // Tailwind v4 emits emerald as lab(); older builds as rgb(). Green = negative a* (lab) or g-dominant (rgb).
-      const green = (c) => {
-        if (!c) return false;
-        const n = c.match(/-?\d+(\.\d+)?/g).map(Number);
-        if (c.startsWith("lab(")) return n[1] < -10;
-        if (c.startsWith("rgb(")) return n[1] > n[0] && n[1] > n[2];
-        return false;
-      };
       record("money colour", `${route} · income is green`, green(income), income);
       record("money colour", `${route} · excluded-category inflow is not`, transfer !== null && !green(transfer), transfer);
     }
+    // A charge excluded on its own (the shelf's "Exclude from totals") doesn't
+    // count either: the dashboard's Recent activity only checked the category.
+    const month = new Date().toISOString().slice(0, 7);
+    const id = await page.evaluate(async (month) => {
+      const r = await (await fetch(`/api/transactions?month=${month}`)).json();
+      const pay = (r.rows ?? r).find((t) => t.merchant.includes("Acme Corp Paycheck"));
+      if (pay) await fetch(`/api/transactions/${pay.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded: true }) });
+      return pay?.id ?? null;
+    }, month);
+    for (const route of ["/transactions", "/"]) {
+      await page.goto(BASE + route, { waitUntil: "networkidle2" });
+      await page.waitForSelector("[data-drawer-row]");
+      const c = await colourOf(page, "Acme Corp Paycheck");
+      record("money colour", `${route} · an inflow excluded on its own is not green`, id !== null && c !== null && !green(c), c);
+    }
+    if (id !== null) await page.evaluate((id) => fetch(`/api/transactions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded: false }) }), id);
   });
 }
 
@@ -2363,6 +2379,69 @@ async function needsALook(browser) {
   });
 }
 
+// Two shelf editors the review found saving only on blur. The shelf closes on a
+// mousedown outside it, which unmounts an input before its blur lands, so what
+// was typed was silently dropped. And with no key per vendor, a half-typed
+// value stayed mounted when the shelf moved to the next vendor, where its blur
+// saved it to the wrong one.
+async function shelfEditsLand(browser) {
+  const settingsPosts = (page) => {
+    const posts = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/api/recurrings/settings")) posts.push(JSON.parse(req.postData() || "{}"));
+    });
+    return posts;
+  };
+  const clickOutside = async (page) => {
+    const at = await page.evaluate(() => {
+      const h = [...document.querySelectorAll("h1, h2")].find((e) => !e.closest("aside"));
+      const r = h?.getBoundingClientRect();
+      return r ? { x: r.left + 4, y: r.top + r.height / 2 } : null;
+    });
+    if (at) await page.mouse.click(at.x, at.y);
+    return !!at;
+  };
+  // The match text: type it, click away. The rule must still be saved.
+  await withPage(browser, async (page) => {
+    const posts = settingsPosts(page);
+    await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    await page.click("[data-drawer-row]");
+    await shelfIs(page, true); await shelfSettled(page);
+    await page.select(`${shelfSel} select[aria-label="Match rule"]`, "contains");
+    await page.click(`${shelfSel} input[aria-label="Match text"]`);
+    await page.keyboard.type("NFLXUI");
+    const outside = await clickOutside(page);
+    await sleep(1200);
+    const saved = posts.find((b) => b.matchText === "NFLXUI");
+    record("shelf edits land", "match text typed then clicking away is saved", outside && !!saved, `outside=${outside} posts=${posts.length}`);
+    if (saved) await page.evaluate((m) => fetch("/api/recurrings/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: m, matchMode: null, matchText: null, amountTolerance: null }) }), saved.merchant);
+  });
+  // A half-typed expected amount on vendor A, then open vendor B: A keeps it.
+  await withPage(browser, async (page) => {
+    const posts = settingsPosts(page);
+    await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const rows = await page.$$("[data-drawer-row]");
+    const names = await page.$$eval("[data-drawer-row]", (rs) => rs.map((r) => r.children[1]?.textContent.replace("✎", "").trim()));
+    const other = names.findIndex((n) => n && n !== names[0]); // a different vendor, not a second plan of the same one
+    await rows[0].click();
+    await shelfIs(page, true); await shelfSettled(page);
+    const a = await page.$eval(`${shelfSel} header`, (h) => h.innerText.split("\n")[0].replace("✎", "").trim());
+    await page.click(`${shelfSel} input[aria-label="Expected amount"]`);
+    await page.keyboard.type("987.65");
+    await rows[other].click();
+    await page.waitForFunction((sel, a) => { const h = document.querySelector(`${sel} header`); return h && !h.innerText.startsWith(a); }, { timeout: 8000 }, shelfSel, a);
+    await shelfSettled(page); await sleep(800);
+    const b = await page.$eval(`${shelfSel} header`, (h) => h.innerText.split("\n")[0].replace("✎", "").trim());
+    const shown = await page.$$eval(`${shelfSel} input[aria-label="Expected amount"]`, (els) => els.map((e) => e.value));
+    const wrote = posts.filter((p) => p.expectedAmount === 987.65);
+    record("shelf edits land", "a half-typed amount doesn't follow you to the next vendor", other > 0 && a !== b && !shown.includes("987.65"), `A=${a} B=${b} B shows ${JSON.stringify(shown)} rows=${JSON.stringify(names.slice(0, 6))} other=${other}`);
+    record("shelf edits land", "…and is saved to the vendor it was typed on, never the next", a !== b && wrote.length === 1 && a.toLowerCase().includes(String(wrote[0].merchant).toLowerCase().split(" ")[0]), `saved for ${wrote.map((w) => w.merchant).join(", ") || "nobody"}`);
+    for (const w of wrote) await page.evaluate((m) => fetch("/api/recurrings/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: m, expectedAmount: null }) }), w.merchant);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2373,7 +2452,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

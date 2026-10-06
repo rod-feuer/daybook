@@ -505,7 +505,7 @@ export default function DashboardPage() {
                     </div>
                     <Money
                       value={t.amount}
-                      excluded={!!t.categoryExcluded}
+                      excluded={!!t.excluded || !!t.categoryExcluded}
                       className="text-[13px] font-semibold"
                     />
                     <DrillChevron />

@@ -307,8 +307,16 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     setTarget(null);
   }, [pathname]);
 
+  // The shelf's target now, not when a write began: a save that lands after
+  // the shelf moved to another vendor re-reads where it is, never where it was
+  // (that put A's data under B's target, where the next edit mixed the two).
+  const targetNow = useRef(target);
+  useEffect(() => {
+    targetNow.current = target;
+  });
   // Re-read whichever detail is open.
   const refreshTarget = () => {
+    const target = targetNow.current;
     if (target?.kind === "category") fetchCategory(target.categoryId, target.month, true);
     else if (target?.kind === "merchant") fetchMerchant(target.merchant, target.series, true);
     else if (target?.kind === "charge") fetchCharge(target.id, true);
@@ -611,6 +619,9 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
               </div>
             ) : target.kind === "merchant" && mData ? (
               <MerchantBody
+                // A fresh body per vendor: an edit in progress belongs to the
+                // vendor it was typed on, never carried to the next one.
+                key={`${target.merchant}|${target.series ?? ""}`}
                 data={mData}
                 cats={cats}
                 onOpenPlan={(series) => drillToMerchant(target.merchant, series)}
@@ -660,6 +671,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
               />
             ) : target.kind === "charge" && xData ? (
               <ChargeBody
+                key={xData.id}
                 data={xData}
                 cats={cats}
                 onAddCategory={addCat}
