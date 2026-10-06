@@ -890,6 +890,47 @@ async function similarNames(browser) {
   });
 }
 
+// Change vendor: a charge the bank filed under the wrong name (one bank name
+// carrying two subscriptions) moves to its vendor from its own shelf. The
+// shelf then reads the new vendor, marked edited, and Reset puts it back.
+// The rule option lists the charges it would move before it does.
+async function changeVendor(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/transactions?vendor=Chipotle", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    await page.click("[data-drawer-row]"); await shelfIs(page, true); await shelfSettled(page);
+    const line = (sel) => page.evaluate((sel) => { const l = document.querySelector(`${sel} [data-vendor-line]`); return l ? { name: l.querySelector("[data-vendor-name]")?.textContent.trim(), edited: /edited/.test(l.textContent), reset: !!l.querySelector("[data-reset-vendor]"), head: document.querySelector(`${sel} [data-open-vendor]`)?.textContent.trim() } : null; }, sel);
+    const before = await line(shelfSel);
+    record("change vendor", "a charge's shelf says which vendor it is filed under, with Change, and no tag before any move", before && before.name === "Chipotle" && !before.edited, JSON.stringify(before));
+    await page.click(`${shelfSel} [data-change-vendor]`);
+    await page.type(`${shelfSel} [data-vendor-panel] input`, "Whole");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(`${shelfSel} [data-move-vendor]`);
+    await page.click(`${shelfSel} [data-move-vendor]`);
+    const moved = await page.waitForFunction((sel) => /Whole Foods/.test(document.querySelector(`${sel} [data-vendor-name]`)?.textContent ?? ""), { timeout: 8000 }, shelfSel).then(() => true, () => false);
+    const after = await line(shelfSel);
+    record("change vendor", "Move files the charge under the chosen vendor: the shelf's name and line read it, marked edited, with Reset", moved && after.edited && after.reset && /Whole Foods/.test(after.head ?? ""), JSON.stringify(after));
+    await page.click(`${shelfSel} [data-reset-vendor]`);
+    const back = await page.waitForFunction((sel) => /Chipotle/.test(document.querySelector(`${sel} [data-vendor-name]`)?.textContent ?? ""), { timeout: 8000 }, shelfSel).then(() => true, () => false);
+    const reset = await line(shelfSel);
+    record("change vendor", "Reset files it under its bank name's vendor again, with no tag", back && !reset.edited, JSON.stringify(reset));
+
+    // The rule's preview: Netflix's three charges at its price, listed before anything moves.
+    await page.goto(BASE + "/transactions?vendor=Netflix", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    await page.click("[data-drawer-row]"); await shelfIs(page, true); await shelfSettled(page);
+    await page.click(`${shelfSel} [data-change-vendor]`);
+    await page.type(`${shelfSel} [data-vendor-panel] input`, "Spotify");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(`${shelfSel} [data-vendor-rule]`);
+    await page.click(`${shelfSel} [data-vendor-rule]`);
+    const preview = await page.$eval(`${shelfSel} [data-vendor-rule-preview]`, (e) => e.textContent.trim()).catch(() => "");
+    record("change vendor", "choosing 'this and future charges' lists the charges it would move, with a count, before it moves any", /^\d+ charges? so far: /.test(preview), preview);
+    await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-vendor-panel] button`)].find((b) => b.textContent.trim() === "Cancel").click(), shelfSel);
+    if (errs.length) record("change vendor", "page errors", false, errs[0]);
+  });
+}
+
 // Model suggestions: the queue asks on its own when the page loads (a suggestion
 // you must press a button to see is one you mostly don't see), and shows the
 // answer by confidence — sure ones as suggestions, middling ones tagged
@@ -2331,7 +2372,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getDb } from "../src/lib/db";
 import { detectRecurrings } from "../src/lib/core";
-import { applyRecategorize, distinctVendors, listTransactions, merchantSummary, setTransactionCategory } from "../src/lib/queries";
+import { applyRecategorize, distinctVendors, listTransactions, merchantSummary, setTransactionCategory, transactionById } from "../src/lib/queries";
 import { setChargeVendor, createVendorRule, deleteVendorRule, applyVendorRules, ruleMatches } from "../src/lib/vendorMoves";
 
 cleanDbBeforeEach();
@@ -132,4 +132,23 @@ test("a rule moves the bank name's charges at its amount, past and arriving, and
   assert.equal(view("Google One").count, 4);
   assert.equal(view("Google").count, 7);
   assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM charge_vendors").get() as { n: number }).n, 0);
+});
+
+test("the shelves show the move: the charge says its vendor and whose word it is, the bank name's vendor lists the rule", () => {
+  // WHY: a move the owner can't see can't be undone. The charge's shelf
+  // names the vendor and the rule; the vendor it left lists the rule with
+  // what it moved, where Remove brings them back.
+  const { oct3 } = twoGoogles();
+  const before = transactionById(oct3.id)!;
+  assert.equal(before.vendor, "Google");
+  assert.equal(before.moved, null);
+  assert.deepEqual(before.sameAmount.map((c) => c.date), ["2026-10-03"], "the rule's preview: the one $19.99 under Google");
+  const id = createVendorRule("Google", 19.99, "Google One");
+  detectRecurrings();
+  const after = transactionById(oct3.id)!;
+  assert.deepEqual([after.vendor, after.vendorName, after.moved], ["Google One", "Google One", { origin: "rule", ruleId: id }]);
+  assert.deepEqual(
+    (merchantSummary("Google") as { vendorRules: { amount: number; vendorName: string; moved: number }[] }).vendorRules.map((r) => [r.amount, r.vendorName, r.moved]),
+    [[19.99, "Google One", 1]]
+  );
 });

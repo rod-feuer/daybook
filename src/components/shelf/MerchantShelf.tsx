@@ -274,6 +274,88 @@ function SimilarNames({
   );
 }
 
+// Find a vendor by its name or a bank name: the first step of Combine and of
+// Change vendor, one picker for both. A row, Enter or Next picks the top match.
+export function VendorSearch({
+  vendors,
+  exclude,
+  onPick,
+  onCancel,
+  placeholder = "Find a vendor to combine…",
+}: {
+  vendors: Vendor[];
+  placeholder?: string;
+  exclude: string; // the vendor you're on
+  onPick: (merchant: string) => void;
+  onCancel: () => void;
+}) {
+  const [pick, setPick] = useState("");
+  const [showList, setShowList] = useState(false);
+  // Live matches, one row per vendor, by its friendly name (filters on the
+  // name or the raw descriptor).
+  const q = pick.trim().toLowerCase();
+  const matches = q
+    ? vendors
+        .filter((v) => v.merchant !== exclude && (v.displayName.toLowerCase().includes(q) || v.merchant.toLowerCase().includes(q)))
+        .slice(0, 50)
+    : [];
+  const choose = (m?: string) => {
+    const merchant = m ?? matches[0]?.merchant;
+    if (!merchant) return;
+    setShowList(false);
+    onPick(merchant);
+  };
+  return (
+    <>
+      <div className="relative">
+        <input
+          autoFocus
+          value={pick}
+          onChange={(e) => {
+            setPick(e.target.value);
+            setShowList(true);
+          }}
+          onFocus={() => setShowList(true)}
+          onKeyDown={(e) => e.key === "Enter" && choose()}
+          onBlur={() => setTimeout(() => setShowList(false), 150)}
+          placeholder={placeholder}
+          className="w-full rounded-lg border border-[var(--border)] bg-card px-2 py-1"
+        />
+        {showList && matches.length > 0 && (
+          <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-auto rounded-lg border border-[var(--border)] bg-card py-1 shadow-lg">
+            {matches.map((v) => (
+              <li key={v.merchant}>
+                <button
+                  // mousedown (not click) + preventDefault so selecting fires
+                  // before the input's blur closes the list.
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    choose(v.merchant);
+                  }}
+                  className="block w-full px-2 py-2 text-left leading-snug hover:bg-[var(--hover)]"
+                >
+                  {v.displayName}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => choose()}
+          className="shrink-0 rounded-lg border border-[var(--border)] px-2 py-1 hover:bg-card"
+        >
+          Next
+        </button>
+        <button onClick={onCancel} className="text-[var(--muted)] hover:text-[var(--foreground)]">
+          Cancel
+        </button>
+      </div>
+    </>
+  );
+}
+
 // Merge this vendor with another. The only decision surfaced is the resulting
 // NAME — which silently determines the survivor (canonical), so the user never
 // reasons about "primary". Defaults to the cleaner name; a preview shows the
@@ -299,36 +381,19 @@ export function CombineControl({
   onCombine: (loser: string, primary: string, alias?: string, categoryId?: number | null) => void;
   onClose: () => void;
 }) {
-  const [pick, setPick] = useState("");
   const [other, setOther] = useState<CombineVendor | null>(null);
   const [choice, setChoice] = useState<"current" | "other" | "custom">("current");
   const [custom, setCustom] = useState("");
-  const [showList, setShowList] = useState(false); // vendor-picker dropdown open
   // The category to apply to all the combined charges, or "asis" to leave them.
   const [unifyCat, setUnifyCat] = useState<number | "asis">("asis");
 
   const reset = () => {
-    setPick("");
     setOther(null);
     setCustom("");
     setChoice("current");
     setUnifyCat("asis");
-    setShowList(false);
     onClose();
   };
-
-  // Live matches for the custom picker dropdown — one row per vendor, shown by
-  // friendly display name (filters on the name or the raw descriptor).
-  const q = pick.trim().toLowerCase();
-  const matches = q
-    ? vendors
-        .filter(
-          (v) =>
-            v.merchant !== current.merchant &&
-            (v.displayName.toLowerCase().includes(q) || v.merchant.toLowerCase().includes(q))
-        )
-        .slice(0, 50)
-    : [];
 
   // Cleaner = fewer words, then shorter, with a digit penalty (bank descriptors
   // tend to be long, multi-word, and id-laden). Returns true if `a` is cleaner.
@@ -338,11 +403,7 @@ export function CombineControl({
   // split across categories).
   const categoriesDiffer = !!other && current.categoryId !== other.categoryId;
 
-  async function chooseOther(merchant?: string) {
-    // A clicked row passes its canonical merchant; Enter/Next takes the top match.
-    const m = merchant ?? matches[0]?.merchant;
-    if (!m || m === current.merchant || !vendors.some((v) => v.merchant === m)) return;
-    setShowList(false);
+  async function chooseOther(m: string) {
     const o = await fetch(`/api/merchant?name=${encodeURIComponent(m)}`).then((r) => r.json());
     const next: CombineVendor = {
       merchant: m,
@@ -378,53 +439,7 @@ export function CombineControl({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-xs">
       {!other ? (
-        <>
-          <div className="relative">
-            <input
-              autoFocus
-              value={pick}
-              onChange={(e) => {
-                setPick(e.target.value);
-                setShowList(true);
-              }}
-              onFocus={() => setShowList(true)}
-              onKeyDown={(e) => e.key === "Enter" && chooseOther()}
-              onBlur={() => setTimeout(() => setShowList(false), 150)}
-              placeholder="Find a vendor to combine…"
-              className="w-full rounded-lg border border-[var(--border)] bg-card px-2 py-1"
-            />
-            {showList && matches.length > 0 && (
-              <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-auto rounded-lg border border-[var(--border)] bg-card py-1 shadow-lg">
-                {matches.map((v) => (
-                  <li key={v.merchant}>
-                    <button
-                      // mousedown (not click) + preventDefault so selecting fires
-                      // before the input's blur closes the list.
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        chooseOther(v.merchant);
-                      }}
-                      className="block w-full px-2 py-2 text-left leading-snug hover:bg-[var(--hover)]"
-                    >
-                      {v.displayName}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => chooseOther()}
-              className="shrink-0 rounded-lg border border-[var(--border)] px-2 py-1 hover:bg-card"
-            >
-              Next
-            </button>
-            <button onClick={reset} className="text-[var(--muted)] hover:text-[var(--foreground)]">
-              Cancel
-            </button>
-          </div>
-        </>
+        <VendorSearch vendors={vendors} exclude={current.merchant} onPick={chooseOther} onCancel={reset} />
       ) : (
         <>
           <div className="text-[var(--muted)]">Combine into one vendor — name it:</div>
@@ -496,6 +511,51 @@ export function CombineControl({
 }
 
 // Auto vs. edited legibility: shows whether a field holds the system's detected
+
+// Rules that move this vendor's charges at one amount to another vendor (the
+// bank sends Google One as "Google"), made by Change vendor on a charge.
+// Removing one puts the charges it moved back here; two steps, like a split.
+export function VendorRules({ rules, onRemove }: { rules: Summary["vendorRules"]; onRemove: (id: number) => void }) {
+  const [armed, setArmed] = useState<number | null>(null);
+  return (
+    <div data-vendor-rules>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="stat-label">Moved to another vendor</span>
+        <InfoHint text="Every charge under this bank name of exactly this amount is filed under the other vendor: its name, category, totals and plans. Removing the rule brings them back here." />
+      </div>
+      <ul className="flex flex-col gap-2">
+        {rules.map((r) => (
+          <li key={r.id} className="flex items-start justify-between gap-3 text-xs">
+            <span className="min-w-0">
+              <span className="font-medium tabular-nums">{usd(r.amount)}</span>
+              <span className="text-[var(--muted)]"> charges go to </span>
+              {r.vendorName}
+              <span className="block text-[11px] text-[var(--muted)]">
+                {r.moved === 0 ? "none moved yet" : `${r.moved} charge${r.moved === 1 ? "" : "s"} moved`}
+              </span>
+            </span>
+            <button
+              type="button"
+              aria-label={`Remove the rule for ${usd(r.amount)} charges`}
+              onClick={() => {
+                if (armed !== r.id) {
+                  setArmed(r.id);
+                  setTimeout(() => setArmed((cur) => (cur === r.id ? null : cur)), 3000);
+                  return;
+                }
+                setArmed(null);
+                onRemove(r.id);
+              }}
+              className={`tap shrink-0 text-xs ${armed === r.id ? "font-semibold text-[var(--bad)]" : "text-[var(--muted)] hover:text-[var(--bad)]"}`}
+            >
+              {armed === r.id ? (r.moved ? `Bring ${r.moved} back?` : "Confirm remove?") : "Remove"}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 // The vendor's split rules. A rule was invisible unless you found a charge it
 // had split; here it can be read and removed. Remove means what "Undo split"
@@ -623,6 +683,7 @@ export function MerchantBody({
   onCombineMany,
   onCategorizeMany,
   onRemoveSplit,
+  onRemoveVendorRule,
 }: {
   data: Summary;
   cats: Cat[];
@@ -638,6 +699,7 @@ export function MerchantBody({
   onCombineMany: (losers: string[], into?: string) => void; // several similar names into this vendor, or this vendor and the rest into one of them
   onCategorizeMany: (merchants: string[], categoryId: number) => void; // one category for several similar names, kept apart
   onRemoveSplit: (id: number, applied: number) => void;
+  onRemoveVendorRule: (id: number) => void;
   onOpenPlan: (series: string) => void; // one of this vendor's plans, with Back
 }) {
   // "+ New category…" in the Category field: create it here and apply it.
@@ -999,6 +1061,7 @@ export function MerchantBody({
           </Tooltip>
         )}
         {data.splitRules.length > 0 && <SplitRules rules={data.splitRules} onRemove={onRemoveSplit} />}
+        {data.vendorRules.length > 0 && <VendorRules rules={data.vendorRules} onRemove={onRemoveVendorRule} />}
         {/* A plan the detector found and nobody added doesn't count yet: its
             charges show no ↻, and Add is the one verb that changes that. */}
         {data.recurring && !multi && !data.planConfirmed && (

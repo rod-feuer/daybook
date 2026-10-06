@@ -597,6 +597,15 @@ export type ChargeDetail = TransactionRow & {
   // A split rule for this vendor that missed this charge by a price change,
   // with its parts scaled to this amount (see splits.ts).
   splitDrift: SplitDrift | null;
+  // The vendor this charge is filed under: a bank name (open its shelf by
+  // it) and its name. The bank name's vendor unless the charge was moved,
+  // by the owner ("user"), a rule ("rule"), or plan matching ("auto").
+  vendor: string;
+  vendorName: string;
+  moved: { origin: "user" | "rule" | "auto"; ruleId: number | null } | null;
+  // Charges under this bank name at this amount, newest first: what "this
+  // and future charges" would move, shown before it does.
+  sameAmount: { date: string }[];
 };
 export function transactionById(id: number): ChargeDetail | null {
   const db = getDb();
@@ -617,7 +626,9 @@ export function transactionById(id: number): ChargeDetail | null {
   const settings = getRecurringSettings();
   const links = getMerchantLinks();
   // The charge's vendor: where it was moved, else its bank name's.
-  const variants = merchantVariants(vendorName(row as unknown as { merchant: string; hash: string }, getChargeMoves()));
+  const hash = (row as unknown as { hash: string }).hash;
+  const vendor = vendorName({ merchant: row.merchant, hash }, getChargeMoves());
+  const variants = merchantVariants(vendor);
   const scope = vendorScope(variants);
   const scopeT = vendorScope(variants, "t");
   const plan =
@@ -674,6 +685,15 @@ export function transactionById(id: number): ChargeDetail | null {
     byYear: spendByYear(scope.sql, scope.args),
     splitDrift: splitDriftFor(row),
     splitMissed: splitDriftFor(row) != null,
+    vendor,
+    vendorName: merchantDisplayName(vendor, settings, links),
+    moved: (db.prepare("SELECT origin, ruleId FROM charge_vendors WHERE hash = ?").get(hash) as ChargeDetail["moved"] | undefined) ?? null,
+    sameAmount: db
+      .prepare(
+        `SELECT COALESCE(effectiveDate, date) AS date FROM transactions
+         WHERE merchant = ? AND ABS(ABS(amount) - ?) < 0.005 AND hash NOT LIKE '%:s%' ORDER BY date DESC`
+      )
+      .all(row.merchant, Math.abs(row.amount)) as { date: string }[],
   };
 }
 
@@ -1278,6 +1298,16 @@ export function merchantSummary(merchant: string, series?: string | null) {
     priceChange,
     // Split rules acting on this vendor's own descriptors (a part-vendor's
     // rows are all parts, so it lists none).
+    // Rules moving this vendor's bank names' charges at one amount to
+    // another vendor, each with the charges it moved (Remove restores them).
+    vendorRules: (
+      db
+        .prepare(
+          `SELECT r.id, r.amount, r.vendor, (SELECT COUNT(*) FROM charge_vendors cv WHERE cv.ruleId = r.id AND cv.origin = 'rule') AS moved
+           FROM vendor_rules r WHERE r.merchant IN (${ph}) ORDER BY r.id`
+        )
+        .all(...variants) as { id: number; amount: number; vendor: string; moved: number }[]
+    ).map((r) => ({ ...r, vendorName: merchantDisplayName(r.vendor, settings, links) })),
     splitRules: splitRulesFor(
       (db.prepare(`SELECT DISTINCT merchant FROM transactions WHERE merchant IN (${ph}) AND hash NOT LIKE '%:s%'`).all(...variants) as { merchant: string }[]).map((r) => r.merchant)
     ),
