@@ -9,7 +9,8 @@ import { useNewCategory } from "@/components/NewCategoryOption";
 import { useMutation } from "@/components/useMutation";
 import { postJson } from "@/lib/http";
 import type { ChargeDetail } from "@/lib/queries";
-import type { Cat } from "@/components/shelf/types";
+import type { Cat, Vendor } from "@/components/shelf/types";
+import { VendorSearch } from "@/components/shelf/MerchantShelf";
 import {
   ByYear,
   CategoryCaption,
@@ -17,6 +18,7 @@ import {
   MembershipPill,
   PropertyCard,
   ShelfRow,
+  StateTag,
 } from "@/components/shelf/parts";
 
 export function ChargeHeader({ data, onOpenVendor, onSeparate }: { data: ChargeDetail | null; onOpenVendor: () => void; onSeparate: () => void }) {
@@ -88,9 +90,15 @@ export function ChargeBody({
   onOpenVendor,
   onMakeRecurring,
   onOpenCharge,
+  vendors,
+  onChangeVendor,
+  onRemoveVendorRule,
 }: {
   data: ChargeDetail;
   cats: Cat[];
+  vendors: Vendor[];
+  onChangeVendor: (vendor: string | null, rule: boolean) => void; // null: Reset
+  onRemoveVendorRule: (id: number) => void;
   onAddCategory: (c: Cat) => void;
   onSetCategory: (categoryId: number | null) => void;
   onSetDate: (effectiveDate: string | null) => void;
@@ -167,6 +175,7 @@ export function ChargeBody({
         {excluded && <span>not counted in totals</span>}
         {isParent && <span>split · {data.splitParts} parts</span>}
       </div>
+      {!isParent && <VendorLine data={data} vendors={vendors} onChange={onChangeVendor} onRemoveRule={onRemoveVendorRule} />}
 
       <div>
         <div className="stat-label mb-2">Note</div>
@@ -378,5 +387,108 @@ export function SplitDialog({
       </div>
     </div>,
     document.body
+  );
+}
+
+// Change vendor: the bank sends two subscriptions under one name ("Google"
+// for Google One and for Workspace), so this charge can belong to another
+// vendor than its bank name's. The line says which vendor it's filed under
+// and whose word that is: no tag for the bank name or plan matching's guess,
+// "edited" for the owner's move (Reset undoes it) or a rule's (removed here,
+// or on the bank name's vendor shelf).
+function VendorLine({
+  data,
+  vendors,
+  onChange,
+  onRemoveRule,
+}: {
+  data: ChargeDetail;
+  vendors: Vendor[];
+  onChange: (vendor: string | null, rule: boolean) => void;
+  onRemoveRule: (id: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState<string | null>(null);
+  const [rule, setRule] = useState(false);
+  const reset = () => {
+    setOpen(false);
+    setTo(null);
+    setRule(false);
+  };
+  const origin = data.moved?.origin;
+  const toName = to ? (vendors.find((v) => v.merchant === to)?.displayName ?? to) : "";
+  const amount = usd(Math.abs(data.amount));
+  const shown = data.sameAmount.slice(0, 6);
+  return (
+    <div className="-mt-2 flex flex-col gap-2 text-[11px] text-[var(--muted)]" data-vendor-line>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span>Vendor</span>
+        <span className="font-medium text-[var(--foreground)]" data-vendor-name>{data.vendorName}</span>
+        {(origin === "user" || origin === "rule") && <StateTag edited />}
+        {origin === "rule" && <span>by your rule for {amount} “{data.merchant}” charges</span>}
+        {!open && (
+          <button type="button" onClick={() => setOpen(true)} className="tap underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)]" data-change-vendor>
+            Change
+          </button>
+        )}
+        {origin === "user" && !open && (
+          <button type="button" onClick={() => onChange(null, false)} className="tap underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)]" data-reset-vendor>
+            Reset
+          </button>
+        )}
+        {origin === "rule" && data.moved?.ruleId != null && !open && (
+          <button type="button" onClick={() => onRemoveRule(data.moved!.ruleId!)} className="tap underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)]">
+            Remove rule
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-xs text-[var(--foreground)]" data-vendor-panel>
+          {!to ? (
+            <VendorSearch vendors={vendors} exclude={data.vendor} onPick={setTo} onCancel={reset} placeholder="Find the vendor this charge is…" />
+          ) : (
+            <>
+              <div className="text-[var(--muted)]">Move to {toName}:</div>
+              <label className="flex items-center gap-2">
+                <input type="radio" checked={!rule} onChange={() => setRule(false)} />
+                <span>Just this charge</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" checked={rule} onChange={() => setRule(true)} data-vendor-rule />
+                <span className="min-w-0">
+                  This and future “{data.merchant}” charges of {amount}
+                </span>
+              </label>
+              {/* What the rule moves, before it does: a rule touches charges
+                  you can't see from here. */}
+              {rule && (
+                <div className="flex flex-col gap-1 border-t border-dashed border-[var(--border)] pt-2 text-[var(--muted)]" data-vendor-rule-preview>
+                  <span>
+                    {data.sameAmount.length} charge{data.sameAmount.length === 1 ? "" : "s"} so far:{" "}
+                    {shown.map((c) => shortDate(c.date)).join(", ")}
+                    {data.sameAmount.length > shown.length ? `, and ${data.sameAmount.length - shown.length} more` : ""}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button onClick={reset} className="rounded-lg px-2 py-1 text-[var(--muted)]">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    onChange(to, rule);
+                    reset();
+                  }}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1 font-medium text-white"
+                  data-move-vendor
+                >
+                  Move
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
