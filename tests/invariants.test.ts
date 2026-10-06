@@ -3635,6 +3635,19 @@ test("similar names: one place's bank spellings match; a shared short start does
   assert.deepEqual(names("Puccini S Pizza"), ["Puccini'spizzapacarmel In"]);
 });
 
+// WHY: "The Roku Channel" became "ROKU INC" on the statement. The names are
+// compared on their first word, and "The" is no vendor's first word: Roku's
+// own subscription was never offered to combine with it.
+test("similar names: a leading The, A or An isn't the name", () => {
+  for (const m of ["Roku", "The Roku Channel", "Roku, Inc", "The Home Depot", "The Container Store", "A Cut Above", "Cutco"])
+    tx(m, { amount: -20, date: "2026-09-01", categoryId: CAT });
+  const names = (m: string) => similarVendors(m).map((v) => v.merchant).sort();
+  assert.deepEqual(names("Roku"), ["Roku, Inc", "The Roku Channel"]);
+  assert.deepEqual(names("The Roku Channel"), ["Roku", "Roku, Inc"], "and the other way");
+  assert.deepEqual(names("The Home Depot"), [], "sharing only a The is not a match");
+  assert.deepEqual(names("A Cut Above"), [], "Cut is three letters: too short to stand for a vendor");
+});
+
 test("only a plan the user added anchors a stray: a detected guess draws nothing", () => {
   // The detector read Charleston's, a restaurant, as a quarterly bill, and
   // never asked; "Chatham" (0.82 on a shared "Cha", the same weeks, a similar
