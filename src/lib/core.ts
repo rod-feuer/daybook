@@ -19,7 +19,7 @@ import {
   countedPlanId,
 } from "./queries";
 import type { Recurring } from "./types";
-import { getPlanMatches } from "./planMatch";
+import { migrateCrossVendorPlans } from "./vendorMoves";
 import { CADENCE_DAYS, medianGap } from "./cadence";
 import { MIN_ELAPSED_DAYS } from "./budgetOutlook";
 
@@ -580,6 +580,7 @@ export function detectRecurrings(): Recurring[] {
 
 function rebuildRecurrings(): Recurring[] {
   const db = getDb();
+  migrateCrossVendorPlans();
   // Same calendar and same rows as every reader of the result: a charge lives in
   // its effective month (the user's overlay), and an excluded charge — a
   // transfer, a reimbursed one-off, a split parent whose parts count instead —
@@ -654,9 +655,6 @@ function rebuildRecurrings(): Recurring[] {
   }
   const excluded = getRecurringTxExclusions(); // charges the user took out
   const included = getRecurringTxInclusions(); // charges the user put in: hash → plan
-  // Charges matched to another vendor's plan by score (planMatch.ts), joined
-  // like a pin; the owner's own pin or exclusion of the same charge wins.
-  for (const [hash, plan] of getPlanMatches()) if (!included.has(hash) && !excluded.has(hash)) included.set(hash, plan);
   const rowByHash = new Map(rows.map((r) => [r.hash, r]));
   const settings = getRecurringSettings();
   const created = new Set<string>();
@@ -946,7 +944,6 @@ function rebuildRecurrings(): Recurring[] {
   );
   // A confirmed plan's charges are what the detector grouped for it this time.
   const keepCharge = db.prepare("INSERT OR REPLACE INTO plan_charges (hash, key) VALUES (?, ?)");
-  const confirmedKeys = new Set(confirmed.map((p) => p.key));
   const confirmedByCanon = new Map<string, typeof confirmed>();
   for (const p of confirmed) {
     const canon = canonicalMerchant(p.vendor, links);
@@ -1012,22 +1009,6 @@ function rebuildRecurrings(): Recurring[] {
     // start their own plan below — and so do the plan's charges at their
     // amount that post off its day (the 22nd's, once its mark is lifted),
     // which the catch-all took only because nothing else had.
-    // A charge pinned (or matched) into another vendor's confirmed plan
-    // leaves the plan its own vendor's pass put it in: it joins that plan at
-    // commit. Left here, it was counted twice, or worse, its key was adopted
-    // below as a plan the owner started: the Oct 3 Google One charge kept
-    // Workspace's plan dated the 3rd, at 6 charges.
-    const mineKeys = new Set(canons.flatMap((c) => (confirmedByCanon.get(c) ?? []).map((k) => k.key)));
-    const elsewhere = (t: Tx) => {
-      const k = included.get(t.hash);
-      return k != null && confirmedKeys.has(k) && !mineKeys.has(k);
-    };
-    for (const p of chosen) {
-      if (!p.txs.some(elsewhere)) continue;
-      p.txs = p.txs.filter((t) => !elsewhere(t));
-      p.events = p.txs.map((t) => ({ date: t.date, amount: t.amount }));
-    }
-    for (let i = chosen.length - 1; i >= 0; i--) if (!chosen[i].events.length) chosen.splice(i, 1);
     let emitted = new Set(chosen.map((p) => p.key));
     const bucket = (t: Tx) => Math.min(Number(t.date.slice(8, 10)), 28);
     for (const p of chosen) {

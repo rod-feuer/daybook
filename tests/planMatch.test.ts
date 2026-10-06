@@ -120,3 +120,45 @@ test("charges joined to a plan kept alive by hand land in that one plan, not a t
   assert.equal(rows[0].count, 4, "holding its own charge and the three matched ones");
   for (const id of ids) assert.equal(planOf(id), "Streamclub");
 });
+
+test("a confident match files the charge under the bill's vendor, as auto; Not in plan sends it back and only asks after", () => {
+  // WHY: the match is the system's guess, so it is filed with no tag, and the
+  // owner's "Not in plan" must undo all of it: the vendor too, or the charge
+  // would sit under Google One in no plan.
+  twoGoogles();
+  const id = newCharge();
+  detectRecurrings();
+  applyPlanMatches(TODAY);
+  detectRecurrings();
+  const t = transactionById(id)!;
+  assert.deepEqual([t.vendorName, t.moved?.origin], ["Google One", "auto"]);
+  setTransactionRecurringExcluded(id, true);
+  detectRecurrings();
+  assert.equal(transactionById(id)!.vendor, "Google", "back under its bank name");
+  assert.deepEqual(scorePlanMatches(TODAY).map((m) => m.band), ["suggest"], "and asked about, never filed again on its own");
+  assert.equal(applyPlanMatches(TODAY), 0);
+});
+
+test("the old way's matches and cross-vendor pins become moves, once, with the same plans", () => {
+  // WHY: the owner's data already holds #296's matches (Fandango) and a pin
+  // (Google One's Oct 3 charge). They must keep meaning what they meant,
+  // filed under the bill's vendor, without a second run changing anything.
+  twoGoogles();
+  const matched = newCharge();
+  const pinned = newCharge({ date: "2026-09-04", amount: -19.99 });
+  const hashOf = (id: number) => (getDb().prepare("SELECT hash FROM transactions WHERE id = ?").get(id) as { hash: string }).hash;
+  getDb().prepare("INSERT INTO plan_matches (hash, plan, score) VALUES (?, 'Google One', 0.97)").run(hashOf(matched));
+  getDb().prepare("INSERT INTO recurring_tx_inclusions (hash, plan) VALUES (?, 'Google One')").run(hashOf(pinned));
+  detectRecurrings();
+  const moves = () => getDb().prepare("SELECT hash, vendor, origin FROM charge_vendors ORDER BY origin").all();
+  assert.deepEqual(moves(), [
+    { hash: hashOf(matched), vendor: "Google One", origin: "auto" },
+    { hash: hashOf(pinned), vendor: "Google One", origin: "user" },
+  ]);
+  assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM plan_matches").get() as { n: number }).n, 0);
+  assert.deepEqual([planOf(matched), planOf(pinned)], ["Google One", "Google One"]);
+  const plan = getDb().prepare("SELECT count FROM recurrings WHERE merchant = 'Google'").get() as { count: number };
+  assert.equal(plan.count, 5, "Workspace keeps its own five");
+  detectRecurrings();
+  assert.equal(moves().length, 2, "a second run finds nothing to migrate");
+});
