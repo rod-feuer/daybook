@@ -92,6 +92,7 @@ export type Membership = { kind: "charge" | "vendor"; onToggle: () => void; edit
 export function ShelfRow({
   date,
   name,
+  meta,
   pill,
   amount,
   sign,
@@ -108,6 +109,9 @@ export function ShelfRow({
 }: {
   date: string;
   name?: string; // omitted when every row in the list would say the same thing
+  // What varies between one vendor's charges (the bank's name for each, or
+  // its category): a caption, not a name, so it never reads as another vendor.
+  meta?: string;
   pill?: string; // the day a plan bills, when a vendor carries several
   amount: number;
   sign?: boolean;
@@ -159,6 +163,11 @@ export function ShelfRow({
               className={`truncate font-medium ${muted ? "text-[var(--muted)]" : ""}`}
             >
               {name}
+            </Tooltip>
+          )}
+          {meta && (
+            <Tooltip label={meta} className="truncate text-[var(--muted)]">
+              {meta}
             </Tooltip>
           )}
         </span>

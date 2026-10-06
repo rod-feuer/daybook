@@ -801,7 +801,7 @@ export function MerchantBody({
             <ShelfRow
               key={r.id}
               date={r.date}
-              name={rowName(rows, r)}
+              meta={rowName(rows, r)}
               pill={multi ? (r.planDay ?? undefined) : undefined}
               amount={r.amount}
               muted={r.excluded === 1}
