@@ -874,8 +874,10 @@ test("a borderline name match surfaces as a low-confidence suggestion", () => {
 
 test("multiple stray descriptors of one vendor collapse into a single suggestion", () => {
   // The bill's charges on today's day of month, so the strays (today and
-  // yesterday) post on its day, as a renamed bill does, in any month.
-  const [, last, prior] = lastMonthlyDates(3, Number(daysAgo(0).slice(8, 10)));
+  // yesterday) post on its day, as a renamed bill does, in any month. At most
+  // the 28th: a bill on the 29th-31st posts earlier in a short month, which
+  // the fixture would skip, and a skipped month is no bill.
+  const [, last, prior] = lastMonthlyDates(3, Math.min(28, Number(daysAgo(0).slice(8, 10))));
   const rid = Number(
     getDb()
       .prepare(

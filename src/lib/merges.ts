@@ -12,7 +12,7 @@ import {
   merchantDisplayName,
   confirmedKey,
 } from "./queries";
-import { CADENCE_DAYS, type Cadence } from "./cadence";
+import { CADENCE_DAYS, monthDayGap, type Cadence } from "./cadence";
 
 // US state codes as normalizeMerchant title-cases them (e.g. "IN" -> "In").
 const STATES = new Set(
@@ -229,8 +229,7 @@ export function recurringMatchSuggestions(exclude: Set<string>): MergeSuggestion
         // after the mortgage's 1st.
         if (r.cadence === "monthly") {
           const day = r.day ?? Number(r.lastDate.slice(8, 10)); // a plan without a stored day: its last charge's
-          const d = Math.abs(Number(c.d.slice(8, 10)) - day);
-          if (Math.min(d, 31 - d) > 3) continue;
+          if (monthDayGap(c.d, day) > 3) continue;
         }
         // The card the bill is paid from, unless the names agree outright.
         if (affinity < NAME_MATCH && r.accounts != null && !r.accounts.split(",").includes(c.account)) continue;
