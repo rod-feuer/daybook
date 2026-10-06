@@ -1,6 +1,7 @@
+import { applyVendorRules } from "./vendorMoves";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureTxDescriptor } from "./db";
+import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureChargeVendors, ensureTxDescriptor } from "./db";
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
 import { applyPlanMatches } from "./planMatch";
@@ -210,11 +211,12 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   ensureRecurringTxExclusions(db);
   ensureRecurringTxInclusions(db);
   ensurePlanCharges(db);
+  ensureChargeVendors(db);
   const rekeyRow = db.prepare("UPDATE transactions SET hash = @to WHERE hash = @from");
   const rekeyParts = db.prepare(
     "UPDATE transactions SET hash = @to || substr(hash, length(@from) + 1) WHERE hash LIKE @from || ':s%'"
   );
-  const rekeyRefs = ["recurring_tx_exclusions", "recurring_tx_inclusions", "plan_charges"].map((t) =>
+  const rekeyRefs = ["recurring_tx_exclusions", "recurring_tx_inclusions", "plan_charges", "charge_vendors"].map((t) =>
     db.prepare(`UPDATE ${t} SET hash = @to || substr(hash, length(@from) + 1) WHERE hash = @from OR hash LIKE @from || ':s%'`)
   );
   // Names in use before this pull: on a charge, or in a combine.
@@ -370,6 +372,8 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   const items = await fetchPlaidTransactions(start, end);
   const result = importPlaidTransactions(items);
   const split = applySplitRules();
+  // New charges a vendor rule moves (vendorMoves.ts), before plans are found.
+  applyVendorRules();
   if (result.inserted > 0 || result.updated > 0) {
     detectRecurrings();
     // New charges a sibling vendor's plan claims by score; rebuild once to join them.

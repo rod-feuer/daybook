@@ -145,6 +145,30 @@ function init(db: Database.Database) {
   ensurePlanCharges(db);
   ensureAccounts(db);
   ensurePlanMatches(db);
+  ensureChargeVendors(db);
+}
+
+// A charge's own vendor, where it isn't its bank name's (chargeVendors.ts):
+// the bank sends Google One and Google Workspace both as "Google". `vendor`
+// is a bank name, resolved through merchant_links when read, so a charge
+// moved to a vendor follows it into a later Combine. origin: 'user' (the
+// owner's Change vendor), 'rule' (a vendor rule's), 'auto' (plan matching).
+// A rule moves the bank name's charges at one amount, to the cent.
+export function ensureChargeVendors(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS charge_vendors (
+      hash TEXT PRIMARY KEY,
+      vendor TEXT NOT NULL,
+      origin TEXT NOT NULL CHECK (origin IN ('user','rule','auto')),
+      ruleId INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS vendor_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      merchant TEXT NOT NULL,
+      amount REAL NOT NULL,
+      vendor TEXT NOT NULL
+    );
+  `);
 }
 
 // Charges joined to another vendor's plan by score (planMatch.ts), and the

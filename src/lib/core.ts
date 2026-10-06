@@ -1,3 +1,4 @@
+import { getChargeMoves, vendorName } from "./chargeVendors";
 import { variableStillToCome, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS } from "./forecast";
 import { seriesKey, seriesVendor, isSeriesKey, dayLabel, amountLabel } from "./series";
 import { merchantKey } from "./merchant";
@@ -600,10 +601,13 @@ function rebuildRecurrings(): Recurring[] {
 
   // Group by canonical merchant, so user-linked descriptors (e.g. a gas bill
   // whose payment descriptor changed) form a single recurring.
+  // A charge moved to another vendor (chargeVendors.ts) is grouped with that
+  // vendor's charges, as if the bank had named it so.
   const links = getMerchantLinks();
+  const moves = getChargeMoves();
   const byCanon = new Map<string, typeof rows>();
   for (const r of rows) {
-    const key = canonicalMerchant(r.merchant, links);
+    const key = canonicalMerchant(vendorName(r, moves), links);
     const arr = byCanon.get(key) ?? [];
     arr.push(r);
     byCanon.set(key, arr);
@@ -1112,7 +1116,7 @@ function rebuildRecurrings(): Recurring[] {
       // would otherwise have joined a 2022 plan. A charge that joined stays
       // joined (its membership is kept), so it doesn't leave as it ages.
       const taken = new Set(chosen.flatMap((p) => p.txs.map((t) => t.hash)));
-      const canonOf = (t: Tx) => canonicalMerchant(t.merchant, links);
+      const canonOf = (t: Tx) => canonicalMerchant(vendorName(t, moves), links);
       const firstSeen = new Map<string, string>();
       for (const t of vendorRows) {
         const c = canonOf(t);

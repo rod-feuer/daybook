@@ -1,3 +1,4 @@
+import { getChargeMoves, vendorName } from "./chargeVendors";
 import type Database from "better-sqlite3";
 import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanMatches as ensureTables } from "./db";
 import { nameAffinity } from "./similarity";
@@ -129,6 +130,7 @@ export function scorePlanMatches(today = new Date().toISOString().slice(0, 10)):
   const misfiled = (c: { recurringId: number | null; amount: number }) =>
     c.recurringId == null || Math.abs(c.amount - median(c.recurringId)) > Math.abs(median(c.recurringId)) * 0.25;
   const links = getMerchantLinks();
+  const moves = getChargeMoves();
   const size = new Map(
     (db.prepare("SELECT merchant, COUNT(*) AS n FROM transactions GROUP BY merchant").all() as { merchant: string; n: number }[]).map((r) => [r.merchant, r.n])
   );
@@ -137,7 +139,7 @@ export function scorePlanMatches(today = new Date().toISOString().slice(0, 10)):
   for (const c of charges) {
     if (!misfiled(c)) continue; // in a plan, at its price
     if ((size.get(c.merchant) ?? 0) < 3) continue; // the merge queue's question
-    const own = merchantKey(canonicalMerchant(c.merchant, links));
+    const own = merchantKey(canonicalMerchant(vendorName(c, moves), links));
     const fits: (PlanMatch & { sameCard: boolean; exact: boolean; gap: number })[] = [];
     for (const p of all) {
       if (merchantKey(p.vendor) === own) continue; // its own vendor's plans are the detector's
