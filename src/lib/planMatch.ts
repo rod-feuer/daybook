@@ -1,9 +1,10 @@
 import { getChargeMoves, vendorName } from "./chargeVendors";
 import type Database from "better-sqlite3";
-import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanMatches as ensureTables } from "./db";
+import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensureChargeVendors, ensurePlanMatches as ensureTables } from "./db";
 import { nameAffinity } from "./similarity";
 import { merchantKey } from "./merchant";
 import { canonicalMerchant, getMerchantLinks } from "./queries";
+import { setChargeVendor } from "./vendorMoves";
 
 // Cross-vendor plan matching. A bill's charges can arrive under another of
 // the household's vendors: the bank renamed the descriptor and Plaid cleaned
@@ -18,7 +19,8 @@ import { canonicalMerchant, getMerchantLinks } from "./queries";
 // month and the card choose the plan. Two cut-offs:
 //   auto    the names agree, the amount is to the cent, the day within one,
 //           the same card, and the plan has no other charge that cycle: the
-//           charge joins the plan (shown as auto; "Not in plan" undoes it).
+//           charge is filed under the plan's vendor (chargeVendors.ts), and
+//           so joins its plan (shown as auto; "Not in plan" undoes it).
 //   suggest a looser match, offered for one tap in the review queue.
 // Below both, nothing. Calibrated on the owner's history (2026-10-05): name
 // alone at 0.8 let Culver's in as "Summers Of Franklin", and amount and day
@@ -37,16 +39,8 @@ const WINDOW_DAYS = 120; // only recent charges are matched; history stays as it
 export function ensurePlanMatches(db: Database.Database) {
   ensureRecurringTxExclusions(db);
   ensureRecurringTxInclusions(db);
+  ensureChargeVendors(db);
   ensureTables(db);
-}
-
-// The automatic matches, for the detector: hash → plan key. A charge the owner
-// pinned or took out is theirs, and wins over these.
-export function getPlanMatches(): Map<string, string> {
-  const db = getDb();
-  ensurePlanMatches(db);
-  const rows = db.prepare("SELECT hash, plan FROM plan_matches").all() as { hash: string; plan: string }[];
-  return new Map(rows.map((r) => [r.hash, r.plan]));
 }
 
 export type PlanMatch = {
@@ -110,7 +104,8 @@ export function scorePlanMatches(today = new Date().toISOString().slice(0, 10)):
        WHERE t.amount < 0 AND t.excluded = 0 AND t.pending = 0
          AND t.hash NOT LIKE '%:s%' AND COALESCE(t.effectiveDate, t.date) >= ?
          AND t.hash NOT IN (SELECT hash FROM recurring_tx_inclusions)
-         AND t.hash NOT IN (SELECT hash FROM plan_match_dismissals)`
+         AND t.hash NOT IN (SELECT hash FROM plan_match_dismissals)
+         AND t.hash NOT IN (SELECT hash FROM charge_vendors)`
     )
     .all(since) as { id: number; hash: string; date: string; merchant: string; descriptor: string | null; amount: number; account: string; recurringId: number | null; markedOut: number }[];
   if (!charges.length) return [];
@@ -177,15 +172,16 @@ export function scorePlanMatches(today = new Date().toISOString().slice(0, 10)):
   return out;
 }
 
-// Record the automatic matches (the caller re-runs the detector when any are
-// new). Returns how many were added.
+// File the automatic matches under their plan's vendor ('auto': no tag, and
+// "Not in plan" undoes it); the detector then finds the charge in that plan
+// by its ordinary rules. The caller re-runs the detector when any moved.
+// Returns how many moved.
 export function applyPlanMatches(today?: string): number {
   const db = getDb();
   ensurePlanMatches(db);
-  const add = db.prepare("INSERT OR IGNORE INTO plan_matches (hash, plan, score) VALUES (?, ?, ?)");
   let n = 0;
   db.transaction(() => {
-    for (const m of scorePlanMatches(today)) if (m.band === "auto") n += add.run(m.hash, m.plan, m.score).changes;
+    for (const m of scorePlanMatches(today)) if (m.band === "auto" && setChargeVendor(m.hash, m.vendor, "auto")) n++;
   })();
   return n;
 }

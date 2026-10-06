@@ -1,6 +1,7 @@
-import { getDb } from "./db";
+import { getDb, ensurePlanMatches, ensureRecurringTxInclusions } from "./db";
 import { getChargeMoves, vendorScope } from "./chargeVendors";
-import { merchantVariants } from "./queries";
+import { canonicalMerchant, getMerchantLinks, merchantVariants } from "./queries";
+import { merchantKey } from "./merchant";
 
 // Moving a charge to another vendor, and the rules that move a bank name's
 // charges at one amount. Precedence: the owner's own move, then a rule, then
@@ -126,4 +127,37 @@ export function applyVendorRules(): number {
       if (setChargeVendor(m.hash, r.vendor, "rule", r.id)) n++;
     }
   return n;
+}
+
+// Once, from the way a charge used to join another vendor's plan (#296): a
+// scored match (plan_matches) or the owner's pin into that plan. Both said the
+// charge was the other vendor's; now that is said by moving the charge. A
+// match becomes plan matching's move ('auto'); a pin, the owner's ('user'),
+// and stays as their In plan. Idempotent: it finds nothing the second time.
+export function migrateCrossVendorPlans() {
+  const db = getDb();
+  ensurePlanMatches(db);
+  ensureRecurringTxInclusions(db);
+  getChargeMoves(); // the table, on the live connection
+  const links = getMerchantLinks();
+  const vendorOfKey = db.prepare("SELECT vendor FROM plans WHERE key = ?");
+  const matches = db.prepare("SELECT hash, plan FROM plan_matches").all() as { hash: string; plan: string }[];
+  for (const m of matches) {
+    const p = vendorOfKey.get(m.plan) as { vendor: string } | undefined;
+    if (p) setChargeVendor(m.hash, p.vendor, "auto");
+  }
+  if (matches.length) db.prepare("DELETE FROM plan_matches").run();
+  const moves = getChargeMoves();
+  const vendorKey = (name: string) => {
+    const c = canonicalMerchant(name, links);
+    return merchantKey(c) || c;
+  };
+  const pins = db
+    .prepare(
+      `SELECT i.hash, t.merchant, p.vendor FROM recurring_tx_inclusions i
+       JOIN transactions t ON t.hash = i.hash JOIN plans p ON p.key = i.plan`
+    )
+    .all() as { hash: string; merchant: string; vendor: string }[];
+  for (const pin of pins)
+    if (vendorKey(moves.get(pin.hash) ?? pin.merchant) !== vendorKey(pin.vendor)) setChargeVendor(pin.hash, pin.vendor, "user");
 }

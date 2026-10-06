@@ -782,9 +782,13 @@ export function setTransactionRecurringExcluded(id: number, excluded: boolean) {
   if (!row) return;
   if (excluded) {
     db.prepare("INSERT OR IGNORE INTO recurring_tx_exclusions (hash) VALUES (?)").run(row.hash);
-    // Out means out: a charge the user once put in is no longer pinned in.
+    // Out means out: a charge the user once put in is no longer pinned in,
+    // and one plan matching filed under another vendor's plan goes back to
+    // its bank name (it stays a suggestion, never filed again on its own).
     ensureRecurringTxInclusions(db);
     db.prepare("DELETE FROM recurring_tx_inclusions WHERE hash = ?").run(row.hash);
+    getChargeMoves(); // the table, on the live connection
+    db.prepare("DELETE FROM charge_vendors WHERE hash = ? AND origin = 'auto'").run(row.hash);
   } else db.prepare("DELETE FROM recurring_tx_exclusions WHERE hash = ?").run(row.hash);
 }
 
