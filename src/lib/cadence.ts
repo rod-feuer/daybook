@@ -57,3 +57,20 @@ export function medianGap(gaps: number[]): number {
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
+
+// Days between a charge and the nearest posting of a monthly bill on `day`:
+// in the charge's month, the one before, or the one after. A bill on the 31st
+// posts on the 30th in a 30-day month, and Feb 28 is one day from the 1st,
+// which counting every month as 31 days put four days apart.
+export function monthDayGap(iso: string, day: number): number {
+  const t = Date.parse(iso + "T00:00:00Z");
+  const y = Number(iso.slice(0, 4));
+  const m = Number(iso.slice(5, 7)) - 1;
+  let best = Infinity;
+  for (const k of [-1, 0, 1]) {
+    const last = new Date(Date.UTC(y, m + k + 1, 0)).getUTCDate();
+    const due = Date.UTC(y, m + k, Math.min(day, last));
+    best = Math.min(best, Math.abs(t - due) / 86_400_000);
+  }
+  return best;
+}

@@ -5,6 +5,7 @@ import { nameAffinity } from "./similarity";
 import { merchantKey } from "./merchant";
 import { canonicalMerchant, getMerchantLinks } from "./queries";
 import { setChargeVendor } from "./vendorMoves";
+import { monthDayGap } from "./cadence";
 
 // Cross-vendor plan matching. A bill's charges can arrive under another of
 // the household's vendors: the bank renamed the descriptor and Plaid cleaned
@@ -59,12 +60,6 @@ export type PlanMatch = {
 
 type Plan = { id: number; key: string; vendor: string; amount: number; day: number; names: string[]; accounts: Set<string>; dates: string[] };
 
-const dom = (iso: string) => Number(iso.slice(8, 10));
-// Days apart on a month's clock: the 30th and the 1st are two apart.
-const dayGap = (a: number, b: number) => {
-  const d = Math.abs(a - b);
-  return Math.min(d, 31 - d);
-};
 const daysBetween = (a: string, b: string) => Math.abs(Date.parse(a + "T00:00:00Z") - Date.parse(b + "T00:00:00Z")) / 86_400_000;
 
 function plans(db: Database.Database): Plan[] {
@@ -140,7 +135,7 @@ export function scorePlanMatches(today = new Date().toISOString().slice(0, 10)):
       if (merchantKey(p.vendor) === own) continue; // its own vendor's plans are the detector's
       const off = Math.abs(c.amount - p.amount);
       if (off > Math.abs(p.amount) * 0.01 + 0.005) continue;
-      const gap = dayGap(dom(c.date), p.day);
+      const gap = monthDayGap(c.date, p.day);
       if (gap > 3) continue;
       const score = Math.max(...p.names.map((n) => Math.max(nameAffinity(c.merchant, n), c.descriptor ? nameAffinity(c.descriptor, n) : 0)));
       if (score < SUGGEST_NAME) continue;
