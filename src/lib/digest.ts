@@ -15,6 +15,7 @@ import {
 } from "./queries";
 import { billDelta, billStatus } from "./bills";
 import { budgetOutlook, budgetSpent, isOverBudget } from "./budgetOutlook";
+import { rangeAgainstBudget } from "./verdict";
 import { categorizeSuggestions } from "./categorizeSuggest";
 import { allMergeSuggestions } from "./merges";
 import { nameCleanupSuggestions } from "./nameCleanup";
@@ -247,14 +248,14 @@ function headline(today: string): { text: string; tone: Tone; state: { key: stri
   if (!b || b.total <= 0) return { text: `${dollars(d.expenses)} spent so far in ${name}.`, tone: "neutral", state: null, flipped: false };
   if (b.projected == null)
     return { text: `${dollars(b.spent)} of your ${dollars(b.total)} budget used. Too early to project ${name}.`, tone: "neutral", state: null, flipped: false };
-  const o = budgetOutlook(b.total, b.projected, true);
+  const o = budgetOutlook(b.total, b.projected, true, b.range);
   const key = `verdict:${month}`;
   const db = getDb();
   ensureDigestSent(db);
   const before = (db.prepare("SELECT value FROM digest_sent WHERE key = ?").get(key) as { value: number | null } | undefined)?.value;
   const moved = before != null && before !== KIND_VALUE[o.kind];
   const lead = before == null ? "On pace" : moved ? "Now on pace" : "Still on pace";
-  const tail = o.kind === "on" ? "on budget" : `${dollars(o.delta)} ${o.kind} budget`;
+  const tail = b.range ? rangeAgainstBudget(b.total, b.range) : o.kind === "on" ? "on budget" : `${dollars(o.delta)} ${o.kind} budget`;
   const tone: Tone = o.kind === "over" ? "bad" : o.kind === "under" ? "good" : "neutral";
   return { text: `${lead} to finish ${name} ${tail}.`, tone, state: { key, value: KIND_VALUE[o.kind] }, flipped: moved && o.kind === "over" };
 }

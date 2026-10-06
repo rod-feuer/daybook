@@ -496,11 +496,29 @@ async function dashboardAnatomy(browser) {
     const aligned = await page.evaluate(() => { const cards = [...document.querySelectorAll(".card")]; const chart = cards.find((c) => /Spending this month/.test(c.textContent))?.getBoundingClientRect(); const cat = cards.find((c) => /Spending by category/.test(c.textContent))?.getBoundingClientRect(); const title = [...document.querySelectorAll("h3")].find((h) => /Spending by category/.test(h.textContent))?.getBoundingClientRect(); const label = document.querySelector("[data-budget-panel] .stat-label")?.getBoundingClientRect(); const cell = document.querySelector("[data-summary] [data-figure-pair]")?.parentElement?.getBoundingClientRect(); const figs = [...document.querySelectorAll("[data-summary] [data-figure]")].map((e) => e.getBoundingClientRect()); if (!chart || !cat || !title || !label || !cell || figs.length !== 3) return null; return { line: Math.round(cell.right + 12 - (chart.right + cat.left) / 2), firstFig: Math.round(figs[0].left - (chart.left + 24)), lastFigInside: figs[2].right <= chart.right, text: Math.round(label.left - title.left) }; });
     record("dashboard", "the hairline is centred in the gutter below; the figures span the chart card and the budget panel's text starts on the category card's", !!aligned && Math.abs(aligned.line) <= 1 && Math.abs(aligned.firstFig) <= 1 && aligned.lastFigInside && Math.abs(aligned.text) <= 1, aligned ? `line Δ${aligned.line}px from gutter centre; first figure Δ${aligned.firstFig}px from the chart's text; last inside=${aligned.lastFigInside}; panel text Δ${aligned.text}px` : "cards not found");
     // The projected month end is a tick on the budget bar, so the verdict can
-    // be checked against the gauge: under budget, the tick is short of the end
-    // by the amount the sentence names. The fixture is too early to project,
-    // so the tick is absent there and the check reads the sentence instead.
-    const tick = await page.evaluate(() => { const card = document.querySelector("[data-summary]"); const bar = card.querySelector("[role=progressbar]").getBoundingClientRect(); const mark = card.querySelector("[data-bar-mark]")?.getBoundingClientRect(); const verdict = card.querySelector("[data-status]")?.textContent ?? ""; const m = verdict.match(/finish \$([\d,]+) (under|over) budget/); const total = Number((card.querySelector("[data-bar-caption]")?.textContent.match(/of \$([\d,]+)/)?.[1] ?? "0").replace(/,/g, "")); if (!mark) return { absent: true, tooEarly: /too early/i.test(verdict) }; const at = ((mark.left + mark.right) / 2 - bar.left) / bar.width; const said = m ? Number(m[1].replace(/,/g, "")) : null; return { absent: false, at, expected: said != null && total ? (m[2] === "under" ? 1 - said / total : 1) : null }; });
-    record("dashboard", "the budget bar carries a tick at the projected month end, short of the end by what the verdict says", tick.absent ? tick.tooEarly : tick.expected != null && Math.abs(tick.at - tick.expected) <= 0.01, tick.absent ? `no tick: ${tick.tooEarly ? "too early to project, as the verdict says" : "but the month is projected"}` : `tick at ${(tick.at * 100).toFixed(1)}%, verdict implies ${(tick.expected * 100).toFixed(1)}%`);
+    // be checked against the gauge: the tick sits inside the range the
+    // sentence names (an over-budget tick rests at the bar's end). Too early
+    // to project, the tick is absent and the check reads the sentence instead.
+    const tick = await page.evaluate(() => {
+      const card = document.querySelector("[data-summary]");
+      const bar = card.querySelector("[role=progressbar]").getBoundingClientRect();
+      const mark = card.querySelector("[data-bar-mark]")?.getBoundingClientRect();
+      const verdict = card.querySelector("[data-status]")?.textContent ?? "";
+      const total = Number((card.querySelector("[data-bar-caption]")?.textContent.match(/of \$([\d,]+)/)?.[1] ?? "0").replace(/,/g, ""));
+      if (!mark) return { absent: true, tooEarly: /too early/i.test(verdict) };
+      const n = (x) => Number(x.replace(/,/g, ""));
+      // The sentence's range as spend: "$A–$B under", "up to $B over", "between $A under and $B over", "on budget".
+      let lo = null, hi = null, m;
+      if ((m = verdict.match(/between \$([\d,]+) under and \$([\d,]+) over budget/))) { lo = total - n(m[1]); hi = total + n(m[2]); }
+      else if ((m = verdict.match(/finish (?:up to )?\$([\d,]+)(?:–\$([\d,]+))? (under|over) budget/))) {
+        const a = /up to/.test(verdict) ? 0 : n(m[1]), b = n(m[2] ?? m[1]);
+        [lo, hi] = m[3] === "under" ? [total - b, total - a] : [total + a, total + b];
+      } else if (/on budget/.test(verdict)) { lo = hi = total; }
+      const at = ((mark.left + mark.right) / 2 - bar.left) / bar.width;
+      return { absent: false, at, lo: lo / total, hi: hi / total, verdict };
+    });
+    const inside = !tick.absent && tick.lo != null && (tick.lo >= 1 ? Math.abs(tick.at - 1) <= 0.01 : tick.at >= tick.lo - 0.01 && tick.at <= Math.min(1, tick.hi) + 0.01);
+    record("dashboard", "the budget bar carries a tick at the projected month end, inside the range the verdict says", tick.absent ? tick.tooEarly : inside, tick.absent ? `no tick: ${tick.tooEarly ? "too early to project, as the verdict says" : "but the month is projected"}` : `tick at ${(tick.at * 100).toFixed(1)}%, verdict "${tick.verdict}" spans ${(tick.lo * 100).toFixed(1)}–${(tick.hi * 100).toFixed(1)}%`);
     record("dashboard", "the verdict is the budget panel's conclusion, under its bar; the figures are equal columns; the panel sits to their right, level, its share above its bar", order.statusUnderBar && order.pitch.length === 2 && order.pitch[0] === order.pitch[1] && order.panelRight && order.panelLevel && order.capAboveBar === true, `verdict under bar=${order.statusUnderBar}; column pitch ${order.pitch.join("/")}px; panel right=${order.panelRight}, level=${order.panelLevel}; caption above bar=${order.capAboveBar}`);
     record("dashboard", "the figures share a top line, and the bar says its share of the whole without repeating the spent figure", new Set(f.figs.map((x) => x.top)).size === 1 && /^\d+% of \$[\d,]+$/.test(f.caption.trim()), `tops ${f.figs.map((x) => x.top).join(",")}; "${f.caption}"`);
     // The budget story is told once, in the summary card. A second copy of it
@@ -2482,6 +2500,31 @@ async function statementText(browser) {
   });
 }
 
+// A projection is said as its range (npm run backtest:pace measured how far
+// one made on each day of the month has missed): the verdict carries both
+// ends, the chart a band that fans out from today under the dashed line, and
+// its sentence for a screen reader the same two figures.
+async function projectionRange(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-pace-chart]");
+    const r = await page.evaluate(() => ({
+      verdict: document.querySelector("[data-summary] [data-status]")?.textContent ?? "",
+      said: document.querySelector("[data-pace-chart]")?.getAttribute("aria-label") ?? "",
+      legend: document.body.innerText.includes("Projected range"),
+      band: [...document.querySelectorAll("[data-pace-chart] .recharts-area-area")].some((p) => p.getAttribute("fill-opacity") === "0.12"),
+    }));
+    if (/too early/i.test(r.verdict)) {
+      record("projection range", "too early to project: no range is claimed", !/between|–/.test(r.verdict) && !r.band, r.verdict);
+      return;
+    }
+    record("projection range", "the verdict says both ends of the range", /\$[\d,]+–\$[\d,]+ (under|over) budget|up to \$[\d,]+ (under|over) budget|between \$[\d,]+ under and \$[\d,]+ over budget|on budget/.test(r.verdict), r.verdict);
+    record("projection range", "the chart draws the range as a band, and its legend names it", r.band && r.legend, `band=${r.band} legend=${r.legend}`);
+    record("projection range", "the chart's sentence gives the same two ends", /Projected to finish between \$[\d,]+ and \$[\d,]+\./.test(r.said), r.said);
+    if (errs.length) record("projection range", "page errors", false, errs[0]);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2492,7 +2535,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["statement text", statementText],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["statement text", statementText], ["projection range", projectionRange],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

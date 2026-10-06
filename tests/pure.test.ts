@@ -7,9 +7,9 @@ import { spendTrend } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
-import { buildVerdict } from "../src/lib/verdict";
+import { buildVerdict, rangeAgainstBudget } from "../src/lib/verdict";
 import { billStatus, billDelta, BILL_DELTA_MIN } from "../src/lib/bills";
-import { variableStillToCome, LARGE_CHARGE } from "../src/lib/forecast";
+import { variableStillToCome, LARGE_CHARGE, projectionBand, projectionRange } from "../src/lib/forecast";
 import { canonicalMerchant } from "../src/lib/queries";
 import { CATEGORY_EMOJIS } from "../src/lib/emoji";
 import { createLatestGuard } from "../src/lib/latestGuard";
@@ -261,15 +261,15 @@ test("variableStillToCome: everyday spending is paced; large purchases are a mon
 test("buildVerdict: withholds a projection it doesn't have, qualifies a forecast, and states a finished month as fact", () => {
   const base = { expenses: 3100, net: -400 };
   // too early: the budget is quoted, no month-end claim is made
-  assert.deepEqual(buildVerdict({ ...base, budget: { total: 5000, spent: 800, projected: null } }, true), {
+  assert.deepEqual(buildVerdict({ ...base, budget: { total: 5000, spent: 800, projected: null, range: null } }, true), {
     tone: "neutral",
     text: "Too early to project the month",
   });
   // a forecast speaks in pace terms; a finished month in the past tense
-  assert.equal(buildVerdict({ ...base, budget: { total: 5000, spent: 3100, projected: 4400 } }, true).text, "On pace to finish $600 under budget");
-  assert.deepEqual(buildVerdict({ ...base, budget: { total: 5000, spent: 5600, projected: 5600 } }, false), { tone: "bad", text: "Finished $600 over budget" });
+  assert.equal(buildVerdict({ ...base, budget: { total: 5000, spent: 3100, projected: 4400, range: null } }, true).text, "On pace to finish $600 under budget");
+  assert.deepEqual(buildVerdict({ ...base, budget: { total: 5000, spent: 5600, projected: 5600, range: null } }, false), { tone: "bad", text: "Finished $600 over budget" });
   // inside the forecast's own noise it is "on budget", with no dollar figure
-  assert.equal(buildVerdict({ ...base, budget: { total: 5000, spent: 3100, projected: 5000 * (1 + BUDGET_TOLERANCE) } }, true).text, "On pace to finish on budget");
+  assert.equal(buildVerdict({ ...base, budget: { total: 5000, spent: 3100, projected: 5000 * (1 + BUDGET_TOLERANCE), range: null } }, true).text, "On pace to finish on budget");
   // no budgets: mid-month stays factual; a finished month calls the net
   assert.equal(buildVerdict({ ...base, budget: null }, true).text, "$3,100 spent so far this month");
   assert.equal(buildVerdict({ ...base, budget: null }, false).tone, "bad");
@@ -352,4 +352,34 @@ test("two payees don't look alike just because Chase labels both the same way", 
   const chase = "Orig Co Name:jpmorgan Chase Co Entry Descr:chase Ach Sec:ppd Orig Id";
   assert.ok(affinity(amex, chase) < LOW, `amex vs chase ${affinity(amex, chase)}`);
   assert.ok(affinity(chase, "Jpmorgan Chase Chase Ach") >= HIGH, "the same payee, old and new text, still matches");
+});
+
+// WHY: a projection made on day 5 missed by up to a quarter in 80% of past
+// months (npm run backtest:pace). Said as one figure it claims a precision it
+// hasn't got, so it's said as a range that narrows as the month fills in.
+test("the projection's range narrows through the month, and never reaches below what's spent", () => {
+  assert.equal(projectionBand(1, 31), projectionBand(5, 31), "before day 5, the widest band, never wider guesses");
+  const days = [5, 7, 10, 15, 20, 25, 28, 30];
+  const bands = days.map((d) => projectionBand(d, 31));
+  assert.ok(bands.every((b, i) => i === 0 || b <= bands[i - 1]), `never wider on a later day: ${bands.map((b) => b.toFixed(3)).join(" ")}`);
+  assert.equal(projectionBand(31, 31), 0, "the last day is a fact");
+  assert.ok(projectionBand(12, 31) < 0.19 && projectionBand(12, 31) > 0.15, "between measured days, between their bands");
+  assert.deepEqual(projectionRange(10000, 2000, 0.25), { low: 7500, high: 12500 });
+  assert.equal(projectionRange(10000, 9000, 0.25).low, 9000, "money already spent can't be un-spent");
+});
+
+// WHY: green or red is a promise about where the month ends. While the range
+// reaches both sides of the budget, neither is earned, so the words carry both
+// ends and the colour stays neutral.
+test("the verdict says the range, and takes a colour only when all of it is on one side of the budget", () => {
+  const v = (low: number, high: number) =>
+    buildVerdict({ expenses: 3000, net: 0, budget: { total: 10000, spent: 3000, projected: (low + high) / 2, range: { low, high } } }, true);
+  assert.deepEqual(v(6000, 8000), { tone: "good", text: "On pace to finish $2,000–$4,000 under budget" });
+  assert.deepEqual(v(11000, 13000), { tone: "bad", text: "On pace to finish $1,000–$3,000 over budget" });
+  assert.deepEqual(v(7000, 12000), { tone: "neutral", text: "On pace to finish between $3,000 under and $2,000 over budget" });
+  assert.equal(rangeAgainstBudget(10000, { low: 9960, high: 9980 }), "on budget", "a range within $50 of the budget, both ends round to it");
+  assert.equal(rangeAgainstBudget(10000, { low: 6000, high: 9980 }), "up to $4,000 under budget", "one end at the budget");
+  assert.equal(budgetOutlook(10000, 9500, true, { low: 8000, high: 11000 }).kind, "on", "spanning the budget is not under, though the middle is");
+  // A finished month has no range: it's stated as fact, as before.
+  assert.equal(buildVerdict({ expenses: 3000, net: 0, budget: { total: 10000, spent: 10600, projected: 10600, range: null } }, false).text, "Finished $600 over budget");
 });

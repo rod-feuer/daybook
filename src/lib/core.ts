@@ -1,5 +1,5 @@
 import { getChargeMoves, vendorName } from "./chargeVendors";
-import { variableStillToCome, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS } from "./forecast";
+import { variableStillToCome, projectionBand, projectionRange, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS } from "./forecast";
 import { seriesKey, seriesVendor, isSeriesKey, dayLabel, amountLabel } from "./series";
 import { merchantKey } from "./merchant";
 import crypto from "node:crypto";
@@ -1211,7 +1211,10 @@ export type DashboardData = {
   }[];
   // `projected` is null when it's too early in an in-progress month to run-rate
   // a meaningful forecast (the UI shows a soft message instead of a false figure).
-  budget: { total: number; spent: number; projected: number | null } | null;
+  // `range` is how the projection is said while the month is in progress: the
+  // spread past months' projections missed by (projectionBand). Null when the
+  // month is done, or too early to project.
+  budget: { total: number; spent: number; projected: number | null; range: { low: number; high: number } | null } | null;
   // Cumulative expenses per day (climbs from $0), with a dashed projection to
   // month-end. projectedMonthEnd is null when it's too early/late to forecast.
   pace: {
@@ -1219,9 +1222,11 @@ export type DashboardData = {
       date: string;
       actual: number | null;
       projected: number | null;
+      range: [number, number] | null; // the projection's range so far: zero wide today, the full band at month-end
       prev: number | null;
     }[];
     projectedMonthEnd: number | null;
+    projectedRange: { low: number; high: number } | null;
     daysElapsed: number;
     daysInMonth: number;
   };
@@ -1334,10 +1339,11 @@ export function dashboard(month?: string): DashboardData {
     date: string;
     actual: number | null;
     projected: number | null;
+    range: [number, number] | null;
     prev: number | null; // prior-month cumulative at the same day-of-month (ghost line)
   }[] = [...expenseByDate.keys()].sort().map((date) => {
     spendCum += expenseByDate.get(date)!;
-    return { date, actual: Number(spendCum.toFixed(2)), projected: null, prev: null };
+    return { date, actual: Number(spendCum.toFixed(2)), projected: null, range: null, prev: null };
   });
 
   // Only project when we're partway through a month with enough days elapsed to
@@ -1396,21 +1402,33 @@ export function dashboard(month?: string): DashboardData {
   };
 
   let projectedMonthEnd: number | null = null;
+  let projectedRange: { low: number; high: number } | null = null;
+  const band = projectionBand(lastDataDay, daysInMonth);
   if (remainingDays > 0 && lastDataDay >= MIN_ELAPSED_DAYS) {
     const scheduled = scheduledRemaining.reduce((a, r) => a + Math.abs(r.avgAmount), 0);
     const projectedExtra =
       variableStillToCome({ seen: variableCharges.map((v) => v.mag), daysElapsed: lastDataDay, daysRemaining: remainingDays, history: largeHistory() }) + scheduled;
     projectedMonthEnd = Number((expenses + projectedExtra).toFixed(2));
+    projectedRange = projectionRange(projectedMonthEnd, expenses, band);
     // Linear ramp for the dashed segment; anchor it to the last actual point.
-    if (series.length) series[series.length - 1].projected = series[series.length - 1].actual;
+    // The range fans out along it, from nothing today to the band at month-end.
+    if (series.length) {
+      const last = series[series.length - 1];
+      last.projected = last.actual;
+      last.range = [last.actual!, last.actual!];
+    }
     const perDay = projectedExtra / remainingDays;
+    const { low, high } = projectedRange;
     let p = expenses;
     for (let day = lastDataDay + 1; day <= daysInMonth; day++) {
       p += perDay;
-      series.push({ date: pad(day), actual: null, projected: Number(p.toFixed(2)), prev: null });
+      const f = (day - lastDataDay) / remainingDays;
+      const lo = p - (projectedMonthEnd - low) * f;
+      const hi = p + (high - projectedMonthEnd) * f;
+      series.push({ date: pad(day), actual: null, projected: Number(p.toFixed(2)), range: [Number(lo.toFixed(2)), Number(hi.toFixed(2))], prev: null });
     }
   }
-  const pace = { series, projectedMonthEnd, daysElapsed: lastDataDay, daysInMonth };
+  const pace = { series, projectedMonthEnd, projectedRange, daysElapsed: lastDataDay, daysInMonth };
 
   const recurringByCat = recurringMonthlyByCategory();
   const byCategory = [...catMap.entries()]
@@ -1463,10 +1481,14 @@ export function dashboard(month?: string): DashboardData {
     } else {
       projected = null;
     }
+    // The band was measured on all spending; the budgeted part is assumed to
+    // miss by the same share.
+    const forecast = projected != null && isCurrentMonth && remainingDays > 0;
     budgetSummary = {
       total: Number(total.toFixed(2)),
       spent: Number(spent.toFixed(2)),
       projected: projected == null ? null : Number(projected.toFixed(2)),
+      range: forecast ? projectionRange(projected!, spent, band) : null,
     };
   }
 

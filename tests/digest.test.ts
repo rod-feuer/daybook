@@ -213,7 +213,7 @@ test("the headline withholds a projection early in the month and qualifies it af
   if (daysAgo(1) <= `${month}-04`) assert.match(budgetLine(), /^\$\S+ of your \$5,000 budget used\. Too early to project [A-Z][a-z]+\.$/);
 
   for (const day of ["03", "06", "10"]) tx("Grocer", { amount: -150, date: `${month}-${day}`, categoryId: cat });
-  assert.match(budgetLine(), /^On pace to finish [A-Z][a-z]+ (\$[\d,]+ (under|over)|on) budget\.$/);
+  assert.match(budgetLine(), /^On pace to finish [A-Z][a-z]+ (\$[\d,]+(–\$[\d,]+)? (under|over)|up to \$[\d,]+ (under|over)|between \$[\d,]+ under and \$[\d,]+ over|on) budget\.$/);
 });
 
 
@@ -265,19 +265,19 @@ test("the headline says Still or Now against the last text, and the month going 
 
   const first = deps();
   assert.equal(await runDigest(dailyDigest, first.d), "sent");
-  assert.match(first.sent[0], /^Daybook: On pace to finish [A-Z][a-z]+ \$[\d,]+ under budget\./, "the month's first word on it: neither Still nor Now");
+  assert.match(first.sent[0], /^Daybook: On pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? under budget\./, "the month's first word on it: neither Still nor Now");
 
   tx("Fence Co", { amount: LARGE, date: daysAgo(2), categoryId: other, hash: "r2" });
   const second = deps();
   assert.equal(await runDigest(dailyDigest, second.d), "sent");
-  assert.match(second.sent[0], /^Daybook: Still on pace to finish [A-Z][a-z]+ \$[\d,]+ under budget\./);
+  assert.match(second.sent[0], /^Daybook: Still on pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? under budget\./);
 
   // Groceries run far past the budget: no new surprise, but the month has turned.
   // (Each run is under twice the usual $300, so none of them is itself a surprise.)
   for (const day of ["02", "03", "05", "06", "08", "09", "11", "12"]) tx("Grocer", { amount: -550, date: `${month}-${day}`, categoryId: cat });
   const third = deps();
   assert.equal(await runDigest(dailyDigest, third.d), "sent");
-  assert.match(third.sent[0], /^Daybook: Now on pace to finish [A-Z][a-z]+ \$[\d,]+ over budget\.$/, "the turn is the whole message");
+  assert.match(third.sent[0], /^Daybook: Now on pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? over budget\.$/, "the turn is the whole message");
   assert.equal(await runDigest(dailyDigest, deps().d), "quiet", "said once");
 });
 
@@ -314,7 +314,7 @@ test("the weekly is always sent, and keeps the projection it quoted for next wee
   const subjects: string[] = [];
   const run = deps({ send: async (m) => void subjects.push(m.subject) });
   assert.equal(await runDigest(weeklyDigest, run.d), "sent");
-  assert.match(subjects[0], /^Daybook: On pace to finish [A-Z][a-z]+ \$[\d,]+ under budget$/, "the verdict is the subject line");
+  assert.match(subjects[0], /^Daybook: On pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? under budget$/, "the verdict is the subject line");
   const row = getDb().prepare("SELECT key, value FROM digest_sent WHERE key LIKE 'weekly:%'").get() as { key: string; value: number };
   assert.equal(row.key, `weekly:${daysAgo(0)}`);
   assert.ok(row.value > 1200, "the projected month-end spend it quoted");
