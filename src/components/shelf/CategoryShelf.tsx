@@ -110,14 +110,6 @@ export function CategoryBody({
             detail={
               <>
                 <div>of {usd(b.amount, { cents: false })}</div>
-                {/* The plans' cost, as on the Categories row: what of the
-                    budget is already spoken for. Warn when it alone exceeds it.
-                    Its own line: beside "of $10,375" it wrapped mid-phrase. */}
-                {recurring > 0 && (
-                  <div data-shelf-recurring className={recurNow > b.amount ? "text-[var(--warn)]" : ""}>
-                    {usd(recurNow, { cents: false })} recurring
-                  </div>
-                )}
               </>
             }
           >
@@ -175,6 +167,17 @@ export function CategoryBody({
             suggestedAnnual={b.suggestedAnnual}
             month={data.month}
             onSave={onSetBudget}
+            // The plans' cost, as on the Categories row: what of the budget is
+            // already spoken for, so it sits with the budget, not with what's
+            // left (Spent already counts the bills paid). Warn when it alone
+            // exceeds the budget.
+            aside={
+              recurring > 0 && b.amount != null && (
+                <span data-shelf-recurring className={`text-[11px] ${recurNow > b.amount ? "text-[var(--warn)]" : "text-[var(--muted)]"}`}>
+                  {usd(recurNow, { cents: false })} recurring
+                </span>
+              )
+            }
           />
           {b.plan[0]?.edited && b.amount !== null && (
             <p className="text-xs text-[var(--muted)]" data-month-own>
