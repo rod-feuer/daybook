@@ -307,7 +307,6 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     setTarget(null);
   }, [pathname]);
 
-  // Re-read whichever detail is open.
   // The shelf's target now, not when a write began: a save that lands after
   // the shelf moved to another vendor re-reads where it is, never where it was
   // (that put A's data under B's target, where the next edit mixed the two).
@@ -315,6 +314,7 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     targetNow.current = target;
   });
+  // Re-read whichever detail is open.
   const refreshTarget = () => {
     const target = targetNow.current;
     if (target?.kind === "category") fetchCategory(target.categoryId, target.month, true);

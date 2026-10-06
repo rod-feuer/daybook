@@ -2411,7 +2411,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   // Mid-month, last month is summed over the same days (Aug 1–27 against
   // Sep 1–27): a partial month against a whole one showed a fall early in
   // every month and understated a rise late in it. "The same days" is the
-  // dashboard's rule (monthThroughDay, shared with core.ts): through the latest day with any
+  // dashboard's rule (monthThroughDay; core.ts applies the same counted()): through the latest day with any
   // counted charge, since bank data trails the calendar.
   let prevThrough: number | null = null;
   if (month === new Date().toISOString().slice(0, 7)) {
