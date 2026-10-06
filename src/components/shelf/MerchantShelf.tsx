@@ -644,12 +644,10 @@ export function MatchCorrection({
           <option value="contains">descriptor contains…</option>
         </select>
         {mode === "contains" && (
-          <input
+          <CommitInput
             aria-label="Match text"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onBlur={() => save(mode, text, tol)}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            defaultValue={text}
+            onCommit={(t) => { setText(t); save(mode, t, tol); }}
             placeholder="text in the description"
             className="btn-ghost min-w-0 flex-1 text-[13px]"
           />

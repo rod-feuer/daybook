@@ -137,8 +137,7 @@ export function monthThroughDay(month: string): number {
     .prepare(
       `SELECT MAX(CAST(substr(COALESCE(t.effectiveDate, t.date), 9, 2) AS INTEGER)) AS d
        FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
-       WHERE substr(COALESCE(t.effectiveDate, t.date), 1, 7) = ? AND t.excluded = 0
-         AND COALESCE(c.excludeFromTotals, 0) = 0`
+       WHERE substr(COALESCE(t.effectiveDate, t.date), 1, 7) = ? AND ${counted()}`
     )
     .get(month) as { d: number | null };
   return row.d ?? 0;
@@ -309,6 +308,10 @@ export function resetRecurringOverrides(merchant: string) {
 // every charge; a plan it found and nobody confirmed waits in the
 // suggestions queue (Pies & Pints read as a bill because the detector said so).
 export const confirmedKey = (col: string) => `${col} IN (SELECT key FROM plans)`;
+// A charge that counts toward totals: not excluded itself, and not in a
+// category left out of totals. Needs `LEFT JOIN categories <c> ON <t>.categoryId = <c>.id`.
+// The one statement of the rule: copies of it drifted (one dropped the category half).
+export const counted = (t = "t", c = "c") => `${t}.excluded = 0 AND COALESCE(${c}.excludeFromTotals, 0) = 0`;
 // The plan a charge is in, when that plan counts; else null (variable spend).
 export const countedPlanId = (t: string) =>
   `(CASE WHEN ${t}.recurringId IN (SELECT rc.id FROM recurrings rc JOIN plans pc ON pc.key = rc.merchant) THEN ${t}.recurringId END)`;
@@ -713,8 +716,7 @@ export function transactionsSummary(opts: TxFilter): {
   const row = db
     .prepare(
       `SELECT COUNT(*) AS count,
-        COALESCE(SUM(CASE WHEN t.excluded = 1 OR COALESCE(c.excludeFromTotals, 0) = 1
-                          THEN 0 ELSE t.amount END), 0) AS net,
+        COALESCE(SUM(CASE WHEN ${counted()} THEN t.amount ELSE 0 END), 0) AS net,
         COUNT(DISTINCT COALESCE(t.categoryId, -1)) AS categories
        FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
        ${whereSql}`
@@ -2409,19 +2411,12 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   // Mid-month, last month is summed over the same days (Aug 1–27 against
   // Sep 1–27): a partial month against a whole one showed a fall early in
   // every month and understated a rise late in it. "The same days" is the
-  // dashboard's rule (compareThroughDay in core.ts): through the latest day with any
+  // dashboard's rule (monthThroughDay, shared with core.ts): through the latest day with any
   // counted charge, since bank data trails the calendar.
   let prevThrough: number | null = null;
   if (month === new Date().toISOString().slice(0, 7)) {
     const [yy, mm] = month.split("-").map(Number);
-    const last = (
-      db
-        .prepare(
-          `SELECT COALESCE(MAX(CAST(substr(COALESCE(effectiveDate, date),9,2) AS INTEGER)), 0) AS d
-           FROM transactions WHERE excluded = 0 AND substr(COALESCE(effectiveDate, date),1,7) = ?`
-        )
-        .get(month) as { d: number }
-    ).d;
+    const last = monthThroughDay(month);
     if (last > 0 && last < new Date(Date.UTC(yy, mm, 0)).getUTCDate()) prevThrough = last;
   }
   const cur = monthAgg(month);

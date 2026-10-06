@@ -17,6 +17,7 @@ import {
   getRecurringSettings,
   setRecurringSetting,
   countedPlanId,
+  counted,
 } from "./queries";
 import type { Recurring } from "./types";
 import { migrateCrossVendorPlans } from "./vendorMoves";
@@ -1272,8 +1273,7 @@ export function dashboard(month?: string): DashboardData {
     .prepare(
       `SELECT t.amount, COALESCE(t.effectiveDate, t.date) AS date, ${countedPlanId("t")} AS recurringId, t.categoryId AS cid, c.name AS cname, c.color AS ccolor, c.icon AS cicon, c.kind AS ckind
        FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
-       WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND t.excluded = 0
-         AND COALESCE(c.excludeFromTotals, 0) = 0
+       WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND ${counted()}
        ORDER BY COALESCE(t.effectiveDate, t.date)`
     )
     .all(m) as {
@@ -1383,7 +1383,7 @@ export function dashboard(month?: string): DashboardData {
       .prepare(
         `SELECT substr(COALESCE(t.effectiveDate, t.date),1,7) AS ym, t.categoryId AS cid, -t.amount AS mag
          FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
-         WHERE t.excluded = 0 AND COALESCE(c.excludeFromTotals, 0) = 0 AND ${countedPlanId("t")} IS NULL
+         WHERE ${counted()} AND ${countedPlanId("t")} IS NULL
            AND -t.amount > ? AND -t.amount <= ? AND substr(COALESCE(t.effectiveDate, t.date),1,7) IN (${prior.map(() => "?").join(",")})`
       )
       .all(LARGE_CHARGE, EXTRAORDINARY, ...prior) as { ym: string; cid: number | null; mag: number }[];
@@ -1487,8 +1487,9 @@ export function dashboard(month?: string): DashboardData {
   const prevMonth = (
     db
       .prepare(
-        `SELECT MAX(substr(COALESCE(effectiveDate,date),1,7)) AS m FROM transactions
-         WHERE excluded = 0 AND substr(COALESCE(effectiveDate,date),1,7) < ?`
+        `SELECT MAX(substr(COALESCE(t.effectiveDate, t.date),1,7)) AS m
+         FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
+         WHERE ${counted()} AND substr(COALESCE(t.effectiveDate, t.date),1,7) < ?`
       )
       .get(m) as { m: string | null }
   ).m;
@@ -1503,8 +1504,7 @@ export function dashboard(month?: string): DashboardData {
         .prepare(
           `SELECT COALESCE(SUM(CASE WHEN t.amount >= 0 THEN t.amount ELSE 0 END), 0) AS income
            FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
-           WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND t.excluded = 0
-             AND COALESCE(c.excludeFromTotals, 0) = 0`
+           WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND ${counted()}`
         )
         .get(prevMonth) as { income: number }
     ).income;
@@ -1518,8 +1518,7 @@ export function dashboard(month?: string): DashboardData {
          COALESCE(SUM(CASE WHEN t.amount >= 0 THEN t.amount ELSE 0 END), 0) AS income,
          COALESCE(SUM(CASE WHEN t.amount <  0 THEN -t.amount ELSE 0 END), 0) AS expenses
        FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
-       WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND t.excluded = 0
-         AND COALESCE(c.excludeFromTotals, 0) = 0
+       WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND ${counted()}
          ${dayClause}`
     );
     const t = (
@@ -1544,8 +1543,7 @@ export function dashboard(month?: string): DashboardData {
         `SELECT CAST(substr(COALESCE(t.effectiveDate, t.date), 9, 2) AS INTEGER) AS day,
                 SUM(-t.amount) AS amt
          FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
-         WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND t.excluded = 0
-           AND COALESCE(c.excludeFromTotals, 0) = 0 AND t.amount < 0
+         WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND ${counted()} AND t.amount < 0
          GROUP BY day`
       )
       .all(prevMonth) as { day: number; amt: number }[];

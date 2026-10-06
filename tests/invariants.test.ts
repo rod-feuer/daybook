@@ -3757,3 +3757,34 @@ test("Combine isn't offered for a borderline name on another card; a near-certai
   tx("Acme Power Bil", { amount: -100, date: daysAgo(0), categoryId: null, account: "Other card" });
   assert.equal(offeredFor("Acme Power Bil"), true, "the names agree outright: the card doesn't matter");
 });
+
+test("a month holding only left-out charges isn't the dashboard's previous month", () => {
+  // WHY: "vs last month" compares against the latest month with counted
+  // spending. A month with only a transfer (an excluded category) has nothing
+  // counted, so picking it showed every month as up against $0.
+  tx("Kroger", { amount: -300, date: "2025-04-10", categoryId: CAT });
+  tx("Savings Transfer", { amount: -500, date: "2025-05-10", categoryId: CAT_EXC });
+  tx("Kroger", { amount: -100, date: "2025-06-10", categoryId: CAT });
+  const d = dashboard("2025-06");
+  assert.equal(d.prev!.month, "2025-04", "May held only a transfer: April is the comparison");
+  assert.equal(d.prev!.expenses, 300);
+});
+
+test("the category shelf compares last month through the same day the dashboard does", () => {
+  // WHY: the shelf's "vs last month" and the dashboard's must cover the same
+  // days. A transfer (excluded category) later in the month isn't counted, so
+  // it can't stretch the shelf's period past the last real charge.
+  const now = new Date();
+  const ym = now.toISOString().slice(0, 7);
+  const day = now.getUTCDate();
+  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  if (day < 3 || day >= last) return; // needs a day after the 2nd that isn't the month's end
+  const pm = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+  tx("Kroger", { amount: -40, date: `${ym}-02`, categoryId: CAT });
+  tx("Savings Transfer", { amount: -500, date: `${ym}-${String(day).padStart(2, "0")}`, categoryId: CAT_EXC });
+  tx("Kroger", { amount: -70, date: `${pm}-03`, categoryId: CAT }); // after day 2: outside the comparison
+  const c = categorySummary(CAT, ym)!;
+  assert.equal(c.prevThrough, monthThroughDay(ym), "the shelf's period is the dashboard's");
+  assert.equal(c.prevThrough, 2);
+  assert.equal(c.prevSpent, 0, "last month's charge on the 3rd falls outside Oct 1–2's comparison");
+});

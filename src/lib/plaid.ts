@@ -174,11 +174,13 @@ export function importPlaidTransactions(items: PlaidItem[]): {
   // while it waits, and its posted row splits afresh.
   const drop = db.prepare("DELETE FROM transactions WHERE hash = @h OR hash LIKE @h || ':s%'");
   // A posted twin for a pending charge: same account + amount, within 3 days.
-  // Name affinity (checked in JS) then confirms it's the same vendor.
+  // Name affinity (checked in JS) then confirms it's the same vendor. The bank's
+  // date, not effectiveDate: moving the posted charge to another month is a
+  // filing choice and doesn't make it a different charge.
   const findPosted = db.prepare(
     `SELECT hash, merchant FROM transactions
      WHERE source = 'plaid' AND pending = 0 AND account = @account AND amount = @amount
-       AND ABS(julianday(COALESCE(effectiveDate, date)) - julianday(@date)) <= 3`
+       AND ABS(julianday(date) - julianday(@date)) <= 3`
   );
   const postedTwin = (r: { account: string; amount: number; date: string; merchant: string }) =>
     (findPosted.all({ account: r.account, amount: r.amount, date: r.date }) as { hash: string; merchant: string }[]).find(

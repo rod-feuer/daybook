@@ -242,12 +242,12 @@ function LoanTermsPanel({
   };
   const field = "min-w-0 w-full bg-transparent text-[15px] font-semibold tabular-nums outline-none placeholder:font-normal placeholder:text-[var(--muted)]";
   const date = (f: "maturity" | "opened") => (
-    <input
+    <CommitInput
       type="date"
       aria-label={f === "maturity" ? "Payoff date" : "Opened"}
       defaultValue={t[f] ?? ""}
       key={`${f}-${t[f]}`}
-      onBlur={(e) => e.target.value !== (t[f] ?? "") && onSetTerms({ [f]: e.target.value || null })}
+      onCommit={(raw) => raw !== (t[f] ?? "") && onSetTerms({ [f]: raw || null })}
       className={`tap-native ${field}`}
     />
   );

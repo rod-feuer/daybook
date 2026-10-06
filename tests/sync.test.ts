@@ -54,3 +54,23 @@ test("syncFromBank records each account's balance from the same pull", async () 
   const row = getDb().prepare("SELECT a.side, a.kind, b.amount FROM balances b JOIN accounts a ON a.id = b.accountId").get();
   assert.deepEqual(row, { side: "liability", kind: "card", amount: 250 });
 });
+
+// WHY: a pending charge and its posted version are the same charge on the bank's
+// day. Moving the posted one to another month (effectiveDate) is the owner's
+// filing choice; it must not stop the pending copy being recognized, or the
+// charge counts twice.
+test("a pending charge still finds its posted twin after the posted one is moved to another month", async () => {
+  const day = daysAgo(2);
+  const both = [
+    { id: "shop-posted", date: day, name: "Shop Co", amount: 25 },
+    { id: "shop-pending", date: day, name: "Shop Co", amount: 25, pending: true },
+  ];
+  setBankPayload(both);
+  await syncFromBank();
+  const count = () => (getDb().prepare("SELECT COUNT(*) AS n FROM transactions WHERE merchant LIKE 'Shop%'").get() as { n: number }).n;
+  assert.equal(count(), 1, "fixture: the pending copy was reconciled on first sight");
+  getDb().prepare("UPDATE transactions SET effectiveDate = date(date, '+40 days') WHERE merchant LIKE 'Shop%'").run();
+  setBankPayload(both);
+  await syncFromBank();
+  assert.equal(count(), 1, "the moved posted charge is still the pending one's twin");
+});
