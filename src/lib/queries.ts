@@ -181,7 +181,12 @@ export function similarVendors(
 ): { merchant: string; displayName: string; count: number; categoryName: string | null }[] {
   const links = getMerchantLinks();
   const me = canonicalMerchant(merchant, links);
-  const head = (name: string) => (name.toLowerCase().trim().split(/\s+/)[0] ?? "").replace(/[^a-z]/g, "");
+  // A name's first word, past a leading article: "The Roku Channel" is Roku's.
+  const head = (name: string) => {
+    const words = name.toLowerCase().trim().split(/\s+/);
+    const first = words.length > 1 && ["the", "a", "an"].includes(words[0]) ? words[1] : words[0];
+    return (first ?? "").replace(/[^a-z]/g, "");
+  };
   const alike = (a: string, b: string) => {
     if (!a || !b) return false;
     if (a.length < 7 || b.length < 7) return a === b && a.length >= 4;
