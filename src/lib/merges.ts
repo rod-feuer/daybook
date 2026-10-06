@@ -1,3 +1,4 @@
+import { getChargeMoves, vendorName } from "./chargeVendors";
 import { seriesVendor } from "./series";
 import { getDb, ensureMergeDismissals } from "./db";
 import {
@@ -366,14 +367,15 @@ export function handoffSuggestions(exclude: Set<string>): MergeSuggestion[] {
   const overrides = getRecurringOverrides();
   const settings = getRecurringSettings();
   const DAY = 86_400_000;
-  type Tx = { date: string; amount: number; account: string; merchant: string; recurringId: number | null; categoryId: number | null };
+  type Tx = { date: string; amount: number; account: string; merchant: string; recurringId: number | null; categoryId: number | null; hash: string };
   // Charges that count. (A split parent is excluded, so its parts stand for it.)
   const txs = db
-    .prepare("SELECT date, amount, account, merchant, recurringId, categoryId FROM transactions WHERE excluded = 0 ORDER BY date, id")
+    .prepare("SELECT date, amount, account, merchant, recurringId, categoryId, hash FROM transactions WHERE excluded = 0 ORDER BY date, id")
     .all() as Tx[];
+  const moves = getChargeMoves();
   const byVendor = new Map<string, Tx[]>();
   for (const t of txs) {
-    const c = canonicalMerchant(t.merchant, links);
+    const c = canonicalMerchant(vendorName(t, moves), links);
     (byVendor.get(c) ?? byVendor.set(c, []).get(c)!).push(t);
   }
   const mode = <T,>(xs: T[]): T | undefined => {

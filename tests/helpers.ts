@@ -41,6 +41,8 @@ export const TABLES = [
   "categories",
   "plan_matches",
   "plan_match_dismissals",
+  "charge_vendors",
+  "vendor_rules",
   "loan_terms",
   "balances",
   "accounts",

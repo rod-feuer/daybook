@@ -1,3 +1,4 @@
+import { getChargeMoves, vendorName } from "./chargeVendors";
 import { getDb } from "./db";
 import { dashboard } from "./core";
 import {
@@ -111,14 +112,15 @@ export function unusualCharges(sinceIso: string): UnusualCharge[] {
   // A vendor is its combined name, then the coarse key the shelf rolls bank
   // wordings up with — or a drifted descriptor reads as a brand-new vendor.
   const links = getMerchantLinks();
-  const vendorOf = (m: string) => {
-    const v = canonicalMerchant(m, links);
+  const moves = getChargeMoves();
+  const vendorOf = (r: { merchant: string; hash: string }) => {
+    const v = canonicalMerchant(vendorName(r, moves), links);
     return merchantKey(v) || v;
   };
   const earlier = new Map<string, { any: number; amounts: number[] }>(); // per vendor, the charges before this one
   const out: UnusualCharge[] = [];
   for (const r of rows) {
-    const vendor = vendorOf(r.merchant);
+    const vendor = vendorOf(r);
     const past = earlier.get(vendor) ?? { any: 0, amounts: [] };
     const size = Math.abs(r.amount);
     const counts = r.excluded === 0 && r.catExcluded === 0;

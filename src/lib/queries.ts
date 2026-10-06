@@ -14,6 +14,7 @@ import {
 import type { TransactionWithCategory, Recurring, Category } from "./types";
 import { nameAffinity, LOW_MATCH } from "./similarity";
 import { CADENCE_DAYS, PER_YEAR, monthlyFactor, medianGap, type Cadence } from "./cadence";
+import { vendorScope, getChargeMoves, vendorName } from "./chargeVendors";
 
 // ---- Merchant linking ----------------------------------------------------
 // User-declared "these descriptors are the same vendor" (e.g. a gas bill whose
@@ -99,13 +100,16 @@ export function planNames(settings: Record<string, RecurringSettings>): Map<numb
 // What a CHARGE is called: its plan's name when the user gave it one, else its
 // vendor's. (A vendor is still called by merchantDisplayName: the vendor
 // picker lists vendors, not charges.)
+// A charge moved to another vendor is called by that vendor.
 export function chargeDisplayName(
-  row: { merchant: string; recurringId: number | null },
+  row: { merchant: string; recurringId: number | null; hash?: string },
   settings: Record<string, RecurringSettings>,
   links: Record<string, string>,
-  plans: Map<number, string>
+  plans: Map<number, string>,
+  moves: Map<string, string> = new Map()
 ): string {
-  return (row.recurringId != null ? plans.get(row.recurringId) : undefined) ?? merchantDisplayName(row.merchant, settings, links);
+  const vendor = (row.hash != null ? moves.get(row.hash) : undefined) ?? row.merchant;
+  return (row.recurringId != null ? plans.get(row.recurringId) : undefined) ?? merchantDisplayName(vendor, settings, links);
 }
 
 // Distinct merchant strings with transaction counts — powers the link picker.
@@ -144,8 +148,12 @@ export function distinctVendors(): { merchant: string; displayName: string; coun
   const db = getDb();
   const links = getMerchantLinks();
   const settings = getRecurringSettings();
+  getChargeMoves(); // the table, on the live connection
+  // A moved charge counts for the vendor it was moved to.
   const rows = db
-    .prepare("SELECT merchant, COUNT(*) AS count FROM transactions GROUP BY merchant")
+    .prepare(
+      "SELECT COALESCE(cv.vendor, t.merchant) AS merchant, COUNT(*) AS count FROM transactions t LEFT JOIN charge_vendors cv ON cv.hash = t.hash GROUP BY 1"
+    )
     .all() as { merchant: string; count: number }[];
   const byCanon = new Map<string, number>();
   for (const r of rows) {
@@ -434,7 +442,10 @@ function buildTxFilter(opts: TxFilter): { whereSql: string; params: Record<strin
       if (merchants.length) {
         const ph = merchants.map((_, i) => `@sm${i}`);
         merchants.forEach((m, i) => (params[`sm${i}`] = m));
-        clauses.push(`t.merchant IN (${ph.join(",")})`);
+        // The bank name finds its charges; a vendor's names find the charges
+        // moved to it as well.
+        getChargeMoves(); // the table, on the live connection
+        clauses.push(`(t.merchant IN (${ph.join(",")}) OR t.hash IN (SELECT hash FROM charge_vendors WHERE vendor IN (${ph.join(",")})))`);
       }
       // A plan's own name finds that plan's charges — "Henry" finds the $200
       // contributions and not the $300 ones under the same bank name.
@@ -455,8 +466,11 @@ function buildTxFilter(opts: TxFilter): { whereSql: string; params: Record<strin
   if (opts.vendor) {
     // Match every descriptor variant of the vendor, so this shows the same set
     // the drawer rolled up (not just a substring of the clicked name).
+    // A charge moved to another vendor leaves it; one moved here joins it.
     const vs = merchantVariants(opts.vendor);
-    where.push(`t.merchant IN (${vs.map((_, i) => `@v${i}`).join(",")})`);
+    getChargeMoves(); // the table, on the live connection
+    const vph = vs.map((_, i) => `@v${i}`).join(",");
+    where.push(`((t.merchant IN (${vph}) AND t.hash NOT IN (SELECT hash FROM charge_vendors)) OR t.hash IN (SELECT hash FROM charge_vendors WHERE vendor IN (${vph})))`);
     vs.forEach((v, i) => {
       params[`v${i}`] = v;
     });
@@ -531,10 +545,11 @@ export function listTransactions(
   const settings = getRecurringSettings();
   const links = getMerchantLinks();
   const plans = planNames(settings);
+  const moves = getChargeMoves();
   const rules = splitRules();
   return rows.map((r) => ({
     ...r,
-    displayName: chargeDisplayName(r, settings, links, plans),
+    displayName: chargeDisplayName(r, settings, links, plans, moves),
     splitMissed: rules.length > 0 && splitDriftFor(r, rules) != null,
   }));
 }
@@ -601,8 +616,10 @@ export function transactionById(id: number): ChargeDetail | null {
   if (!row) return null;
   const settings = getRecurringSettings();
   const links = getMerchantLinks();
-  const variants = merchantVariants(row.merchant);
-  const ph = variants.map(() => "?").join(",");
+  // The charge's vendor: where it was moved, else its bank name's.
+  const variants = merchantVariants(vendorName(row as unknown as { merchant: string; hash: string }, getChargeMoves()));
+  const scope = vendorScope(variants);
+  const scopeT = vendorScope(variants, "t");
   const plan =
     (row.recurringId != null
       ? (db.prepare("SELECT merchant FROM recurrings WHERE id = ?").get(row.recurringId) as { merchant: string } | undefined)
@@ -610,10 +627,10 @@ export function transactionById(id: number): ChargeDetail | null {
     (db
       .prepare(
         `SELECT merchant FROM recurrings
-         WHERE id IN (SELECT DISTINCT recurringId FROM transactions WHERE merchant IN (${ph}) AND recurringId IS NOT NULL)
+         WHERE id IN (SELECT DISTINCT recurringId FROM transactions WHERE ${scope.sql} AND recurringId IS NOT NULL)
          ORDER BY lastDate DESC LIMIT 1`
       )
-      .get(...variants) as { merchant: string } | undefined);
+      .get(...scope.args) as { merchant: string } | undefined);
   const planConfirmed = !!plan && !!db.prepare("SELECT 1 FROM plans WHERE key = ?").get(plan.merchant);
   const notParent = "NOT EXISTS (SELECT 1 FROM transactions s WHERE s.hash LIKE t.hash || ':s%')";
   // A vendor with several plans: this charge's list is its plan. The other
@@ -622,13 +639,13 @@ export function transactionById(id: number): ChargeDetail | null {
     db
       .prepare(
         `SELECT COUNT(DISTINCT recurringId) AS n FROM transactions
-         WHERE merchant IN (${ph}) AND recurringId IS NOT NULL`
+         WHERE ${scope.sql} AND recurringId IS NOT NULL`
       )
-      .get(...variants) as { n: number }
+      .get(...scope.args) as { n: number }
   ).n;
   const scopedToPlan = row.recurringId != null && planCount > 1;
-  const scopeSql = scopedToPlan ? `t.merchant IN (${ph}) AND t.recurringId = ?` : `t.merchant IN (${ph})`;
-  const scopeArgs: (string | number)[] = scopedToPlan ? [...variants, row.recurringId as number] : [...variants];
+  const scopeSql = scopedToPlan ? `${scopeT.sql} AND t.recurringId = ?` : scopeT.sql;
+  const scopeArgs: (string | number)[] = scopedToPlan ? [...scopeT.args, row.recurringId as number] : [...scopeT.args];
   const recent = db
     .prepare(
       `SELECT t.id, COALESCE(t.effectiveDate, t.date) AS date, t.amount, t.excluded, ${countedPlanId("t")} AS recurringId
@@ -642,7 +659,7 @@ export function transactionById(id: number): ChargeDetail | null {
   const raw = row as unknown as { descriptor: string | null; source: string; rawMerchant: string | null };
   return {
     ...row,
-    displayName: chargeDisplayName(row, settings, links, planNames(settings)),
+    displayName: chargeDisplayName(row, settings, links, planNames(settings), getChargeMoves()),
     combinedInto: links[row.merchant] ? merchantDisplayName(links[row.merchant], settings, links) : null,
     bankText: raw.descriptor ?? (raw.source !== "plaid" ? raw.rawMerchant : null),
     planKey: plan?.merchant ?? null,
@@ -654,7 +671,7 @@ export function transactionById(id: number): ChargeDetail | null {
     recent,
     scopedToPlan,
     vendorCount,
-    byYear: spendByYear(`merchant IN (${ph})`, variants),
+    byYear: spendByYear(scope.sql, scope.args),
     splitDrift: splitDriftFor(row),
     splitMissed: splitDriftFor(row) != null,
   };
@@ -913,9 +930,13 @@ export function merchantSummary(merchant: string, series?: string | null) {
       : undefined;
   const seriesId = seriesRow?.id ?? null;
   // Scope: the vendor's descriptors, and — for one plan — only its linked charges.
-  const scope = seriesId != null ? `merchant IN (${ph}) AND recurringId = ?` : `merchant IN (${ph})`;
-  const scopeT = seriesId != null ? `t.merchant IN (${ph}) AND t.recurringId = ?` : `t.merchant IN (${ph})`;
-  const scopeArgs: (string | number)[] = seriesId != null ? [...variants, seriesId] : [...variants];
+  // The vendor's charges are its bank names' less those moved to another
+  // vendor, plus those moved to it (chargeVendors.ts).
+  const vs = vendorScope(variants);
+  const vsT = vendorScope(variants, "t");
+  const scope = seriesId != null ? `${vs.sql} AND recurringId = ?` : vs.sql;
+  const scopeT = seriesId != null ? `${vsT.sql} AND t.recurringId = ?` : vsT.sql;
+  const scopeArgs: (string | number)[] = seriesId != null ? [...vs.args, seriesId] : [...vs.args];
   // The descriptor variants with per-name counts. canUnlink is true only for
   // explicit merchant_links aliases (those can be split off); the canonical and
   // the automatic first-2-token key-rollups have no link to remove.
@@ -977,8 +998,8 @@ export function merchantSummary(merchant: string, series?: string | null) {
            ? // A plan's list: its own charges plus the vendor's charges in no
              // plan (so one can be pulled in or flagged out), never a charge
              // in another plan or one excluded from totals, which can't join.
-             `t.merchant IN (${ph}) AND t.excluded = 0 AND (t.recurringId = ? OR t.recurringId IS NULL)`
-           : `t.merchant IN (${ph})`
+             `${vsT.sql} AND t.excluded = 0 AND (t.recurringId = ? OR t.recurringId IS NULL)`
+           : vsT.sql
        }
          -- A split parent is not a charge any more: its parts are, and they
          -- live under their own descriptors ("Chubb — Carmel Home"). On the
@@ -1040,10 +1061,10 @@ export function merchantSummary(merchant: string, series?: string | null) {
       .prepare(
         `SELECT id, merchant, categoryId, cadence, avgAmount, nextDate, lastDate FROM recurrings
          WHERE id IN (SELECT DISTINCT recurringId FROM transactions
-                      WHERE merchant IN (${ph}) AND recurringId IS NOT NULL)
+                      WHERE ${vs.sql} AND recurringId IS NOT NULL)
          ORDER BY lastDate DESC LIMIT 1`
       )
-      .get(...variants) as
+      .get(...vs.args) as
       | { id: number; merchant: string; categoryId: number | null; cadence: string; avgAmount: number; nextDate: string; lastDate: string }
       | undefined);
   const cat =
@@ -1079,10 +1100,10 @@ export function merchantSummary(merchant: string, series?: string | null) {
     ? (db
         .prepare(
           `SELECT COALESCE(effectiveDate, date) AS date, amount FROM transactions
-           WHERE merchant IN (${ph}) AND recurringId = ? AND amount < 0 AND excluded = 0
+           WHERE ${vs.sql} AND recurringId = ? AND amount < 0 AND excluded = 0
            ORDER BY COALESCE(effectiveDate, date) ASC`
         )
-        .all(...variants, (rec as { id: number }).id) as { date: string; amount: number }[])
+        .all(...vs.args, (rec as { id: number }).id) as { date: string; amount: number }[])
     : [];
   let priceChange: { from: number; to: number; since: string } | null = null;
   if (charges.length >= 2) {
@@ -1130,10 +1151,10 @@ export function merchantSummary(merchant: string, series?: string | null) {
         db
           .prepare(
             `SELECT id, merchant, cadence, avgAmount, lastDate FROM recurrings
-             WHERE id IN (SELECT DISTINCT recurringId FROM transactions WHERE merchant IN (${ph}) AND recurringId IS NOT NULL)
+             WHERE id IN (SELECT DISTINCT recurringId FROM transactions WHERE ${vs.sql} AND recurringId IS NOT NULL)
              ORDER BY lastDate DESC`
           )
-          .all(...variants) as { id: number; merchant: string; cadence: string; avgAmount: number; lastDate: string }[]
+          .all(...vs.args) as { id: number; merchant: string; cadence: string; avgAmount: number; lastDate: string }[]
       ).filter((r) => isRecurringActive(r.lastDate, settings[r.merchant]?.cadence ?? r.cadence));
   const planDay = new Map((db.prepare("SELECT key, day FROM plans").all() as { key: string; day: number | null }[]).map((p) => [p.key, p.day]));
   const dayNum = (merchant: string, lastDate: string) => {
@@ -1196,13 +1217,13 @@ export function merchantSummary(merchant: string, series?: string | null) {
                (t.hash IN (SELECT hash FROM recurring_tx_exclusions)) AS recurringExcluded,
                (t.hash IN (SELECT hash FROM recurring_tx_inclusions)) AS recurringIncluded
              FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
-             WHERE t.merchant IN (${ph}) AND t.excluded = 0 AND t.recurringId IS NULL
+             WHERE ${vsT.sql} AND t.excluded = 0 AND t.recurringId IS NULL
                ${recent.some((r) => r.recurringId == null) ? `AND t.id NOT IN (${recent.filter((r) => r.recurringId == null).map(() => "?").join(",")})` : ""}
                AND NOT EXISTS (SELECT 1 FROM transactions s WHERE s.hash LIKE t.hash || ':s%')
              ORDER BY COALESCE(t.effectiveDate, t.date) DESC LIMIT 8`
           )
           .all(
-            ...variants,
+            ...vsT.args,
             ...recent.filter((r) => r.recurringId == null).map((r) => r.id)
           ) as typeof recent).map((r) => ({ ...r, planName: null as string | null, planDay: null as string | null }));
   return {
@@ -1340,13 +1361,13 @@ export function setMerchantCategory(merchant: string, categoryId: number | null)
 // vendor would pull them into one bucket. A stray one-off, or one plan whose
 // charges disagree, is not that: the vendor still moves as a whole.
 function plansDisagree(variants: string[]): boolean {
-  const ph = variants.map(() => "?").join(",");
+  const scope = vendorScope(variants);
   const row = getDb()
     .prepare(
       `SELECT COUNT(DISTINCT recurringId) AS plans, COUNT(DISTINCT COALESCE(categoryId, -1)) AS categories
-       FROM transactions WHERE merchant IN (${ph}) AND recurringId IS NOT NULL AND excluded = 0`
+       FROM transactions WHERE ${scope.sql} AND recurringId IS NOT NULL AND excluded = 0`
     )
-    .get(...variants) as { plans: number; categories: number };
+    .get(...scope.args) as { plans: number; categories: number };
   return row.plans > 1 && row.categories > 1;
 }
 
@@ -1363,14 +1384,14 @@ export function applyRecategorize(
 ): "vendor" | "plan" | "refused" {
   const db = getDb();
   const variants = merchantVariants(merchant);
-  const ph = variants.map(() => "?").join(",");
+  const scope = vendorScope(variants);
   const plans = (
     db
       .prepare(
         `SELECT COUNT(DISTINCT recurringId) AS n FROM transactions
-         WHERE merchant IN (${ph}) AND recurringId IS NOT NULL`
+         WHERE ${scope.sql} AND recurringId IS NOT NULL`
       )
-      .get(...variants) as { n: number }
+      .get(...scope.args) as { n: number }
   ).n;
   if (plans > 1 && recurringId != null) {
     setSeriesCategory(recurringId, categoryId);
@@ -1382,7 +1403,9 @@ export function applyRecategorize(
     return "plan";
   }
   if (!force && plansDisagree(variants)) return "refused";
-  for (const v of variants) setMerchantCategory(v, categoryId);
+  // Every charge that is the vendor's: a charge moved to another vendor
+  // keeps its own vendor's category (Google One's $19.99 under "Google").
+  db.prepare(`UPDATE transactions SET categoryId = ? WHERE ${scope.sql}`).run(categoryId, ...scope.args);
   // One category for the vendor: its plans follow the vendor again.
   db.prepare("UPDATE plans SET categoryId = NULL WHERE vendor = ?").run(canonicalMerchant(merchant, getMerchantLinks()));
   if (recurringId != null)
@@ -2109,18 +2132,20 @@ export function suggestedRecurrings(): RecurringSuggestion[] {
   );
   const rows = db
     .prepare(
-      `SELECT merchant, COALESCE(effectiveDate, date) AS d, amount, categoryId
+      `SELECT merchant, COALESCE(effectiveDate, date) AS d, amount, categoryId, hash
        FROM transactions
        WHERE amount < 0 AND excluded = 0 AND recurringId IS NULL
        ORDER BY merchant, d`
     )
-    .all() as { merchant: string; d: string; amount: number; categoryId: number | null }[];
+    .all() as { merchant: string; d: string; amount: number; categoryId: number | null; hash: string }[];
 
-  // Group by canonical merchant so user-linked descriptors suggest as one.
+  // Group by canonical merchant so user-linked descriptors suggest as one,
+  // and a moved charge with the vendor it was moved to.
   const links = getMerchantLinks();
+  const moves = getChargeMoves();
   const byMerchant = new Map<string, typeof rows>();
   for (const r of rows) {
-    const key = canonicalMerchant(r.merchant, links);
+    const key = canonicalMerchant(vendorName(r, moves), links);
     const a = byMerchant.get(key) ?? [];
     a.push(r);
     byMerchant.set(key, a);
@@ -2403,7 +2428,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   const links = getMerchantLinks();
   const txns = db
     .prepare(
-      `SELECT id, COALESCE(effectiveDate, date) AS date, merchant, amount, account, ${countedPlanId("transactions")} AS recurringId, excluded,
+      `SELECT id, hash, COALESCE(effectiveDate, date) AS date, merchant, amount, account, ${countedPlanId("transactions")} AS recurringId, excluded,
               (hash IN (SELECT hash FROM recurring_tx_exclusions)) AS recurringExcluded
        FROM transactions
        WHERE categoryId = ? AND substr(COALESCE(effectiveDate, date),1,7) = ?
@@ -2448,6 +2473,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
           .sort((a, b) => a.dueDate.localeCompare(b.dueDate)); // soonest first
 
   const plans = planNames(settings);
+  const moves = getChargeMoves();
   return {
     ...cat,
     month,
@@ -2481,7 +2507,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     upcoming,
     transactions: txns.map((t) => ({
       ...t,
-      displayName: chargeDisplayName(t, settings, links, plans),
+      displayName: chargeDisplayName(t, settings, links, plans, moves),
     })),
   };
 }
