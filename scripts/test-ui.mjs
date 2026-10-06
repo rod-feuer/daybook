@@ -2456,6 +2456,32 @@ async function shelfEditsLand(browser) {
   });
 }
 
+// A charge's statement text says what it is: the words on your statement, not
+// a second name and not a bank ("Bank: ROKU INC" sat over the card line and
+// read as which bank, and said nothing of how it related to "Roku" above it).
+async function statementText(browser) {
+  await withPage(browser, async (page, errs) => {
+    // The Copilot import keeps the bank's words and files the charge under the cleaned name.
+    const raw = "SQ *BLUE BOTTLE COFFEE";
+    await fetch(BASE + "/api/import-copilot", { method: "POST", body: `Date,Name,Amount,Status,Account,Parent Category\n${day(0, 2)},${raw},12.34,posted,Credit,Dining` });
+    const month = day(0, 2).slice(0, 7);
+    const rows = await (await fetch(`${BASE}/api/transactions?month=${month}`)).json();
+    const t = (rows.rows ?? rows).find((r) => Math.abs(r.amount + 12.34) < 0.001);
+    const detail = t ? await (await fetch(`${BASE}/api/transactions/${t.id}`)).json() : null;
+    await page.goto(`${BASE}/transactions?month=${month}`, { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const opened = await page.evaluate((name) => {
+      const row = [...document.querySelectorAll("[data-drawer-row]")].find((r) => r.innerText.includes(name) && r.innerText.includes("12.34"));
+      row?.click();
+      return !!row;
+    }, detail?.displayName ?? "∅");
+    if (opened) { await shelfIs(page, true); await shelfSettled(page); }
+    const caption = opened ? await page.$eval(shelfSel, (el) => el.querySelector("[data-bank-text]")?.textContent ?? "") : "";
+    record("statement text", "the bank's own words read as what's on your statement", caption === `${raw} on your statement` && detail?.displayName !== raw, `name "${detail?.displayName}" · caption "${caption}"`);
+    if (errs.length) record("statement text", "page errors", false, errs[0]);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2466,7 +2492,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["statement text", statementText],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

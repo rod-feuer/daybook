@@ -44,10 +44,12 @@ export function ChargeHeader({ data, onOpenVendor, onSeparate }: { data: ChargeD
       )}
       {/* The bank's own words, when they say more than the names above:
           "Commissary" was Plaid's guess; "GP001 - CAPITOL COMMINDIANAPOLIS
-          IN" is where the charge was. */}
+          IN" is where the charge was. Said as where they appear, not as how
+          the name was made (the name may be Plaid's guess, or the owner's):
+          "Bank:" over the card line read as which bank. */}
       {data.bankText && ![data.displayName, data.merchant].some((n) => n.toLowerCase() === data.bankText!.toLowerCase()) && (
         <div className="truncate text-[11px] text-[var(--muted)]" data-bank-text title={data.bankText}>
-          Bank: {data.bankText}
+          {data.bankText} on your statement
         </div>
       )}
       {/* A combine is undone where its mistake shows: on the charge it renamed
