@@ -16,8 +16,21 @@ export const MIN_ELAPSED_DAYS = 5;
 
 export type BudgetOutlook = { kind: "over" | "under" | "on"; delta: number };
 
-export function budgetOutlook(total: number, projected: number, isForecast: boolean): BudgetOutlook {
+// With a forecast's range (projectionRange), the range decides: under or over
+// only when all of it is on one side of the budget; a range that spans the
+// budget is "on". The 1% tolerance is for a bare figure, without a range.
+export function budgetOutlook(
+  total: number,
+  projected: number,
+  isForecast: boolean,
+  range?: { low: number; high: number } | null
+): BudgetOutlook {
   const delta = projected - total;
+  if (isForecast && range) {
+    if (range.high < total) return { kind: "under", delta };
+    if (range.low > total) return { kind: "over", delta };
+    return { kind: "on", delta };
+  }
   const slack = isForecast ? BUDGET_TOLERANCE * total : 0.5; // a finished month: on budget only to the dollar
   if (Math.abs(delta) <= slack) return { kind: "on", delta };
   return { kind: delta > 0 ? "over" : "under", delta };

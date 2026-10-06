@@ -46,3 +46,32 @@ export function variableStillToCome(input: {
   const typicalPace = sum(history.map((h) => h.large / h.days)) / history.length;
   return everyday + Math.min(typicalPace * daysRemaining, Math.max(0, typicalMonth - largeSeen));
 }
+
+// How wide a month-end projection's honest range is, as a share of it.
+// `npm run backtest:pace` replays every finished month: 80% of the projections
+// made on day d of 2025-01 – 2026-09 landed within this share of how the month
+// ended. Measured with each month's remaining bills known exactly, so the live
+// miss runs a little wider. No day gets a narrower band than a later one: day 5
+// measured ±24% and day 7 ±26%, which is noise, not information.
+const BAND: [day: number, share: number][] = [[5, 0.26], [7, 0.26], [10, 0.19], [15, 0.15], [20, 0.12], [25, 0.09]];
+
+export function projectionBand(day: number, daysInMonth: number): number {
+  if (day >= daysInMonth) return 0;
+  if (day <= BAND[0][0]) return BAND[0][1];
+  for (let i = 1; i < BAND.length; i++) {
+    const [d1, s1] = BAND[i];
+    const [d0, s0] = BAND[i - 1];
+    if (day <= d1) return s0 + ((s1 - s0) * (day - d0)) / (d1 - d0);
+  }
+  // Past the last measured day, narrowing to nothing at month-end.
+  const [dl, sl] = BAND[BAND.length - 1];
+  return (sl * (daysInMonth - day)) / (daysInMonth - dl);
+}
+
+// The range a projection is said as. Never below what's already spent.
+export function projectionRange(projected: number, spent: number, band: number): { low: number; high: number } {
+  return {
+    low: Number(Math.max(spent, projected * (1 - band)).toFixed(2)),
+    high: Number((projected * (1 + band)).toFixed(2)),
+  };
+}

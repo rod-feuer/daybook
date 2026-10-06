@@ -16,6 +16,7 @@
     "test:clock": "node scripts/test-clock.mjs",
     "test:ui": "node scripts/test-ui.mjs",
     "detect:diff": "node --import tsx scripts/detect-diff.ts",
+    "backtest:pace": "node --import tsx scripts/backtest-pace.ts",
     "plans:confirm": "node --import tsx scripts/confirm-plans.ts"
   },
   "dependencies": {

@@ -58,12 +58,12 @@ function outsideBudget(data: Dash) {
 function chartSummary(data: Dash, budgetLine: number | null) {
   const pts = data.pace.series;
   const now = [...pts].reverse().find((p) => p.actual != null);
-  const end = [...pts].reverse().find((p) => p.projected != null)?.projected ?? null;
+  const range = data.pace.projectedRange;
   const prevEnd = Math.max(0, ...pts.map((p) => p.prev ?? 0));
   const $ = (v: number) => usd(v, { cents: false });
   return [
     now ? `Spent ${$(now.actual as number)} through ${shortDate(now.date)}.` : "No spending yet.",
-    end != null ? `Projected to finish at ${$(end)}.` : null,
+    range != null ? `Projected to finish between ${$(range.low)} and ${$(range.high)}.` : null,
     prevEnd > 0 ? `Last month finished at ${$(prevEnd)}.` : null,
     budgetLine != null ? `Budget ${$(budgetLine)}.` : null,
   ].filter(Boolean).join(" ");
@@ -232,7 +232,12 @@ export default function DashboardPage() {
                 // budget, at the end when over.
                 mark={
                   b && b.total > 0 && b.projected != null
-                    ? { at: b.projected / b.total, label: `Projected to finish at ${usd(b.projected, { cents: false })} of the ${usd(b.total, { cents: false })} budget` }
+                    ? {
+                        at: b.projected / b.total,
+                        label: b.range
+                          ? `Projected to finish between ${usd(b.range.low, { cents: false })} and ${usd(b.range.high, { cents: false })} of the ${usd(b.total, { cents: false })} budget`
+                          : `Projected to finish at ${usd(b.projected, { cents: false })} of the ${usd(b.total, { cents: false })} budget`,
+                      }
                     : undefined
                 }
                 barLabel={barLabel}
@@ -344,14 +349,16 @@ export default function DashboardPage() {
                           />
                           <Tooltip
                             formatter={(v, name) =>
-                              [
-                                usd(Number(v), { cents: false }),
-                                name === "projected"
-                                  ? "Projected"
-                                  : name === "prev"
-                                    ? "Last month"
-                                    : "Spent",
-                              ] as [string, string]
+                              (Array.isArray(v)
+                                ? [`${usd(Number(v[0]), { cents: false })}–${usd(Number(v[1]), { cents: false })}`, "Range"]
+                                : [
+                                    usd(Number(v), { cents: false }),
+                                    name === "projected"
+                                      ? "Projected"
+                                      : name === "prev"
+                                        ? "Last month"
+                                        : "Spent",
+                                  ]) as [string, string]
                             }
                             labelFormatter={(label) => shortDate(String(label))}
                             contentStyle={{
@@ -391,6 +398,18 @@ export default function DashboardPage() {
                             strokeWidth={2}
                             fill="url(#g)"
                             connectNulls={false}
+                          />
+                          {/* The projection's range, fanning out from today: drawn
+                              under the dashed line, a tint with no edge. */}
+                          <Area
+                            type="monotone"
+                            dataKey="range"
+                            isAnimationActive={!still}
+                            stroke="none"
+                            fill="var(--accent)"
+                            fillOpacity={0.12}
+                            connectNulls
+                            activeDot={false}
                           />
                           <Area
                             type="monotone"
@@ -539,8 +558,10 @@ function ChartLegend({
       </span>
       {showProjected && (
         <span className="flex items-center gap-2">
-          <span className="inline-block w-3.5 border-t-2 border-dashed border-[var(--accent)]" />
-          Projected
+          {/* The dashed line on its band: where the month is headed, and how far
+              past months' projections missed by from this day. */}
+          <span className="inline-block h-2.5 w-3.5 bg-[var(--accent)]/15 [background-image:linear-gradient(var(--accent),var(--accent))] bg-[length:100%_2px] bg-center bg-no-repeat" />
+          Projected range
         </span>
       )}
       {showPrev && (
@@ -608,10 +629,10 @@ function prevPeriodLabel(prev: Dash["prev"]): string | null {
 // the largest spending point, at most six ticks. The budget joins the scale
 // when it sits within a fifth of that top; further up, it is said in words.
 function chartScale(
-  series: { actual: number | null; projected: number | null; prev: number | null }[],
+  series: { actual: number | null; projected: number | null; range: [number, number] | null; prev: number | null }[],
   budget: number | null
 ): { top: number; ticks: number[]; budgetOnChart: boolean } {
-  const spend = Math.max(1, ...series.flatMap((p) => [p.actual ?? 0, p.projected ?? 0, p.prev ?? 0]));
+  const spend = Math.max(1, ...series.flatMap((p) => [p.actual ?? 0, p.projected ?? 0, p.range?.[1] ?? 0, p.prev ?? 0]));
   const budgetOnChart = budget != null && budget <= spend * 1.2;
   const reach = budgetOnChart ? Math.max(spend, budget as number) : spend;
   const raw = reach / 5;
