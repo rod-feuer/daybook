@@ -2553,6 +2553,8 @@ async function dragNoSelect(browser) {
         body: getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect,
         selected: String(window.getSelection()),
         lifted: !!held && held.classList.contains("lifted") && getComputedStyle(held).boxShadow !== "none",
+        // Under the pointer, not only snapped to slots: a vertical offset from its slot.
+        follows: !!held && Math.abs(new DOMMatrix(getComputedStyle(held).transform).m42) > 0.5,
         slid: others.some((e) => e.getAnimations().length > 0),
       };
     }, await grip.evaluate((g) => g.dataset.grip));
@@ -2564,9 +2566,9 @@ async function dragNoSelect(browser) {
     record("drag no select", "letting go makes the page's text selectable again", after !== "none", `after: ${after}`);
     // Weight without haptics (iOS gives a web page none): the row in hand
     // lifts, the rows it passes slide out of its way, and letting go sets it down.
-    const setDown = await page.evaluate(() => !document.querySelector("[data-sort-id].lifted"));
-    record("drag lift", "the row in hand lifts off the list, and a row it passes slides out of its way", during.lifted && during.slid, JSON.stringify({ lifted: during.lifted, slid: during.slid }));
-    record("drag lift", "letting go sets the row down", setDown);
+    const setDown = await page.evaluate(() => [...document.querySelectorAll("[data-sort-id]")].every((e) => !e.classList.contains("lifted") && Math.abs(new DOMMatrix(getComputedStyle(e).transform).m42) < 0.5));
+    record("drag lift", "the row in hand lifts off the list, follows the pointer, and a row it passes slides out of its way", during.lifted && during.follows && during.slid, JSON.stringify({ lifted: during.lifted, follows: during.follows, slid: during.slid }));
+    record("drag lift", "letting go sets the row down in its place", setDown);
     // With less motion asked for, rows change place without sliding.
     await page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
     await page.reload({ waitUntil: "networkidle2" });

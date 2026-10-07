@@ -432,6 +432,16 @@ function SortableRows({
   // from the list's top, so a scroll between two renders isn't a move. The
   // row in hand follows the pointer and doesn't slide. Not with less motion.
   const tops = useRef(new Map<number, number>());
+  // The row in hand stays under the pointer: its offset from where the drag
+  // began, less how far its slot has moved since (offsetTop ignores the
+  // transform, so it is the slot).
+  const grab = useRef<{ y: number; slot: number; pointer: number } | null>(null);
+  const follow = useCallback((id: number | null) => {
+    const g = grab.current;
+    const held = id == null ? null : list.current?.querySelector<HTMLElement>(`[data-sort-id="${id}"]`);
+    if (!g || !held) return;
+    held.style.transform = `translateY(${g.pointer - g.y - (held.offsetTop - g.slot)}px) scale(1.02)`;
+  }, []);
   useLayoutEffect(() => {
     const el = list.current;
     if (!el) return;
@@ -447,7 +457,8 @@ function SortableRows({
         item.animate([{ transform: `translateY(${was - top}px)` }, { transform: "translateY(0)" }], { duration: 160, easing: "ease-out" });
     }
     tops.current = next;
-  }, [order, dragging]);
+    follow(dragging);
+  });
   const move = (ids: number[], id: number, to: number) => {
     const next = ids.filter((x) => x !== id);
     next.splice(Math.max(0, Math.min(to, next.length)), 0, id);
@@ -457,6 +468,8 @@ function SortableRows({
   function onPointerDown(e: React.PointerEvent<HTMLButtonElement>, id: number) {
     e.stopPropagation();
     e.preventDefault();
+    const held = e.currentTarget.closest<HTMLElement>("[data-sort-id]");
+    grab.current = { y: e.clientY, slot: held?.offsetTop ?? 0, pointer: e.clientY };
     setDragging(id);
   }
   // While dragging, the window follows the pointer: rows move in the DOM as
@@ -479,6 +492,8 @@ function SortableRows({
     body.setProperty("-webkit-user-select", "none");
     const onMove = (e: PointerEvent) => {
       if (!list.current) return;
+      if (grab.current) grab.current.pointer = e.clientY;
+      follow(id);
       // The row's new place: before the first other row whose middle is below the pointer.
       const others = [...list.current.querySelectorAll<HTMLElement>("[data-account-row]")].filter((el) => el.dataset.id !== String(id));
       const to = others.findIndex((el) => {
@@ -491,6 +506,14 @@ function SortableRows({
       setOrder(next);
     };
     const onUp = () => {
+      // Set down: from under the finger, a glide into its slot.
+      const held = list.current?.querySelector<HTMLElement>(`[data-sort-id="${id}"]`);
+      if (held) {
+        held.style.transition = "transform 180ms ease-out, box-shadow 180ms ease-out";
+        held.style.transform = "";
+        setTimeout(() => (held.style.transition = ""), 220);
+      }
+      grab.current = null;
       setDragging(null);
       if (orderRef.current.join(",") !== key) onOrder(orderRef.current);
     };
@@ -504,7 +527,7 @@ function SortableRows({
       body.userSelect = was;
       body.setProperty("-webkit-user-select", was);
     };
-  }, [dragging, key, onOrder]);
+  }, [dragging, key, onOrder, follow]);
   function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, id: number) {
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     e.preventDefault();
@@ -522,7 +545,7 @@ function SortableRows({
       {shown.map((a) => (
         // The row in hand is lifted off the list (.lifted) and set down by
         // the transition back when it's let go.
-        <div key={a.id} data-sort-id={a.id} className={`transition-[transform,box-shadow] duration-150 ease-out ${dragging === a.id ? "lifted" : ""}`}>
+        <div key={a.id} data-sort-id={a.id} className={dragging === a.id ? "lifted" : undefined}>
         {render(
           a,
           shown.length > 1 ? (
