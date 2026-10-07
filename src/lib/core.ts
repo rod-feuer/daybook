@@ -16,6 +16,8 @@ import {
   linkedAliases,
   getRecurringSettings,
   setRecurringSetting,
+  getBudgetsFull,
+  ytdSpentByCategory,
   countedPlanId,
   counted,
 } from "./queries";
@@ -1203,7 +1205,10 @@ export type DashboardData = {
     color: string;
     icon: string;
     total: number;
+    // The budget as set: an annual one is the year's, judged on ytdSpent.
     budget: number | null;
+    budgetPeriod: "monthly" | "annual";
+    ytdSpent: number;
     // Monthly-equivalent of this category's detected recurring charges — the
     // committed "floor" of the category, marked on its bar so the discretionary
     // headroom (budget − recurring) is visible. 0 when nothing recurs here.
@@ -1431,6 +1436,11 @@ export function dashboard(month?: string): DashboardData {
   const pace = { series, projectedMonthEnd, projectedRange, daysElapsed: lastDataDay, daysInMonth };
 
   const recurringByCat = recurringMonthlyByCategory();
+  // Each row's budget as set, so an annual one is judged on the year so far
+  // (as the Categories page does), not as a twelfth of it per month. The
+  // summary card's total stays monthly-equivalent: it is one month's figure.
+  const budgetsAsSet = getBudgetsFull(m);
+  const ytd = ytdSpentByCategory();
   const byCategory = [...catMap.entries()]
     .map(([name, v]) => ({
       name,
@@ -1438,7 +1448,9 @@ export function dashboard(month?: string): DashboardData {
       color: v.color,
       icon: v.icon,
       total: Number(v.total.toFixed(2)),
-      budget: v.id != null ? budgets[v.id] ?? null : null,
+      budget: v.id != null ? budgetsAsSet[v.id]?.amount ?? null : null,
+      budgetPeriod: (v.id != null ? budgetsAsSet[v.id]?.period : undefined) ?? "monthly",
+      ytdSpent: v.id != null ? Number((ytd.get(v.id) ?? 0).toFixed(2)) : 0,
       recurringBaseline: v.id != null ? Number((recurringByCat[v.id] ?? 0).toFixed(2)) : 0,
     }))
     .sort((a, b) => b.total - a.total);

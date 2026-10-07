@@ -937,6 +937,8 @@ function CategoryBars({
     icon: string;
     total: number;
     budget: number | null;
+    budgetPeriod: "monthly" | "annual";
+    ytdSpent: number;
     recurringBaseline: number;
   }[];
   month: string;
@@ -945,13 +947,16 @@ function CategoryBars({
   const shelfActive = useShelfActive();
   if (rows.length === 0)
     return <p className="text-[13px] text-[var(--muted)]">No spending this month.</p>;
-  const pace = paceOf(month);
   const fmt = (v: number) => usd(v, { cents: false });
   const shown = rows.slice(0, 7);
   return (
     <div className="flex flex-col gap-3">
       {shown.map((r) => {
-        const over = r.budget != null && r.total > r.budget;
+        // An annual budget is the year's: judged on the year so far, with
+        // the year's pace, in the Categories row's words.
+        const annual = r.budgetPeriod === "annual";
+        const spentNow = annual ? r.ytdSpent : r.total;
+        const over = r.budget != null && spentNow > r.budget;
         const active = r.categoryId != null && shelfActive.isCategory(r.categoryId, month);
         const cls = `group block w-full cursor-pointer rounded-lg text-left transition-opacity hover:opacity-80${
           active ? " -mx-2 -my-1 bg-[var(--accent)]/10 px-2 py-1" : ""
@@ -978,12 +983,13 @@ function CategoryBars({
               </span>
             </div>
             {/* Its own budget is the bar; a category without one has none. */}
-            {r.budget != null && <BudgetBar spent={r.total} budget={r.budget} pace={pace} />}
+            {r.budget != null && <BudgetBar spent={spentNow} budget={r.budget} pace={paceOf(month, r.budgetPeriod)} period={r.budgetPeriod} />}
             {/* What's left, said: the pair above made you subtract. The
                 Categories row's words, so the two pages agree. */}
             {r.budget != null && (
               <div className={`mt-1 text-right text-xs ${over ? "font-medium text-[var(--bad)]" : "text-[var(--muted)]"}`} data-row-left>
-                {over ? `${fmt(r.total - r.budget)} over` : `${fmt(r.budget - r.total)} left`}
+                {over ? `${fmt(spentNow - r.budget)} over` : `${fmt(r.budget - spentNow)} left`}
+                {annual ? " this year" : ""}
               </div>
             )}
           </>

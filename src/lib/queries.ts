@@ -1984,6 +1984,28 @@ export type CategoryWithTotals = Category & {
   suggestedAnnualBudget: number;
 };
 
+// Calendar year-to-date spend per category: the basis an annual budget is
+// judged on ("$X left this year"), by the Categories page and the dashboard's
+// rows alike. Expense categories count outflows, income ones inflows.
+export function ytdSpentByCategory(): Map<number, number> {
+  const yearStart = `${new Date().getUTCFullYear()}-01-01`;
+  const ytdRows = getDb()
+    .prepare(
+      `SELECT t.categoryId AS id,
+        COALESCE(SUM(
+          CASE
+            WHEN c.kind = 'expense' AND t.amount < 0 THEN -t.amount
+            WHEN c.kind = 'income'  AND t.amount > 0 THEN  t.amount
+            ELSE 0
+          END), 0) AS spent
+       FROM transactions t JOIN categories c ON c.id = t.categoryId
+       WHERE t.excluded = 0 AND COALESCE(t.effectiveDate, t.date) >= @yearStart
+       GROUP BY t.categoryId`
+    )
+    .all({ yearStart }) as { id: number; spent: number }[];
+  return new Map(ytdRows.map((r) => [r.id, r.spent]));
+}
+
 export function categoriesWithTotals(month?: string): CategoryWithTotals[] {
   const db = getDb();
   const monthFilter = month ? "AND substr(COALESCE(t.effectiveDate, t.date),1,7) = @month" : "";
@@ -2012,24 +2034,7 @@ export function categoriesWithTotals(month?: string): CategoryWithTotals[] {
   const budgets = getBudgetsFull(month ?? new Date().toISOString().slice(0, 7));
   const baseline = recurringMonthlyByCategory();
 
-  // Calendar year-to-date spend per category — the comparison basis for annual
-  // budgets ("$X of $Y this year"). Same sign convention as `total` above.
-  const yearStart = `${new Date().getUTCFullYear()}-01-01`;
-  const ytdRows = db
-    .prepare(
-      `SELECT t.categoryId AS id,
-        COALESCE(SUM(
-          CASE
-            WHEN c.kind = 'expense' AND t.amount < 0 THEN -t.amount
-            WHEN c.kind = 'income'  AND t.amount > 0 THEN  t.amount
-            ELSE 0
-          END), 0) AS spent
-       FROM transactions t JOIN categories c ON c.id = t.categoryId
-       WHERE t.excluded = 0 AND COALESCE(t.effectiveDate, t.date) >= @yearStart
-       GROUP BY t.categoryId`
-    )
-    .all({ yearStart }) as { id: number; spent: number }[];
-  const ytdById = new Map(ytdRows.map((r) => [r.id, r.spent]));
+  const ytdById = ytdSpentByCategory();
 
   // Suggested budget = the trailing-12-month average monthly spend (total spend
   // over the window ÷ 12, so an annual or sporadic expense smooths into a

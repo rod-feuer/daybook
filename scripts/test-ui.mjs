@@ -2615,6 +2615,33 @@ async function dragThreshold(browser) {
   });
 }
 
+// An annual budget is the year's allowance: a dashboard row judges it on the
+// year so far, as the Categories row does. As a twelfth a month, the month a
+// yearly premium posted read "$X over" here and "$Y left this year" there.
+async function annualBudgetRow(browser) {
+  await withPage(browser, async (page, errs) => {
+    const month = new Date().toISOString().slice(0, 7);
+    const d = await (await fetch(`${BASE}/api/dashboard?month=${month}`)).json();
+    const row = (d.byCategory ?? []).find((c) => c.categoryId != null && c.budget == null && c.total > 0);
+    if (!row) return record("annual budget row", "a category with spending and no budget to try it on", false, "none in the fixture");
+    const cats = await (await fetch(`${BASE}/api/categories?month=${month}`)).json();
+    const ytd = Math.round((cats.categories ?? cats).find((c) => c.id === row.categoryId)?.ytdSpent ?? NaN);
+    // A year's budget $500 above the year so far, and well under 12x this month: as a twelfth, it read over.
+    const budget = ytd + 500;
+    const set = (body) => fetch(`${BASE}/api/categories/${row.categoryId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, month: `${month.slice(0, 4)}-01` }) });
+    await set({ budget, period: "annual" });
+    await page.goto(BASE + "/", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-row-left]");
+    const said = await page.evaluate((name) => {
+      const r = [...document.querySelectorAll("[data-drawer-row]")].find((e) => e.querySelector(".font-medium")?.textContent.trim() === name);
+      return r?.querySelector("[data-row-left]")?.textContent ?? null;
+    }, row.name);
+    record("annual budget row", "a row with an annual budget says what's left of the year's budget, as Categories does", said === "$500 left this year", `${row.name}: "${said}" (year so far $${ytd}, budget $${budget})`);
+    await set({ budget: null });
+    if (errs.length) record("annual budget row", "page errors", false, errs[0]);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2625,7 +2652,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
   ]) {

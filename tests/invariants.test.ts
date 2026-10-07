@@ -3801,3 +3801,20 @@ test("the category shelf compares last month through the same day the dashboard 
   assert.equal(c.prevThrough, 2);
   assert.equal(c.prevSpent, 0, "last month's charge on the 3rd falls outside Oct 1–2's comparison");
 });
+
+// WHY: an annual budget is a year's allowance. The dashboard judged it as a
+// twelfth per month, so the month a once-a-year premium posted read "$X over"
+// there while Categories said "$Y left this year". One rule, Categories': the
+// year so far against the year's budget.
+test("the dashboard's category rows judge an annual budget on the year so far, as Categories does", () => {
+  const ins = addCat("Insurance");
+  setBudget(ins, 3000, "annual", "2026-01");
+  const cm = new Date().toISOString().slice(0, 7);
+  tx("Chubb", { amount: -2400, date: `${cm}-01`, categoryId: ins }); // the yearly premium, this month
+  const row = dashboard(cm).byCategory.find((c) => c.categoryId === ins)!;
+  const cats = categoriesWithTotals(cm).find((c) => c.id === ins)!;
+  assert.equal(row.budget, 3000, "the year's budget, not $250 a month");
+  assert.equal(row.budgetPeriod, "annual");
+  assert.equal(row.ytdSpent, cats.ytdSpent, "the same year-so-far figure the Categories page uses");
+  assert.ok(row.ytdSpent <= row.budget, "$2,400 of $3,000 this year: not over");
+});
