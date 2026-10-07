@@ -74,3 +74,17 @@ export function monthDayGap(iso: string, day: number): number {
   }
   return best;
 }
+
+// One cadence period after a date (YYYY-MM-DD), in UTC. The detector's next
+// due and the overrides' re-derived one both step by this, so they agree.
+export function addCadence(date: string, cadence: string): string {
+  const d = new Date(date + "T00:00:00Z");
+  if (cadence === "weekly") d.setUTCDate(d.getUTCDate() + 7);
+  else if (cadence === "biweekly") d.setUTCDate(d.getUTCDate() + 14);
+  else if (cadence === "monthly") d.setUTCMonth(d.getUTCMonth() + 1);
+  else if (cadence === "bimonthly") d.setUTCMonth(d.getUTCMonth() + 2);
+  else if (cadence === "quarterly") d.setUTCMonth(d.getUTCMonth() + 3);
+  else if (cadence === "semiannual") d.setUTCMonth(d.getUTCMonth() + 6);
+  else d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}

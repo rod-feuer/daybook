@@ -1,6 +1,6 @@
 import { getChargeMoves, vendorName } from "./chargeVendors";
 import type Database from "better-sqlite3";
-import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensureChargeVendors, ensurePlanMatches as ensureTables } from "./db";
+import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensureChargeVendors, ensurePlanMatchTables } from "./db";
 import { nameAffinity } from "./similarity";
 import { merchantKey } from "./merchant";
 import { canonicalMerchant, getMerchantLinks } from "./queries";
@@ -41,7 +41,7 @@ export function ensurePlanMatches(db: Database.Database) {
   ensureRecurringTxExclusions(db);
   ensureRecurringTxInclusions(db);
   ensureChargeVendors(db);
-  ensureTables(db);
+  ensurePlanMatchTables(db);
 }
 
 export type PlanMatch = {
