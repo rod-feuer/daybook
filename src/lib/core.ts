@@ -23,7 +23,7 @@ import {
 } from "./queries";
 import type { Recurring } from "./types";
 import { migrateCrossVendorPlans } from "./vendorMoves";
-import { CADENCE_DAYS, medianGap } from "./cadence";
+import { CADENCE_DAYS, medianGap, addCadence } from "./cadence";
 import { MIN_ELAPSED_DAYS } from "./budgetOutlook";
 
 // ---- Dedupe key -----------------------------------------------------------
@@ -203,17 +203,8 @@ function currentAmount(amounts: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-export function addCadence(date: string, cadence: Recurring["cadence"]): string {
-  const d = new Date(date + "T00:00:00Z");
-  if (cadence === "weekly") d.setUTCDate(d.getUTCDate() + 7);
-  else if (cadence === "biweekly") d.setUTCDate(d.getUTCDate() + 14);
-  else if (cadence === "monthly") d.setUTCMonth(d.getUTCMonth() + 1);
-  else if (cadence === "bimonthly") d.setUTCMonth(d.getUTCMonth() + 2);
-  else if (cadence === "quarterly") d.setUTCMonth(d.getUTCMonth() + 3);
-  else if (cadence === "semiannual") d.setUTCMonth(d.getUTCMonth() + 6);
-  else d.setUTCFullYear(d.getUTCFullYear() + 1);
-  return d.toISOString().slice(0, 10);
-}
+// Re-exported: copilot-import and the tests import it from here.
+export { addCadence } from "./cadence";
 
 // The most common category among a recurring's charges — robust to a single new
 // uncategorized member (unlike "use the latest charge's category", which a fresh

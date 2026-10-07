@@ -13,7 +13,7 @@ import {
 } from "./db";
 import type { TransactionWithCategory, Recurring, Category } from "./types";
 import { nameAffinity, LOW_MATCH } from "./similarity";
-import { CADENCE_DAYS, PER_YEAR, monthlyFactor, medianGap, type Cadence } from "./cadence";
+import { CADENCE_DAYS, PER_YEAR, monthlyFactor, medianGap, addCadence, type Cadence } from "./cadence";
 import { vendorScope, getChargeMoves, vendorName } from "./chargeVendors";
 
 // ---- Merchant linking ----------------------------------------------------
@@ -883,7 +883,7 @@ export function merchantVariants(merchant: string): string[] {
 
 // Recategorize ONE series of a descriptor that carries several (a split
 // "Netflix · 26th"): only its linked charges move, so the sibling keeps its
-// category. Vendor-wide recategorize (setMerchantCategory) would move both.
+// category. A vendor-wide applyRecategorize (no plan named) would move both.
 export function setSeriesCategory(recurringId: number, categoryId: number | null) {
   const db = getDb();
   db.prepare("UPDATE transactions SET categoryId = ? WHERE recurringId = ?").run(categoryId, recurringId);
@@ -894,32 +894,13 @@ export function setSeriesCategory(recurringId: number, categoryId: number | null
 // it lands on/after today, so the drawer's "next due" never shows a past date
 // when a charge is late or the series has paused. Display-only: the stored
 // nextDate is left alone (the dashboard's "upcoming" filter relies on it).
-// Advance a UTC date in place by one cadence period.
-function advanceByCadence(d: Date, cadence: string): void {
-  if (cadence === "weekly") d.setUTCDate(d.getUTCDate() + 7);
-  else if (cadence === "biweekly") d.setUTCDate(d.getUTCDate() + 14);
-  else if (cadence === "monthly") d.setUTCMonth(d.getUTCMonth() + 1);
-  else if (cadence === "bimonthly") d.setUTCMonth(d.getUTCMonth() + 2);
-  else if (cadence === "quarterly") d.setUTCMonth(d.getUTCMonth() + 3);
-  else if (cadence === "semiannual") d.setUTCMonth(d.getUTCMonth() + 6);
-  else d.setUTCFullYear(d.getUTCFullYear() + 1);
-}
-
-// Next due one cadence period after a base date (YYYY-MM-DD). Used to re-derive a
-// recurring's next-due when the user corrects its cadence.
-function nextAfter(baseDate: string, cadence: string): string {
-  const d = new Date(baseDate + "T00:00:00Z");
-  advanceByCadence(d, cadence);
-  return d.toISOString().slice(0, 10);
-}
-
 function nextDueFromToday(nextDate: string, cadence: string): string {
   const today = new Date().toISOString().slice(0, 10);
   if (nextDate >= today) return nextDate;
-  const d = new Date(nextDate + "T00:00:00Z");
+  let d = nextDate;
   let guard = 0;
-  while (d.toISOString().slice(0, 10) < today && guard++ < 600) advanceByCadence(d, cadence);
-  return d.toISOString().slice(0, 10);
+  while (d < today && guard++ < 600) d = addCadence(d, cadence);
+  return d;
 }
 
 // Whether a recurring of `cadence` anchored in `anchorMonth` (1-12) is expected
@@ -1116,7 +1097,7 @@ export function merchantSummary(merchant: string, series?: string | null) {
           perCharge: Number(Math.abs(rec.avgAmount).toFixed(2)),
           annualized: Number((Math.abs(rec.avgAmount) * (PER_YEAR[effCadence as Cadence] ?? 12)).toFixed(2)),
           nextDate: nextDueFromToday(
-            sett?.nextDate ?? nextAfter(rec.lastDate, effCadence),
+            sett?.nextDate ?? addCadence(rec.lastDate, effCadence),
             effCadence
           ),
         }
@@ -1221,7 +1202,7 @@ export function merchantSummary(merchant: string, series?: string | null) {
       day: (dayCount.get(d) ?? 0) > 1 ? `${dayLabel(d)} · ${amountLabel(amount)}` : dayLabel(d),
       amount,
       cadence,
-      nextDate: nextDueFromToday(s?.nextDate ?? nextAfter(r.lastDate, cadence), cadence),
+      nextDate: nextDueFromToday(s?.nextDate ?? addCadence(r.lastDate, cadence), cadence),
       ended: recurringEnded(s?.endedDate, r.lastDate),
     };
   });
@@ -1387,14 +1368,6 @@ export function setTransactionExcluded(id: number, excluded: boolean) {
   getDb()
     .prepare("UPDATE transactions SET excluded = ? WHERE id = ?")
     .run(excluded ? 1 : 0, id);
-}
-
-// Recategorize every transaction of a merchant (used when editing a recurring's
-// category on the Recurrings page). Returns the rows changed.
-export function setMerchantCategory(merchant: string, categoryId: number | null) {
-  return getDb()
-    .prepare("UPDATE transactions SET categoryId = ? WHERE merchant = ?")
-    .run(categoryId, merchant).changes;
 }
 
 // Houses under one vendor: several plans whose charges sit in more than one
@@ -1804,7 +1777,7 @@ export function upcomingRecurringExpenses(
       const s = settings[r.merchant];
       // A cadence correction re-derives next-due from the last charge (so the
       // dashboard's upcoming list follows it), unless next-due was set explicitly.
-      const nextDate = s?.nextDate ?? (s?.cadence ? nextAfter(r.lastDate, s.cadence) : r.nextDate);
+      const nextDate = s?.nextDate ?? (s?.cadence ? addCadence(r.lastDate, s.cadence) : r.nextDate);
       const mag = s?.expectedAmount ?? Math.abs(r.avgAmount);
       return { ...r, cadence: s?.cadence ?? r.cadence, nextDate, avgAmount: -mag, displayName: s?.alias ?? displayMerchant(r.merchant) };
     })

@@ -1,4 +1,4 @@
-import { getDb, ensurePlanMatches, ensureRecurringTxInclusions } from "./db";
+import { getDb, ensurePlanMatchTables, ensureRecurringTxInclusions } from "./db";
 import { getChargeMoves, vendorScope } from "./chargeVendors";
 import { canonicalMerchant, getMerchantLinks, merchantVariants } from "./queries";
 import { merchantKey } from "./merchant";
@@ -136,7 +136,7 @@ export function applyVendorRules(): number {
 // and stays as their In plan. Idempotent: it finds nothing the second time.
 export function migrateCrossVendorPlans() {
   const db = getDb();
-  ensurePlanMatches(db);
+  ensurePlanMatchTables(db);
   ensureRecurringTxInclusions(db);
   getChargeMoves(); // the table, on the live connection
   const links = getMerchantLinks();

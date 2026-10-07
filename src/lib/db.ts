@@ -144,7 +144,7 @@ function init(db: Database.Database) {
   ensurePlans(db);
   ensurePlanCharges(db);
   ensureAccounts(db);
-  ensurePlanMatches(db);
+  ensurePlanMatchTables(db);
   ensureChargeVendors(db);
 }
 
@@ -172,8 +172,9 @@ export function ensureChargeVendors(db: Database.Database) {
 }
 
 // Charges joined to another vendor's plan by score (planMatch.ts), and the
-// suggestions the owner dismissed.
-export function ensurePlanMatches(db: Database.Database) {
+// suggestions the owner dismissed. Just these two tables; planMatch.ts's
+// ensurePlanMatches also makes the ones plan matching reads.
+export function ensurePlanMatchTables(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS plan_matches (hash TEXT PRIMARY KEY, plan TEXT NOT NULL, score REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS plan_match_dismissals (hash TEXT PRIMARY KEY);
