@@ -331,6 +331,9 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
     if (!(await mutate(fn, messages, { refresh: "never" }))) return;
     after();
     onChange.current?.();
+    // The pickers' vendor list: a combine, separate or rename changes it, and
+    // it was read once, so they offered names already folded away.
+    getJson<Vendor[]>("/api/vendors").then(setVendors).catch(() => {});
   }
   const UPDATE_ERROR = "Couldn't update — please try again";
 

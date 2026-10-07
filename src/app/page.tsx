@@ -32,7 +32,7 @@ import { LoadError, LoadingRows } from "@/components/LoadState";
 import Shell from "@/components/Shell";
 import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { HeaderMenu } from "@/components/HeaderMenu";
-import { useTxDrawer, useCategoryShelf, useShelfActive } from "@/components/TransactionDrawer";
+import { useTxDrawer, useChargeShelf, useCategoryShelf, useShelfActive } from "@/components/TransactionDrawer";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
 import { useMonthBoot } from "@/components/useMonthBoot";
 import { useMutation } from "@/components/useMutation";
@@ -96,6 +96,7 @@ export default function DashboardPage() {
   const still = useReducedMotion();
   const [recent, setRecent] = useState<Tx[]>([]);
   const openTx = useTxDrawer();
+  const openCharge = useChargeShelf();
   const shelfActive = useShelfActive();
 
   const load = useCallback(async (m: string) => {
@@ -513,9 +514,10 @@ export default function DashboardPage() {
                 <li key={t.id}>
                   <button
                     data-drawer-row
-                    onClick={() => openTx(t.merchant, { onChange: refresh })}
+                    // A transaction row opens the charge (DESIGN.md §2), as on Transactions.
+                    onClick={() => openCharge(t.id, { onChange: refresh })}
                     className={`group -mx-2 flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-3 text-left transition-colors ${
-                      shelfActive.isMerchant(t.merchant)
+                      shelfActive.isCharge(t.id)
                         ? "bg-[var(--accent)]/10"
                         : "hover:bg-[var(--hover)]"
                     }`}
@@ -531,7 +533,7 @@ export default function DashboardPage() {
                         )}
                       </div>
                       <div className="text-xs text-[var(--muted)]">
-                        {shortDate(t.date)} · {t.categoryName ?? "Uncategorized"}
+                        {shortDate(t.effectiveDate ?? t.date)} · {t.categoryName ?? "Uncategorized"}
                       </div>
                     </div>
                     <Money
@@ -719,7 +721,7 @@ function UncategorizedResolver({
   onResolved: () => void;
 }) {
   const CAP = 4;
-  type UncatTx = { id: number; merchant: string; displayName: string; date: string; amount: number; excluded: 0 | 1 };
+  type UncatTx = { id: number; merchant: string; displayName: string; date: string; effectiveDate: string | null; amount: number; excluded: 0 | 1 };
   const [rows, setRows] = useState<UncatTx[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [cats, setCats] = useState<Category[]>([]);
@@ -730,7 +732,7 @@ function UncategorizedResolver({
   // Vendors whose category waits on a merge decision: the row points at it.
   const [deferred, setDeferred] = useState<Map<string, DeferredToMerge>>(new Map());
   const askedFor = useRef("");
-  const openTx = useTxDrawer();
+  const openCharge = useChargeShelf();
   const [busy, setBusy] = useState<number | null>(null);
   // "always": onResolved refreshes the dashboard (count, totals) and re-syncs
   // this list either way — a failed write has to put the optimistic row back.
@@ -911,12 +913,12 @@ function UncategorizedResolver({
               key={t.id}
               data-drawer-row
               data-proposed={s ? s.categoryName : undefined}
-              {...rowButtonProps(() => openTx(t.merchant))}
+              {...rowButtonProps(() => openCharge(t.id))}
               className={`group flex cursor-pointer items-center gap-3 px-4 py-2 text-[13px] hover:bg-[var(--hover)] ${ROW_FOCUS} ${
                 busy === t.id ? "opacity-50" : ""
               }`}
             >
-              <div className="w-12 shrink-0 text-xs tabular-nums text-[var(--muted)]">{shortDate(t.date)}</div>
+              <div className="w-12 shrink-0 text-xs tabular-nums text-[var(--muted)]">{shortDate(t.effectiveDate ?? t.date)}</div>
               {/* The property sits in its own column on desktop and under the
                   name on a phone, as on Transactions, so the name keeps its room. */}
               <div className="min-w-0 flex-1">

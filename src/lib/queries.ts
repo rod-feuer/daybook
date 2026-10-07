@@ -1103,7 +1103,8 @@ export function merchantSummary(merchant: string, series?: string | null) {
       ? {
           cadence: effCadence,
           perCharge: Number(Math.abs(rec.avgAmount).toFixed(2)),
-          annualized: Number((Math.abs(rec.avgAmount) * (PER_YEAR[effCadence as Cadence] ?? 12)).toFixed(2)),
+          // The going rate: the owner's per-charge amount when set, as every list uses.
+          annualized: Number(((sett?.expectedAmount ?? Math.abs(rec.avgAmount)) * (PER_YEAR[effCadence as Cadence] ?? 12)).toFixed(2)),
           nextDate: nextDueFromToday(
             sett?.nextDate ?? addCadence(rec.lastDate, effCadence),
             effCadence

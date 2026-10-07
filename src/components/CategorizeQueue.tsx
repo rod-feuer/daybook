@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation } from "@/components/useMutation";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
-import { postJson } from "@/lib/http";
+import { getJson, postJson } from "@/lib/http";
+import { useToast } from "@/components/Toast";
 import { CategoryProperty } from "@/components/RowCells";
 import type { CategorySuggestion, DeferredToMerge } from "@/lib/categorizeSuggest";
 import type { Category } from "@/lib/types";
@@ -45,19 +46,26 @@ export function CategorizeQueue({
   const [modelEnabled, setModelEnabled] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
+  const toast = useToast();
+  // A failed read says so and keeps what's shown: storing the error reply
+  // crashed the queue (its suggestions were undefined).
   const load = useCallback(async () => {
-    const [d, cs] = await Promise.all([
-      fetch("/api/category-suggestions").then((r) => r.json()),
-      fetch("/api/categories").then((r) => r.json()),
-    ]);
+    let d: { suggestions: Proposal[]; needsModelCount: number; dismissedCount?: number; deferred?: DeferredToMerge[]; modelEnabled: boolean };
+    let cs: Category[];
+    try {
+      [d, cs] = await Promise.all([getJson<typeof d>("/api/category-suggestions"), getJson<Category[]>("/api/categories")]);
+    } catch {
+      toast("Couldn't load the category suggestions — please try again", "error");
+      return null;
+    }
     setItems(d.suggestions);
     setCats(cs);
     setNeedsModel(d.needsModelCount);
     setDismissedCount(d.dismissedCount ?? 0);
     setDeferred(d.deferred ?? []);
     setModelEnabled(d.modelEnabled);
-    return d as { needsModelCount: number; modelEnabled: boolean };
-  }, []);
+    return d;
+  }, [toast]);
   // Ask about the vendors nobody has asked about yet, then read again: the
   // answers are remembered server-side, so the second read carries them. Once
   // per distinct count, so a failure or an unanswerable vendor can't loop.

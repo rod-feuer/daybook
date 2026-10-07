@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation } from "@/components/useMutation";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
-import { postJson } from "@/lib/http";
+import { getJson, postJson } from "@/lib/http";
+import { useToast } from "@/components/Toast";
 import { usd, shortDate } from "@/lib/format";
 import type { MergeSuggestion } from "@/lib/merges";
 
@@ -46,10 +47,16 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
   const as = (g: MergeSuggestion) =>
     picked[g.key] && g.variants.some((v) => v.merchant === picked[g.key]) ? { ...g, canonical: picked[g.key] } : g;
 
+  const toast = useToast();
+  // A failed read says so and keeps what's shown: storing the error reply as
+  // the list crashed the queue (an object has no .map).
   const load = useCallback(async () => {
-    const data = await fetch("/api/merges").then((r) => r.json());
-    setMerges(data);
-  }, []);
+    try {
+      setMerges(await getJson<MergeSuggestion[]>("/api/merges"));
+    } catch {
+      toast("Couldn't load the merge suggestions — please try again", "error");
+    }
+  }, [toast]);
   const mutate = useMutation(load);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
