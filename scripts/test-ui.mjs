@@ -997,6 +997,30 @@ async function modelSuggestionTiers(browser) {
   });
 }
 
+// The merge queue asks the model about close-named vendors on its own, and a
+// match it is sure of arrives as a card marked AI with the model's reason, so
+// the owner can tell it from a rule's card and weigh it. Asked once per visit.
+// Every request is answered here; no model is called.
+async function modelMergeCard(browser) {
+  await withPage(browser, async (page) => {
+    const state = { mode: "waiting", asks: 0 };
+    const card = { canonical: "The Roku Channel", key: "ai:Roku|The Roku Channel", dismissKeys: ["ai:Roku|The Roku Channel"], variants: [{ merchant: "Roku", count: 1 }, { merchant: "The Roku Channel", count: 5 }], total: 6, note: "Same subscription after a price rise", source: "model" };
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (!req.url().endsWith("/api/merges")) return req.continue();
+      if (req.method() === "POST" && (req.postData() ?? "").includes("judge")) { state.asks++; state.mode = "answered"; return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ asked: 1, answered: 1 }) }); }
+      if (req.method() === "GET") return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(state.mode === "answered" ? [card] : []) });
+      req.continue();
+    });
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    const shown = await page.waitForSelector("[data-merge-source='model']", { timeout: 8000 }).then(() => true).catch(() => false);
+    const r = shown ? await page.$eval("[data-merge-source='model']", (tag) => { const li = tag.closest("li"); return { tag: tag.textContent.trim(), text: li.textContent.replace(/\s+/g, " ") }; }) : null;
+    record("model merge card", "the queue asks the model with no press, and its match arrives marked AI with its reason", shown && state.asks === 1 && r.tag === "AI" && r.text.includes("Same subscription after a price rise") && /Combine Roku \(1\) into The Roku Channel \(5\)/.test(r.text), r ? `${r.tag} · ${r.text.slice(0, 120)}` : `asks=${state.asks}, no card`);
+    await sleep(600);
+    record("model merge card", "having asked, it does not ask again on that visit", state.asks === 1, `asks=${state.asks}`);
+  });
+}
+
 // The login screen asks the server for nothing. It used to request categories,
 // vendors and a bank sync before anyone had signed in: three 401s, the error
 // reply stored as if it were the category list, and the launch sync's 15-minute
@@ -2702,7 +2726,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],

@@ -13,6 +13,7 @@ import {
   confirmedKey,
 } from "./queries";
 import { CADENCE_DAYS, monthDayGap, type Cadence } from "./cadence";
+import { sureJudgments, ownerMade } from "./vendorJudge";
 
 // US state codes as normalizeMerchant title-cases them (e.g. "IN" -> "In").
 const STATES = new Set(
@@ -38,11 +39,14 @@ const PERIOD: Record<string, number> = {
 // must be a real US state code, and the surviving prefix must be specific
 // enough (≥ 4 chars) so it can't collapse to a generic like "The". Returns the
 // stripped prefix, or null when there's no recognizable location suffix.
+// A store number goes with it: the bank runs it into the city ("Target
+// 018481indianapolis In") or leaves it on the name ("Get Go # 0000075carmel
+// In", "Jay C Foods #079 000edinburgh In").
 export function stripLocationSuffix(merchant: string): string | null {
   let m = merchant.match(/^(.+?) - .+ ([A-Z][a-z])$/); // "Name - City ST"
-  if (!m) m = merchant.match(/^(.+?) [A-Za-z]+ ([A-Z][a-z])$/); // "Name City ST"
+  if (!m) m = merchant.match(/^(.+?) \d*[A-Za-z]+ ([A-Z][a-z])$/); // "Name City ST"
   if (!m || !STATES.has(m[2])) return null;
-  const prefix = m[1].trim();
+  const prefix = m[1].replace(/\s*#\s*\d*$/, "").trim();
   return prefix.length >= 4 ? prefix : null;
 }
 
@@ -55,6 +59,7 @@ export type MergeSuggestion = {
   note?: string; // why it's suggested (recurring-match only)
   categoryId?: number; // recurring-match: set uncategorized variant charges to this
   lowConfidence?: boolean; // 0.8–0.9 name band — surface for confirmation, not certain
+  source?: "model"; // the model's judgment, not a rule's (vendorJudge.ts)
   // The bill a recurring-match card folds into, as a row elsewhere can say it
   // to decide there: "Same as Every ($20 monthly, the 4th)?".
   bill?: { name: string; amount: number; cadence: string; day: number };
@@ -95,6 +100,8 @@ export function mergeSuggestions(): MergeSuggestion[] {
     if (dismissed.has(canon)) continue;
     if (countOf[canon] != null) set.add(canon);
     if (set.size < 2) continue;
+    // Already one vendor: the owner combined these under another name ("Love's #").
+    if (new Set([...set].map((m) => canonicalMerchant(m, links))).size < 2) continue;
     const variants = [...set]
       .map((merchant) => ({ merchant, count: countOf[merchant] ?? 0 }))
       .sort((a, b) => b.count - a.count);
@@ -386,12 +393,7 @@ export function handoffSuggestions(exclude: Set<string>): MergeSuggestion[] {
     Math.sign(a) === Math.sign(b) && Math.abs(Math.abs(a) - Math.abs(b)) <= 0.03 * Math.max(Math.abs(a), Math.abs(b));
   const words = (s: string) => new Set(s.toLowerCase().replace(/[^a-z ]+/g, " ").split(/\s+/).filter((w) => w.length >= 4));
   const muted = (vendor: string) => (byVendor.get(vendor) ?? []).some((t) => overrides[t.merchant] === "mute") || overrides[vendor] === "mute";
-  // A settings row that holds something: a row left behind with every field
-  // empty is not the user's name for the vendor ("Sofi" had one, and would
-  // have outranked "Sofi Mortgage (Carmel)").
-  const hasName = (vendor: string) => Object.entries(settings).some(([k, s]) => canonicalMerchant(seriesVendor(k), links) === vendor && !!s.alias);
-  const hasSettings = (vendor: string) =>
-    Object.entries(settings).some(([k, s]) => canonicalMerchant(seriesVendor(k), links) === vendor && Object.values(s).some((v) => v != null && v !== ""));
+  const { hasName, hasSettings } = ownerSettings(settings, links);
 
   const plans = db.prepare("SELECT id, merchant, cadence FROM recurrings").all() as { id: number; merchant: string; cadence: Cadence }[];
   const linkedBy = new Map<number, Tx[]>();
@@ -486,8 +488,74 @@ export function handoffSuggestions(exclude: Set<string>): MergeSuggestion[] {
   return out;
 }
 
+// Which vendor carries something the owner set, so a Combine keeps it as the
+// name the others fold into. A settings row that holds something: a row left
+// behind with every field empty is not the user's name for the vendor ("Sofi"
+// had one, and would have outranked "Sofi Mortgage (Carmel)").
+function ownerSettings(settings: ReturnType<typeof getRecurringSettings>, links: Record<string, string>) {
+  const hasName = (vendor: string) => Object.entries(settings).some(([k, s]) => canonicalMerchant(seriesVendor(k), links) === vendor && !!s.alias);
+  const hasSettings = (vendor: string) =>
+    Object.entries(settings).some(([k, s]) => canonicalMerchant(seriesVendor(k), links) === vendor && Object.values(s).some((v) => v != null && v !== ""));
+  return { hasName, hasSettings };
+}
+
+// The model's matches (vendorJudge.ts): two close names it is sure are one
+// payee, which no rule above surfaced. The vendor the owner named or set up
+// stays canonical, else the one with more charges. Dismiss key =
+// "ai:<a>|<b>" (the names sorted).
+export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
+  const db = getDb();
+  const dismissed = dismissedKeys(db);
+  const links = getMerchantLinks();
+  const { hasName, hasSettings } = ownerSettings(getRecurringSettings(), links);
+  const moves = getChargeMoves();
+  const counts = new Map<string, number>();
+  const ownCharge = new Set<string>(); // vendors with a charge the owner didn't place there (vendorJudge's ownerMade)
+  for (const t of db.prepare("SELECT merchant, hash FROM transactions WHERE excluded = 0").all() as { merchant: string; hash: string }[]) {
+    const v = canonicalMerchant(vendorName(t, moves), links);
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+    if (!ownerMade(t.hash, moves)) ownCharge.add(v);
+  }
+  // The owner's no to a rule's card holds for the model's: a dismissed
+  // location group ("Elite", "Carmel", "Cheddarup*") covers every name that
+  // starts with it, and a dismissed handoff covers its pair.
+  const dismissedStems = [...dismissed].filter((k) => !k.includes(":")).map(normName).filter((n) => n.length >= 4);
+  const ruledOut = (a: string, b: string) =>
+    dismissed.has(`handoff:${a}>${b}`) ||
+    dismissed.has(`handoff:${b}>${a}`) ||
+    dismissedStems.some((n) => normName(a).startsWith(n) && normName(b).startsWith(n));
+  const seen = new Set<string>();
+  const out: MergeSuggestion[] = [];
+  for (const { a, b, why } of sureJudgments()) {
+    const key = `ai:${a}|${b}`;
+    if (dismissed.has(key) || ruledOut(a, b) || exclude.has(a) || exclude.has(b) || seen.has(a) || seen.has(b)) continue;
+    // Both still vendors, and neither one the owner made (an answer kept from
+    // before a move or split).
+    if (!ownCharge.has(a) || !ownCharge.has(b)) continue;
+    seen.add(a).add(b); // one card per vendor
+    // Then the busier one. Preferring the name without a city kept bank
+    // truncations ("Harmony Harmo", "West Clay Win") on real data.
+    const keepA =
+      hasName(a) !== hasName(b) ? hasName(a)
+      : hasSettings(a) !== hasSettings(b) ? hasSettings(a)
+      : counts.get(a)! >= counts.get(b)!;
+    const variants = [a, b].map((m) => ({ merchant: m, count: counts.get(m)! }));
+    out.push({
+      canonical: keepA ? a : b,
+      key,
+      dismissKeys: [key],
+      variants,
+      total: variants.reduce((s, v) => s + v.count, 0),
+      note: why,
+      source: "model",
+    });
+  }
+  return out.sort((x, y) => y.total - x.total);
+}
+
 // The full review queue: behaviour-based matches first (most time-sensitive),
-// then punctuation/spacing twins, then location-suffix groups. A merchant
+// then punctuation/spacing twins, then location-suffix groups, then the
+// model's matches (asked separately: judgeVendorPairs). A merchant
 // surfaced by an earlier detector is not double-suggested by a later one.
 export function allMergeSuggestions(): MergeSuggestion[] {
   const loc = mergeSuggestions();
@@ -497,7 +565,9 @@ export function allMergeSuggestions(): MergeSuggestion[] {
   const handoff = handoffSuggestions(covered);
   for (const g of handoff) for (const v of g.variants) covered.add(v.merchant);
   const eq = nameEqualityMergeSuggestions(covered);
-  const all = [...rec, ...handoff, ...eq, ...loc];
+  for (const g of eq) for (const v of g.variants) covered.add(v.merchant);
+  // The model's last: a rule's match, where there is one, says why in its terms.
+  const all = [...rec, ...handoff, ...eq, ...loc, ...modelMergeSuggestions(covered)];
   // Confident suggestions keep their natural order; borderline ones sink to the end.
   return [...all.filter((s) => !s.lowConfidence), ...all.filter((s) => s.lowConfidence)];
 }
