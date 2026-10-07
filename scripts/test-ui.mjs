@@ -2545,13 +2545,39 @@ async function dragNoSelect(browser) {
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height * 2, { steps: 6 });
-    const during = await page.evaluate(() => ({ body: getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect, selected: String(window.getSelection()) }));
+    // Read at once: the slide lasts 160ms.
+    const during = await page.evaluate((id) => {
+      const held = document.querySelector(`[data-sort-id="${id}"]`);
+      const others = [...document.querySelectorAll("[data-sort-id]")].filter((e) => e !== held);
+      return {
+        body: getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect,
+        selected: String(window.getSelection()),
+        lifted: !!held && held.classList.contains("lifted") && getComputedStyle(held).boxShadow !== "none",
+        slid: others.some((e) => e.getAnimations().length > 0),
+      };
+    }, await grip.evaluate((g) => g.dataset.grip));
     await page.mouse.up();
     await sleep(300);
     const after = await page.evaluate(() => getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect);
     record("drag no select", "while a row is dragged, nothing on the page is selectable, and nothing is selected", during.body === "none" && during.selected === "", JSON.stringify(during));
     record("drag no select", "the grip offers no text to select", gripStyle.select === "none", JSON.stringify(gripStyle));
     record("drag no select", "letting go makes the page's text selectable again", after !== "none", `after: ${after}`);
+    // Weight without haptics (iOS gives a web page none): the row in hand
+    // lifts, the rows it passes slide out of its way, and letting go sets it down.
+    const setDown = await page.evaluate(() => !document.querySelector("[data-sort-id].lifted"));
+    record("drag lift", "the row in hand lifts off the list, and a row it passes slides out of its way", during.lifted && during.slid, JSON.stringify({ lifted: during.lifted, slid: during.slid }));
+    record("drag lift", "letting go sets the row down", setDown);
+    // With less motion asked for, rows change place without sliding.
+    await page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+    await page.reload({ waitUntil: "networkidle2" });
+    const g2 = await page.waitForSelector("[data-sortable] [data-grip]");
+    const b2 = await g2.boundingBox();
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height * 2, { steps: 6 });
+    const slidStill = await page.evaluate(() => [...document.querySelectorAll("[data-sort-id]")].some((e) => e.getAnimations().some((a) => a.effect?.getTiming().duration > 1)));
+    await page.mouse.up();
+    record("drag lift", "with less motion asked for, rows change place without sliding", !slidStill);
     if (errs.length) record("drag no select", "page errors", false, errs[0]);
   });
 }

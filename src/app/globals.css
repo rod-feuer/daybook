@@ -58,6 +58,12 @@ body {
   .card {
     @apply bg-card rounded-lg border border-[var(--border)] shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)];
   }
+  /* A row in hand (the Accounts grip): raised off the list while it moves,
+     then set down by the transition back. One step above .card's shadow. */
+  .lifted {
+    @apply relative z-10 bg-card shadow-[0_6px_16px_rgba(16,24,40,0.16),0_2px_4px_rgba(16,24,40,0.08)];
+    transform: scale(1.015);
+  }
   .stat-label {
     @apply text-xs font-medium uppercase tracking-wide text-[var(--muted)];
   }

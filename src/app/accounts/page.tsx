@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Shell from "@/components/Shell";
 import { AmountCell } from "@/components/RowCells";
 import { SummaryCard } from "@/components/SummaryCard";
@@ -427,6 +427,27 @@ function SortableRows({
   });
   const byId = new Map(rows.map((r) => [r.id, r]));
   const shown = order.map((id) => byId.get(id)).filter((r): r is Account => !!r);
+  // Rows that change place slide there from where they were, so each step of
+  // a drag (or an arrow-key move) is seen, not a jump. Positions are measured
+  // from the list's top, so a scroll between two renders isn't a move. The
+  // row in hand follows the pointer and doesn't slide. Not with less motion.
+  const tops = useRef(new Map<number, number>());
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const base = el.getBoundingClientRect().top;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const next = new Map<number, number>();
+    for (const item of el.querySelectorAll<HTMLElement>("[data-sort-id]")) {
+      const id = Number(item.dataset.sortId);
+      const top = item.getBoundingClientRect().top - base;
+      next.set(id, top);
+      const was = tops.current.get(id);
+      if (!still && was != null && was !== top && id !== dragging)
+        item.animate([{ transform: `translateY(${was - top}px)` }, { transform: "translateY(0)" }], { duration: 160, easing: "ease-out" });
+    }
+    tops.current = next;
+  }, [order, dragging]);
   const move = (ids: number[], id: number, to: number) => {
     const next = ids.filter((x) => x !== id);
     next.splice(Math.max(0, Math.min(to, next.length)), 0, id);
@@ -498,8 +519,11 @@ function SortableRows({
 
   return (
     <div ref={list} className="card divide-y divide-[var(--border)] overflow-hidden" data-sortable>
-      {shown.map((a) =>
-        render(
+      {shown.map((a) => (
+        // The row in hand is lifted off the list (.lifted) and set down by
+        // the transition back when it's let go.
+        <div key={a.id} data-sort-id={a.id} className={`transition-[transform,box-shadow] duration-150 ease-out ${dragging === a.id ? "lifted" : ""}`}>
+        {render(
           a,
           shown.length > 1 ? (
             <button
@@ -519,8 +543,9 @@ function SortableRows({
               </svg>
             </button>
           ) : undefined
-        )
-      )}
+        )}
+        </div>
+      ))}
     </div>
   );
 }
