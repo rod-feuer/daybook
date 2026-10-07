@@ -2584,6 +2584,37 @@ async function dragNoSelect(browser) {
   });
 }
 
+// A row swaps with its neighbour at half a row of travel, as iOS lists do;
+// at a third of a row it stays. (The pointer had to cross the neighbour's
+// middle, a full row, and on a phone the row felt stuck.) Runs after
+// dragNoSelect, whose two vehicles give a list to drag in.
+async function dragThreshold(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/accounts", { waitUntil: "networkidle2" });
+    const list = await page.waitForSelector("[data-sortable]:has([data-grip])");
+    const orderNow = () => list.evaluate((l) => [...l.querySelectorAll("[data-sort-id]")].map((e) => e.dataset.sortId).join(","));
+    const dragBy = async (rows) => {
+      const g = await list.$("[data-grip]");
+      const b = await g.boundingBox();
+      // A row is the row's height, not the grip's (the grip is shorter).
+      const h = await g.evaluate((e) => e.closest("[data-sort-id]").offsetHeight);
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2 + h * rows, { steps: 8 });
+      await sleep(100);
+      const o = await orderNow();
+      await page.mouse.up();
+      await sleep(400);
+      return o;
+    };
+    const before = await orderNow();
+    const third = await dragBy(0.33);
+    const most = await dragBy(0.6);
+    record("drag threshold", "at a third of a row the row stays; past half a row it swaps", third === before && most !== before, `before ${before} · ⅓ row ${third} · 0.6 row ${most}`);
+    if (errs.length) record("drag threshold", "page errors", false, errs[0]);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2594,7 +2625,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["drag no select", dragNoSelect],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
   ]) {

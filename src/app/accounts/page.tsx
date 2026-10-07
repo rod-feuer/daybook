@@ -494,14 +494,23 @@ function SortableRows({
       if (!list.current) return;
       if (grab.current) grab.current.pointer = e.clientY;
       follow(id);
-      // The row's new place: before the first other row whose middle is below the pointer.
-      const others = [...list.current.querySelectorAll<HTMLElement>("[data-account-row]")].filter((el) => el.dataset.id !== String(id));
-      const to = others.findIndex((el) => {
-        const r = el.getBoundingClientRect();
-        return e.clientY < r.top + r.height / 2;
-      });
-      const next = move(orderRef.current, id, to < 0 ? others.length : to);
-      if (next.join(",") === orderRef.current.join(",")) return;
+      // A swap at half a row, as iOS lists do: moving down, when the held
+      // row's bottom edge crosses the next row's middle; moving up, when its
+      // top edge crosses the previous row's. (The pointer crossing a
+      // neighbour's middle took a full row of travel.) Layout positions
+      // (offsetTop), not drawn ones, so a row mid-slide doesn't jitter it;
+      // one swap per move, and none until the last swap has rendered.
+      const items = [...list.current.querySelectorAll<HTMLElement>("[data-sort-id]")];
+      const ids = orderRef.current;
+      const g = grab.current;
+      if (!g || items.map((el) => el.dataset.sortId).join(",") !== ids.join(",")) return;
+      const i = ids.indexOf(id);
+      const held = items[i];
+      const top = g.slot + (g.pointer - g.y);
+      const middle = (el: HTMLElement) => el.offsetTop + el.offsetHeight / 2;
+      const to = items[i + 1] && top + held.offsetHeight > middle(items[i + 1]) ? i + 1 : items[i - 1] && top < middle(items[i - 1]) ? i - 1 : i;
+      if (to === i) return;
+      const next = move(ids, id, to);
       orderRef.current = next; // before the re-render, so the next move starts from it
       setOrder(next);
     };
