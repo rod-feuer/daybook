@@ -2527,6 +2527,94 @@ async function projectionRange(browser) {
   });
 }
 
+// Holding a finger on a row's grip is also the touch gesture for selecting
+// text, and on iOS preventDefault doesn't stop it: the row's name highlighted
+// and the selection followed the drag. While a row moves, nothing on the page
+// is selectable, and the grip never offers text or a long-press menu. (Headless
+// Chrome can't long-press like an iPhone, so this checks what the phone obeys:
+// the page's user-select during the drag, and the grip's own.)
+async function dragNoSelect(browser) {
+  await withPage(browser, async (page, errs) => {
+    for (const name of ["Grip car one", "Grip car two"])
+      await fetch(BASE + "/api/net-worth/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, kind: "vehicle", amount: 10000, asOf: day(0, 1) }) });
+    await page.goto(BASE + "/accounts", { waitUntil: "networkidle2" });
+    const grip = await page.waitForSelector("[data-sortable] [data-grip]", { timeout: 8000 });
+    const box = await grip.boundingBox();
+    // -webkit-touch-callout is Safari's alone; Chrome reports nothing for it, so only user-select is checked.
+    const gripStyle = await grip.evaluate((g) => { const c = getComputedStyle(g); return { select: c.userSelect || c.webkitUserSelect }; });
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 2, { steps: 6 });
+    // Read at once: the slide lasts 160ms.
+    const during = await page.evaluate((id) => {
+      const held = document.querySelector(`[data-sort-id="${id}"]`);
+      const others = [...document.querySelectorAll("[data-sort-id]")].filter((e) => e !== held);
+      return {
+        body: getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect,
+        selected: String(window.getSelection()),
+        lifted: !!held && held.classList.contains("lifted") && getComputedStyle(held).boxShadow !== "none",
+        // Under the pointer, not only snapped to slots: a vertical offset from its slot.
+        follows: !!held && Math.abs(new DOMMatrix(getComputedStyle(held).transform).m42) > 0.5,
+        slid: others.some((e) => e.getAnimations().length > 0),
+      };
+    }, await grip.evaluate((g) => g.dataset.grip));
+    await page.mouse.up();
+    await sleep(300);
+    const after = await page.evaluate(() => getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect);
+    record("drag no select", "while a row is dragged, nothing on the page is selectable, and nothing is selected", during.body === "none" && during.selected === "", JSON.stringify(during));
+    record("drag no select", "the grip offers no text to select", gripStyle.select === "none", JSON.stringify(gripStyle));
+    record("drag no select", "letting go makes the page's text selectable again", after !== "none", `after: ${after}`);
+    // Weight without haptics (iOS gives a web page none): the row in hand
+    // lifts, the rows it passes slide out of its way, and letting go sets it down.
+    const setDown = await page.evaluate(() => [...document.querySelectorAll("[data-sort-id]")].every((e) => !e.classList.contains("lifted") && Math.abs(new DOMMatrix(getComputedStyle(e).transform).m42) < 0.5));
+    record("drag lift", "the row in hand lifts off the list, follows the pointer, and a row it passes slides out of its way", during.lifted && during.follows && during.slid, JSON.stringify({ lifted: during.lifted, follows: during.follows, slid: during.slid }));
+    record("drag lift", "letting go sets the row down in its place", setDown);
+    // With less motion asked for, rows change place without sliding.
+    await page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+    await page.reload({ waitUntil: "networkidle2" });
+    const g2 = await page.waitForSelector("[data-sortable] [data-grip]");
+    const b2 = await g2.boundingBox();
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height * 2, { steps: 6 });
+    const slidStill = await page.evaluate(() => [...document.querySelectorAll("[data-sort-id]")].some((e) => e.getAnimations().some((a) => a.effect?.getTiming().duration > 1)));
+    await page.mouse.up();
+    record("drag lift", "with less motion asked for, rows change place without sliding", !slidStill);
+    if (errs.length) record("drag no select", "page errors", false, errs[0]);
+  });
+}
+
+// A row swaps with its neighbour at half a row of travel, as iOS lists do;
+// at a third of a row it stays. (The pointer had to cross the neighbour's
+// middle, a full row, and on a phone the row felt stuck.) Runs after
+// dragNoSelect, whose two vehicles give a list to drag in.
+async function dragThreshold(browser) {
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/accounts", { waitUntil: "networkidle2" });
+    const list = await page.waitForSelector("[data-sortable]:has([data-grip])");
+    const orderNow = () => list.evaluate((l) => [...l.querySelectorAll("[data-sort-id]")].map((e) => e.dataset.sortId).join(","));
+    const dragBy = async (rows) => {
+      const g = await list.$("[data-grip]");
+      const b = await g.boundingBox();
+      // A row is the row's height, not the grip's (the grip is shorter).
+      const h = await g.evaluate((e) => e.closest("[data-sort-id]").offsetHeight);
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2 + h * rows, { steps: 8 });
+      await sleep(100);
+      const o = await orderNow();
+      await page.mouse.up();
+      await sleep(400);
+      return o;
+    };
+    const before = await orderNow();
+    const third = await dragBy(0.33);
+    const most = await dragBy(0.6);
+    record("drag threshold", "at a third of a row the row stays; past half a row it swaps", third === before && most !== before, `before ${before} · ⅓ row ${third} · 0.6 row ${most}`);
+    if (errs.length) record("drag threshold", "page errors", false, errs[0]);
+  });
+}
+
 // An annual budget is the year's allowance: a dashboard row judges it on the
 // year so far, as the Categories row does. As a twelfth a month, the month a
 // yearly premium posted read "$X over" here and "$Y left this year" there.
@@ -2564,7 +2652,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
   ]) {

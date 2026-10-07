@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Shell from "@/components/Shell";
 import { AmountCell } from "@/components/RowCells";
 import { SummaryCard } from "@/components/SummaryCard";
@@ -427,6 +427,38 @@ function SortableRows({
   });
   const byId = new Map(rows.map((r) => [r.id, r]));
   const shown = order.map((id) => byId.get(id)).filter((r): r is Account => !!r);
+  // Rows that change place slide there from where they were, so each step of
+  // a drag (or an arrow-key move) is seen, not a jump. Positions are measured
+  // from the list's top, so a scroll between two renders isn't a move. The
+  // row in hand follows the pointer and doesn't slide. Not with less motion.
+  const tops = useRef(new Map<number, number>());
+  // The row in hand stays under the pointer: its offset from where the drag
+  // began, less how far its slot has moved since (offsetTop ignores the
+  // transform, so it is the slot).
+  const grab = useRef<{ y: number; slot: number; pointer: number } | null>(null);
+  const follow = useCallback((id: number | null) => {
+    const g = grab.current;
+    const held = id == null ? null : list.current?.querySelector<HTMLElement>(`[data-sort-id="${id}"]`);
+    if (!g || !held) return;
+    held.style.transform = `translateY(${g.pointer - g.y - (held.offsetTop - g.slot)}px) scale(1.02)`;
+  }, []);
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const base = el.getBoundingClientRect().top;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const next = new Map<number, number>();
+    for (const item of el.querySelectorAll<HTMLElement>("[data-sort-id]")) {
+      const id = Number(item.dataset.sortId);
+      const top = item.getBoundingClientRect().top - base;
+      next.set(id, top);
+      const was = tops.current.get(id);
+      if (!still && was != null && was !== top && id !== dragging)
+        item.animate([{ transform: `translateY(${was - top}px)` }, { transform: "translateY(0)" }], { duration: 160, easing: "ease-out" });
+    }
+    tops.current = next;
+    follow(dragging);
+  });
   const move = (ids: number[], id: number, to: number) => {
     const next = ids.filter((x) => x !== id);
     next.splice(Math.max(0, Math.min(to, next.length)), 0, id);
@@ -436,6 +468,8 @@ function SortableRows({
   function onPointerDown(e: React.PointerEvent<HTMLButtonElement>, id: number) {
     e.stopPropagation();
     e.preventDefault();
+    const held = e.currentTarget.closest<HTMLElement>("[data-sort-id]");
+    grab.current = { y: e.clientY, slot: held?.offsetTop ?? 0, pointer: e.clientY };
     setDragging(id);
   }
   // While dragging, the window follows the pointer: rows move in the DOM as
@@ -448,20 +482,47 @@ function SortableRows({
   useEffect(() => {
     if (dragging == null) return;
     const id = dragging;
+    // A finger held on the grip is also the touch gesture for selecting
+    // text, and preventDefault on pointerdown doesn't stop it on iOS: the
+    // row's name highlighted and the selection followed the drag. Nothing on
+    // the page is selectable while a row is moving.
+    const body = document.body.style;
+    const was = body.userSelect;
+    body.userSelect = "none";
+    body.setProperty("-webkit-user-select", "none");
     const onMove = (e: PointerEvent) => {
       if (!list.current) return;
-      // The row's new place: before the first other row whose middle is below the pointer.
-      const others = [...list.current.querySelectorAll<HTMLElement>("[data-account-row]")].filter((el) => el.dataset.id !== String(id));
-      const to = others.findIndex((el) => {
-        const r = el.getBoundingClientRect();
-        return e.clientY < r.top + r.height / 2;
-      });
-      const next = move(orderRef.current, id, to < 0 ? others.length : to);
-      if (next.join(",") === orderRef.current.join(",")) return;
+      if (grab.current) grab.current.pointer = e.clientY;
+      follow(id);
+      // A swap at half a row, as iOS lists do: moving down, when the held
+      // row's bottom edge crosses the next row's middle; moving up, when its
+      // top edge crosses the previous row's. (The pointer crossing a
+      // neighbour's middle took a full row of travel.) Layout positions
+      // (offsetTop), not drawn ones, so a row mid-slide doesn't jitter it;
+      // one swap per move, and none until the last swap has rendered.
+      const items = [...list.current.querySelectorAll<HTMLElement>("[data-sort-id]")];
+      const ids = orderRef.current;
+      const g = grab.current;
+      if (!g || items.map((el) => el.dataset.sortId).join(",") !== ids.join(",")) return;
+      const i = ids.indexOf(id);
+      const held = items[i];
+      const top = g.slot + (g.pointer - g.y);
+      const middle = (el: HTMLElement) => el.offsetTop + el.offsetHeight / 2;
+      const to = items[i + 1] && top + held.offsetHeight > middle(items[i + 1]) ? i + 1 : items[i - 1] && top < middle(items[i - 1]) ? i - 1 : i;
+      if (to === i) return;
+      const next = move(ids, id, to);
       orderRef.current = next; // before the re-render, so the next move starts from it
       setOrder(next);
     };
     const onUp = () => {
+      // Set down: from under the finger, a glide into its slot.
+      const held = list.current?.querySelector<HTMLElement>(`[data-sort-id="${id}"]`);
+      if (held) {
+        held.style.transition = "transform 180ms ease-out, box-shadow 180ms ease-out";
+        held.style.transform = "";
+        setTimeout(() => (held.style.transition = ""), 220);
+      }
+      grab.current = null;
       setDragging(null);
       if (orderRef.current.join(",") !== key) onOrder(orderRef.current);
     };
@@ -472,8 +533,10 @@ function SortableRows({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
+      body.userSelect = was;
+      body.setProperty("-webkit-user-select", was);
     };
-  }, [dragging, key, onOrder]);
+  }, [dragging, key, onOrder, follow]);
   function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, id: number) {
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     e.preventDefault();
@@ -488,8 +551,11 @@ function SortableRows({
 
   return (
     <div ref={list} className="card divide-y divide-[var(--border)] overflow-hidden" data-sortable>
-      {shown.map((a) =>
-        render(
+      {shown.map((a) => (
+        // The row in hand is lifted off the list (.lifted) and set down by
+        // the transition back when it's let go.
+        <div key={a.id} data-sort-id={a.id} className={dragging === a.id ? "lifted" : undefined}>
+        {render(
           a,
           shown.length > 1 ? (
             <button
@@ -500,7 +566,7 @@ function SortableRows({
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => onPointerDown(e, a.id)}
               onKeyDown={(e) => onKeyDown(e, a.id)}
-              className={`tap flex w-6 shrink-0 touch-none items-center justify-center self-stretch text-[var(--muted)] opacity-60 hover:opacity-100 focus-visible:opacity-100 ${dragging === a.id ? "cursor-grabbing opacity-100" : "cursor-grab"}`}
+              className={`tap flex w-6 shrink-0 touch-none select-none [-webkit-touch-callout:none] items-center justify-center self-stretch text-[var(--muted)] opacity-60 hover:opacity-100 focus-visible:opacity-100 ${dragging === a.id ? "cursor-grabbing opacity-100" : "cursor-grab"}`}
             >
               <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden>
                 <circle cx="3" cy="3" r="1.3" /><circle cx="7" cy="3" r="1.3" />
@@ -509,8 +575,9 @@ function SortableRows({
               </svg>
             </button>
           ) : undefined
-        )
-      )}
+        )}
+        </div>
+      ))}
     </div>
   );
 }

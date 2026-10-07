@@ -58,6 +58,12 @@ body {
   .card {
     @apply bg-card rounded-lg border border-[var(--border)] shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.06)];
   }
+  /* A row in hand (the Accounts grip): raised off the list and outlined in
+     the accent, so it reads even under a finger. It follows the pointer by an
+     inline transform, and glides back to its place when let go. */
+  .lifted {
+    @apply relative z-10 bg-card ring-1 ring-[var(--accent)]/40 shadow-[0_10px_24px_rgba(16,24,40,0.18),0_2px_6px_rgba(16,24,40,0.10)];
+  }
   .stat-label {
     @apply text-xs font-medium uppercase tracking-wide text-[var(--muted)];
   }
