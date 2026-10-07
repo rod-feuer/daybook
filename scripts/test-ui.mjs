@@ -2527,6 +2527,35 @@ async function projectionRange(browser) {
   });
 }
 
+// Holding a finger on a row's grip is also the touch gesture for selecting
+// text, and on iOS preventDefault doesn't stop it: the row's name highlighted
+// and the selection followed the drag. While a row moves, nothing on the page
+// is selectable, and the grip never offers text or a long-press menu. (Headless
+// Chrome can't long-press like an iPhone, so this checks what the phone obeys:
+// the page's user-select during the drag, and the grip's own.)
+async function dragNoSelect(browser) {
+  await withPage(browser, async (page, errs) => {
+    for (const name of ["Grip car one", "Grip car two"])
+      await fetch(BASE + "/api/net-worth/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, kind: "vehicle", amount: 10000, asOf: day(0, 1) }) });
+    await page.goto(BASE + "/accounts", { waitUntil: "networkidle2" });
+    const grip = await page.waitForSelector("[data-sortable] [data-grip]", { timeout: 8000 });
+    const box = await grip.boundingBox();
+    // -webkit-touch-callout is Safari's alone; Chrome reports nothing for it, so only user-select is checked.
+    const gripStyle = await grip.evaluate((g) => { const c = getComputedStyle(g); return { select: c.userSelect || c.webkitUserSelect }; });
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 2, { steps: 6 });
+    const during = await page.evaluate(() => ({ body: getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect, selected: String(window.getSelection()) }));
+    await page.mouse.up();
+    await sleep(300);
+    const after = await page.evaluate(() => getComputedStyle(document.body).userSelect || getComputedStyle(document.body).webkitUserSelect);
+    record("drag no select", "while a row is dragged, nothing on the page is selectable, and nothing is selected", during.body === "none" && during.selected === "", JSON.stringify(during));
+    record("drag no select", "the grip offers no text to select", gripStyle.select === "none", JSON.stringify(gripStyle));
+    record("drag no select", "letting go makes the page's text selectable again", after !== "none", `after: ${after}`);
+    if (errs.length) record("drag no select", "page errors", false, errs[0]);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2537,7 +2566,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["drag no select", dragNoSelect],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
   ]) {

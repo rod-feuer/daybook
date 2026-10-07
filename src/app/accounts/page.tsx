@@ -448,6 +448,14 @@ function SortableRows({
   useEffect(() => {
     if (dragging == null) return;
     const id = dragging;
+    // A finger held on the grip is also the touch gesture for selecting
+    // text, and preventDefault on pointerdown doesn't stop it on iOS: the
+    // row's name highlighted and the selection followed the drag. Nothing on
+    // the page is selectable while a row is moving.
+    const body = document.body.style;
+    const was = body.userSelect;
+    body.userSelect = "none";
+    body.setProperty("-webkit-user-select", "none");
     const onMove = (e: PointerEvent) => {
       if (!list.current) return;
       // The row's new place: before the first other row whose middle is below the pointer.
@@ -472,6 +480,8 @@ function SortableRows({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
+      body.userSelect = was;
+      body.setProperty("-webkit-user-select", was);
     };
   }, [dragging, key, onOrder]);
   function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, id: number) {
@@ -500,7 +510,7 @@ function SortableRows({
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => onPointerDown(e, a.id)}
               onKeyDown={(e) => onKeyDown(e, a.id)}
-              className={`tap flex w-6 shrink-0 touch-none items-center justify-center self-stretch text-[var(--muted)] opacity-60 hover:opacity-100 focus-visible:opacity-100 ${dragging === a.id ? "cursor-grabbing opacity-100" : "cursor-grab"}`}
+              className={`tap flex w-6 shrink-0 touch-none select-none [-webkit-touch-callout:none] items-center justify-center self-stretch text-[var(--muted)] opacity-60 hover:opacity-100 focus-visible:opacity-100 ${dragging === a.id ? "cursor-grabbing opacity-100" : "cursor-grab"}`}
             >
               <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden>
                 <circle cx="3" cy="3" r="1.3" /><circle cx="7" cy="3" r="1.3" />
