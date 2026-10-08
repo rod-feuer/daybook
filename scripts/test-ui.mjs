@@ -1019,6 +1019,32 @@ async function quietLogin(browser) {
   });
 }
 
+// A sync that brings only new balances (a day with no new charges) is new
+// data: Accounts re-reads in place. It used to refresh only on new charges,
+// so the page kept yesterday's balances until a reload. And Accounts can pull
+// a sync itself, from its ⋯ menu, as the dashboard can.
+async function accountsSync(browser) {
+  await withPage(browser, async (page) => {
+    let reads = 0;
+    await page.setRequestInterception(true);
+    page.on("request", (q) => {
+      const u = new URL(q.url());
+      if (u.pathname === "/api/plaid/sync" && q.method() === "POST")
+        return void q.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, inserted: 0, updated: 0, balances: 3 }) });
+      if (u.pathname === "/api/net-worth" && q.method() === "GET") reads++;
+      q.continue();
+    });
+    await page.evaluateOnNewDocument(() => { try { localStorage.removeItem("copilot:lastAutoSync"); } catch {} });
+    await page.goto(BASE + "/accounts", { waitUntil: "networkidle2" }); await sleep(800);
+    record("accounts sync", "a launch sync with new balances and no new charges refreshes Accounts in place", reads >= 2, `${reads} read(s) of /api/net-worth`);
+    const before = reads;
+    await page.click("header button[aria-label='More actions']");
+    const item = await page.waitForSelector("header ::-p-text(Sync from bank)", { timeout: 3000 }).catch(() => null);
+    if (item) { await item.click(); await sleep(800); }
+    record("accounts sync", "Accounts' ⋯ menu has Sync from bank, and the page re-reads after it", !!item && reads > before, item ? `${reads - before} read(s) after the sync` : "no Sync from bank in the menu");
+  });
+}
+
 // A transaction row opens the charge. The vendor's shelf (its years, its plan,
 // rename, Combine) is one step up, and the step has to be findable: the name in
 // the header opens it, and the link under the list says what it opens whatever
@@ -2589,7 +2615,9 @@ async function dragNoSelect(browser) {
     record("drag no select", "letting go makes the page's text selectable again", after !== "none", `after: ${after}`);
     // Weight without haptics (iOS gives a web page none): the row in hand
     // lifts, the rows it passes slide out of its way, and letting go sets it down.
-    const setDown = await page.evaluate(() => [...document.querySelectorAll("[data-sort-id]")].every((e) => !e.classList.contains("lifted") && Math.abs(new DOMMatrix(getComputedStyle(e).transform).m42) < 0.5));
+    // Waited for, not sampled once at 300ms: on the CI runner the 160ms
+    // set-down was still running then, and the check failed on a healthy page.
+    const setDown = await page.waitForFunction(() => [...document.querySelectorAll("[data-sort-id]")].every((e) => !e.classList.contains("lifted") && Math.abs(new DOMMatrix(getComputedStyle(e).transform).m42) < 0.5), { timeout: 2000 }).then(() => true, () => false);
     record("drag lift", "the row in hand lifts off the list, follows the pointer, and a row it passes slides out of its way", during.lifted && during.follows && during.slid, JSON.stringify({ lifted: during.lifted, follows: during.follows, slid: during.slid }));
     record("drag lift", "letting go sets the row down in its place", setDown);
     // With less motion asked for, rows change place without sliding.
@@ -2674,7 +2702,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
