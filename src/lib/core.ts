@@ -1,5 +1,5 @@
 import { getChargeMoves, vendorName } from "./chargeVendors";
-import { variableStillToCome, projectionBand, projectionRange, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS } from "./forecast";
+import { variableStillToCome, projectionBand, projectionRange, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS, CHART_RANGE_FROM_DAY } from "./forecast";
 import { seriesKey, seriesVendor, isSeriesKey, dayLabel, amountLabel } from "./series";
 import { merchantKey } from "./merchant";
 import crypto from "node:crypto";
@@ -1408,10 +1408,11 @@ export function dashboard(month?: string): DashboardData {
     projectedRange = projectionRange(projectedMonthEnd, expenses, band);
     // Linear ramp for the dashed segment; anchor it to the last actual point.
     // The range fans out along it, from nothing today to the band at month-end.
+    const drawRange = lastDataDay >= CHART_RANGE_FROM_DAY;
     if (series.length) {
       const last = series[series.length - 1];
       last.projected = last.actual;
-      last.range = [last.actual!, last.actual!];
+      last.range = drawRange ? [last.actual!, last.actual!] : null;
     }
     const perDay = projectedExtra / remainingDays;
     const { low, high } = projectedRange;
@@ -1421,7 +1422,7 @@ export function dashboard(month?: string): DashboardData {
       const f = (day - lastDataDay) / remainingDays;
       const lo = p - (projectedMonthEnd - low) * f;
       const hi = p + (high - projectedMonthEnd) * f;
-      series.push({ date: pad(day), actual: null, projected: Number(p.toFixed(2)), range: [Number(lo.toFixed(2)), Number(hi.toFixed(2))], prev: null });
+      series.push({ date: pad(day), actual: null, projected: Number(p.toFixed(2)), range: drawRange ? [Number(lo.toFixed(2)), Number(hi.toFixed(2))] : null, prev: null });
     }
   }
   const pace = { series, projectedMonthEnd, projectedRange, daysElapsed: lastDataDay, daysInMonth };

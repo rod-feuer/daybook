@@ -68,6 +68,14 @@ export function projectionBand(day: number, daysInMonth: number): number {
   return (sl * (daysInMonth - day)) / (daysInMonth - dl);
 }
 
+// The first day the chart draws the range as a band. Before it the band is
+// ±25% of the month: past months really did end that far from a day-7
+// projection, and neither blending in past months, splitting out large
+// purchases, nor any everyday line from $150 to $1,500 narrowed it
+// (backtest:pace). A band that wide fills the chart and says little, so it
+// waits; the verdict still says the range in words.
+export const CHART_RANGE_FROM_DAY = 10;
+
 // The range a projection is said as. Never below what's already spent.
 export function projectionRange(projected: number, spent: number, band: number): { low: number; high: number } {
   return {

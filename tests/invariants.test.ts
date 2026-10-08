@@ -366,6 +366,25 @@ test("in-progress month compares like-for-like against the prior month's same da
   assert.notEqual(d.prev!.expenses, 1070, "must not compare against the full prior month");
 });
 
+// WHY: on day 7 the band was ±25% of the month ($52k ± $13.5k), filling the
+// chart. Past months really did end that far out, and nothing tried narrowed
+// it, so the chart waits for day 10 to draw it; the projection and its range
+// are still computed (the verdict says the range in words).
+test("the chart's range band waits for day 10; the projection doesn't", () => {
+  const cm = new Date().toISOString().slice(0, 7);
+  for (let day = 1; day <= 7; day++) tx(`Shop ${day}`, { amount: -150, date: `${cm}-0${day}`, categoryId: CAT });
+  let d = dashboard(cm);
+  assert.equal(d.pace.daysElapsed, 7);
+  assert.ok(d.pace.projectedMonthEnd != null && d.pace.projectedRange != null, "projected, with its range, on day 7");
+  assert.ok(d.pace.series.every((p) => p.range == null), "but no band drawn before day 10");
+  assert.ok(d.pace.series.some((p) => p.projected != null), "the dashed line still is");
+
+  for (const day of [8, 9, 10]) tx(`Shop ${day}`, { amount: -150, date: `${cm}-${String(day).padStart(2, "0")}`, categoryId: CAT });
+  d = dashboard(cm);
+  assert.equal(d.pace.daysElapsed, 10);
+  assert.ok(d.pace.series.some((p) => p.range != null), "from day 10 the band is drawn");
+});
+
 test("a complete past month still compares full-vs-full (throughDay null)", () => {
   // 2025-06 is historical, so no MTD bounding — the whole prior month is the
   // baseline. This guards against the partial fix leaking into past months.

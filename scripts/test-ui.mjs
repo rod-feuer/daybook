@@ -2680,16 +2680,27 @@ async function projectionRange(browser) {
       verdict: `${document.querySelector("[data-summary] [data-status]")?.textContent ?? ""} ${document.querySelector("[data-summary] [data-status-caption]")?.textContent ?? ""}`,
       said: document.querySelector("[data-pace-chart]")?.getAttribute("aria-label") ?? "",
       legend: document.body.innerText.includes("Projected range"),
+      projected: /\bProjected\b/.test(document.querySelector("[data-pace-chart]")?.parentElement?.innerText ?? ""),
       band: [...document.querySelectorAll("[data-pace-chart] .recharts-area-area")].some((p) => p.getAttribute("fill-opacity") === "0.12"),
     }));
     if (/too early/i.test(r.verdict)) {
       record("projection range", "too early to project: no range is claimed", !/between|–/.test(r.verdict) && !r.band, r.verdict);
       return;
     }
+    // The band waits for day 10 (CHART_RANGE_FROM_DAY): before it, past
+    // months ended ±25% from the projection, a band that fills the chart. The
+    // verdict says the range in words from the first projection.
+    const { pace } = await (await fetch(BASE + "/api/dashboard")).json();
+    const early = pace.daysElapsed < 10;
     // The estimate leads ("about $4,300 over budget"); the caption after it says both ends of the range.
     record("projection range", "the verdict leads with the estimate, and its caption says both ends of the range", /finish (about \$[\d,]+ (under|over) budget|on budget)/.test(r.verdict) && /likely (\$[\d,]+–\$[\d,]+ (under|over)|up to \$[\d,]+ (under|over)|between \$[\d,]+ under and \$[\d,]+ over|on budget)/.test(r.verdict), r.verdict);
-    record("projection range", "the chart draws the range as a band, and its legend names it", r.band && r.legend, `band=${r.band} legend=${r.legend}`);
-    record("projection range", "the chart's sentence gives the same two ends", /Projected to finish between \$[\d,]+ and \$[\d,]+\./.test(r.said), r.said);
+    if (early) {
+      record("projection range", `day ${pace.daysElapsed}, before day 10: the chart draws no band and its legend says "Projected"`, !r.band && !r.legend && r.projected, `band=${r.band} legend=${r.legend} projected=${r.projected}`);
+      record("projection range", "before day 10 the chart's sentence gives the projection, not a range it doesn't draw", /Projected to finish at \$[\d,]+\./.test(r.said), r.said);
+    } else {
+      record("projection range", "the chart draws the range as a band, and its legend names it", r.band && r.legend, `band=${r.band} legend=${r.legend}`);
+      record("projection range", "the chart's sentence gives the same two ends", /Projected to finish between \$[\d,]+ and \$[\d,]+\./.test(r.said), r.said);
+    }
     if (errs.length) record("projection range", "page errors", false, errs[0]);
   });
 }
