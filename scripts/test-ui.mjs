@@ -1058,7 +1058,7 @@ async function modelMergeLeaveOut(browser) {
 async function modelMergePick(browser) {
   await withPage(browser, async (page) => {
     const card = { canonical: "Franklin Liquor", key: "ai:Franklin Liquor|Franklin Liqunineveh In", dismissKeys: ["ai:Franklin Liquor|Franklin Liqunineveh In"], variants: [{ merchant: "Franklin Liqunineveh In", count: 9 }, { merchant: "Franklin Liquor", count: 2 }], total: 11, note: "same store", source: "model", fixed: false };
-    const fixed = { ...card, key: "ai:Nike|Nike.com", dismissKeys: ["ai:Nike|Nike.com"], canonical: "Nike.com", variants: [{ merchant: "Nike.com", count: 4 }, { merchant: "Nike", count: 1 }], total: 5, fixed: true };
+    const fixed = { ...card, key: "ai:Nike|Nike.com", dismissKeys: ["ai:Nike|Nike.com"], canonical: "Nike.com", variants: [{ merchant: "Nike.com", count: 4 }, { merchant: "Nike", count: 1 }], total: 5, fixed: true, shownAs: "Nike Store" };
     const state = { approved: null };
     await page.setRequestInterception(true);
     page.on("request", (req) => {
@@ -1072,11 +1072,15 @@ async function modelMergePick(browser) {
     await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-merge-into]", { timeout: 8000 });
     const pickers = await page.$$eval("[data-merge-into]", (ss) => ss.map((x) => x.value));
+    const named = await page.$$eval("[data-merge-into]", (ss) => { const x = ss[1]; return x ? { options: [...x.options].map((o) => o.textContent.trim()), title: x.closest("li").querySelector(".font-medium").textContent.trim() } : null; });
     await page.select("[data-merge-into]", "Franklin Liqunineveh In");
     const after = await page.$eval("[data-merge-into]", (x) => { const li = x.closest("li"); return { title: li.querySelector(".font-medium").textContent.trim(), opened: !!li.querySelector(".border-dashed") }; });
     await page.$eval("[data-merge-into]", (x) => x.closest("li").querySelector("[data-queue-accept]").click());
     await page.waitForFunction(() => true); await sleep(500);
-    record("model merge pick", "the card proposes the cleanest name, and a name the owner set up has no picker", JSON.stringify(pickers) === JSON.stringify(["Franklin Liquor"]), `pickers: ${JSON.stringify(pickers)}`);
+    record("model merge pick", "the card proposes the cleanest name", pickers[0] === "Franklin Liquor", `pickers: ${JSON.stringify(pickers)}`);
+    // A vendor the owner named shows that name, and its picker offers only it
+    // or a new name: the bank's other spellings would drop the owner's name.
+    record("model merge pick", "a vendor the owner named is shown by that name, kept or renamed", named?.title === "Nike Store" && JSON.stringify(named?.options) === JSON.stringify(["Nike Store (4)", "New name…"]), JSON.stringify(named));
     record("model merge pick", "picking another name retitles the card without opening it, and Combine folds into it", after.title === "Franklin Liqunineveh In" && !after.opened && state.approved?.canonical === "Franklin Liqunineveh In", `title ${after.title} · opened ${after.opened} · approved into ${state.approved?.canonical}`);
   });
 }
