@@ -385,6 +385,25 @@ test("the chart's range band waits for day 10; the projection doesn't", () => {
   assert.ok(d.pace.series.some((p) => p.range != null), "from day 10 the band is drawn");
 });
 
+// WHY: four $700 Delta tickets bought on the 2nd were each under the $1,000
+// line, so each was everyday spending: $2,800 in two days, run-rated to about
+// $10,000 more by month-end. Bought together they are one large purchase, which
+// this household's recent months say doesn't repeat.
+test("tickets bought together are one large purchase, not a pace to run out", () => {
+  const now = new Date();
+  const cm = now.toISOString().slice(0, 7);
+  // Six recent months with data and no large purchases.
+  for (let i = 1; i <= 6; i++) tx(`Grocer ${i}`, { amount: -20, date: `${new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 15)).toISOString().slice(0, 7)}-15`, categoryId: CAT });
+  for (let k = 0; k < 4; k++) tx("Delta Air Lines", { amount: -700, date: `${cm}-02`, categoryId: CAT });
+  for (let day = 1; day <= 7; day++) tx(`Cafe ${day}`, { amount: -50, date: `${cm}-0${day}`, categoryId: CAT });
+  const d = dashboard(cm);
+  const daysIn = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const spent = 2800 + 350;
+  assert.equal(d.pace.daysElapsed, 7);
+  // Everyday $350 over 7 days, run out; the trip isn't.
+  assert.equal(d.pace.projectedMonthEnd, Number((spent + (350 / 7) * (daysIn - 7)).toFixed(2)));
+});
+
 test("a complete past month still compares full-vs-full (throughDay null)", () => {
   // 2025-06 is historical, so no MTD bounding — the whole prior month is the
   // baseline. This guards against the partial fix leaking into past months.

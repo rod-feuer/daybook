@@ -26,6 +26,22 @@
 // A charge over EXTRAORDINARY (a down payment, a tax bill) is neither
 // extrapolated nor taught to the forecast: nothing predicts those.
 export const LARGE_CHARGE = 1000;
+
+// Charges at one vendor on one day are one purchase: four $700 airline
+// tickets bought together are a $2,800 trip, not $2,800 of everyday spending
+// to multiply by the days left. Without this, eight sub-$1,000 Delta and
+// Southwest tickets were run-rated as everyday spend and the month's range ran
+// to absurd. Grouped within a category, so a budget's share stays its own.
+export function purchases(charges: { mag: number; date: string; vendor: string; cid: number | null }[]): { mag: number; cid: number | null; date: string }[] {
+  const byKey = new Map<string, { mag: number; cid: number | null; date: string }>();
+  for (const c of charges) {
+    const key = `${c.date}|${c.vendor}|${c.cid}`;
+    const p = byKey.get(key);
+    if (p) p.mag += c.mag;
+    else byKey.set(key, { mag: c.mag, cid: c.cid, date: c.date });
+  }
+  return [...byKey.values()];
+}
 export const EXTRAORDINARY = 20000;
 export const HISTORY_MONTHS = 6;
 
@@ -50,10 +66,12 @@ export function variableStillToCome(input: {
 // How wide a month-end projection's honest range is, as a share of it.
 // `npm run backtest:pace` replays every finished month: 80% of the projections
 // made on day d of 2025-01 – 2026-09 landed within this share of how the month
-// ended. Measured with each month's remaining bills known exactly, so the live
-// miss runs a little wider. No day gets a narrower band than a later one: day 5
-// measured ±24% and day 7 ±26%, which is noise, not information.
-const BAND: [day: number, share: number][] = [[5, 0.26], [7, 0.26], [10, 0.19], [15, 0.15], [20, 0.12], [25, 0.09]];
+// ended ("today, k = 0"), with a vendor's same-day charges as one purchase.
+// Measured with each month's remaining bills known exactly, so the live miss
+// runs a little wider. No day gets a narrower band than a later one: day 5
+// measured ±21% and day 7 ±23%, day 15 ±11% and day 20 ±13%, which is noise,
+// not information.
+const BAND: [day: number, share: number][] = [[5, 0.23], [7, 0.23], [10, 0.19], [15, 0.13], [20, 0.13], [25, 0.08]];
 
 export function projectionBand(day: number, daysInMonth: number): number {
   if (day >= daysInMonth) return 0;

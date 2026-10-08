@@ -41,22 +41,29 @@ async function main() {
   process.env.COPILOT_DB_PATH = copy;
   const { getDb } = await import("../src/lib/db");
   const { counted, countedPlanId } = await import("../src/lib/queries");
-  const { variableStillToCome, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS } = await import("../src/lib/forecast");
+  const { variableStillToCome, purchases, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS } = await import("../src/lib/forecast");
 
   const rows = getDb()
     .prepare(
       `SELECT substr(COALESCE(t.effectiveDate, t.date),1,7) AS m,
+              COALESCE(t.effectiveDate, t.date) AS date, t.merchant AS vendor, t.categoryId AS cid,
               CAST(substr(COALESCE(t.effectiveDate, t.date),9,2) AS INTEGER) AS day,
               -t.amount AS mag, ${countedPlanId("t")} IS NOT NULL AS plan
        FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
        WHERE ${counted()} AND t.amount < 0`
     )
-    .all() as { m: string; day: number; mag: number; plan: number }[];
+    .all() as { m: string; date: string; vendor: string; cid: number | null; day: number; mag: number; plan: number }[];
+  // Outside a plan, a vendor's charges on one day are one purchase, as the
+  // app counts them (forecast.ts purchases).
+  const grouped = [
+    ...rows.filter((r) => r.plan).map((r) => ({ m: r.m, day: r.day, mag: r.mag, plan: true })),
+    ...purchases(rows.filter((r) => !r.plan)).map((p) => ({ m: p.date.slice(0, 7), day: Number(p.date.slice(8, 10)), mag: p.mag, plan: false })),
+  ];
   const byMonth = new Map<string, Charge[]>();
-  for (const r of rows) {
+  for (const r of grouped) {
     if (!r.plan && r.mag > EXTRAORDINARY) continue;
     const list = byMonth.get(r.m) ?? [];
-    list.push({ day: r.day, mag: r.mag, plan: !!r.plan });
+    list.push({ day: r.day, mag: r.mag, plan: r.plan });
     byMonth.set(r.m, list);
   }
 
@@ -134,6 +141,7 @@ async function main() {
   // The spread a range should show: 80% of later months landed within this.
   const p80 = (xs: number[]) => [...xs.map(Math.abs)].sort((x, y) => x - y)[Math.floor(xs.length * 0.8)];
   console.log(`\n80% of later months landed within (chosen model): ${DAYS.map((d) => `day ${d} ±${(p80(errors.get(`check|${best.p}|${best.k}|${d}`)!) * 100).toFixed(0)}%`).join(", ")}`);
+  console.log(`80% of later months landed within (today, k = 0): ${DAYS.map((d) => `day ${d} ±${(p80(errors.get(`check|flat6|0|${d}`)!) * 100).toFixed(0)}%`).join(", ")}`);
 
   const avg = (xs: number[]) => Math.round(mean(xs)).toLocaleString("en-US");
   console.log(`\nWhere today's miss comes from (later months, days ${early.join("/")}; average dollars off per projection):`);
