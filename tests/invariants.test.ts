@@ -3673,6 +3673,20 @@ test("similar names: a leading The, A or An isn't the name", () => {
   assert.deepEqual(names("A Cut Above"), [], "Cut is three letters: too short to stand for a vendor");
 });
 
+// WHY: BP posted under 13 names, "Bp" and a store number run into the town
+// ("Bp#1914300ninnineveh In", "Bp#8479750fair Oaks"). "Bp" is too short to
+// match on a shared start, and the town made each store's first word its
+// own: the Bp shelf offered none of them. A "#" and a number end the brand.
+test("similar names: a store number ends the brand, however short", () => {
+  for (const m of ["Bp", "Bp#1914300ninnineveh In", "Bp#8479750fair Oaks", "Bp#8832982getgo #754carmel In", "La Grande Epicerie Bparis", "Bpi Tax Service", "Amoco#1045400good Towestfield In", "Amoco#1367800clermonindianapolis In"])
+    tx(m, { amount: -50, date: "2026-09-01", categoryId: CAT });
+  const names = (m: string) => similarVendors(m).map((v) => v.merchant).sort();
+  assert.deepEqual(names("Bp"), ["Bp#1914300ninnineveh In", "Bp#8479750fair Oaks", "Bp#8832982getgo #754carmel In"], "every BP store, and no other B name");
+  assert.deepEqual(names("Bp#8479750fair Oaks"), ["Bp", "Bp#1914300ninnineveh In", "Bp#8832982getgo #754carmel In"], "and from a store's shelf");
+  assert.deepEqual(names("Amoco#1045400good Towestfield In"), ["Amoco#1367800clermonindianapolis In"], "the town after the number is not the name");
+  assert.deepEqual(names("Bpi Tax Service"), [], "a short name with no store number still needs four letters");
+});
+
 test("only a plan the user added anchors a stray: a detected guess draws nothing", () => {
   // The detector read Charleston's, a restaurant, as a quarterly bill, and
   // never asked; "Chatham" (0.82 on a shared "Cha", the same weeks, a similar
