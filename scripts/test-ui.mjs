@@ -1835,6 +1835,28 @@ async function dashboardReadout(browser) {
       ? chart.lineLabel == null && !chart.legendBudget
       : chart.lineLabel != null && chart.cardBudget != null && chart.lineLabel.includes(chart.cardBudget) && chart.legendBudget;
     record("dashboard readout", "the chart's budget line is the summary card's figure, named in the legend, and withheld when spending sits outside the budget", drawnRight, chart.outside ? `withheld: ${chart.outside}` : `line "${chart.lineLabel}", card ${chart.cardBudget}`);
+    // The budget label sits at the left: the projection rises to the right,
+    // and at the right it ran through the label.
+    const labelSide = await page.evaluate(() => {
+      const c = document.querySelector("[data-pace-chart]");
+      const t = [...c.querySelectorAll("text")].find((e) => /^Budget \$/.test(e.textContent ?? ""))?.getBoundingClientRect();
+      const plot = c.querySelector(".recharts-cartesian-grid, .recharts-surface")?.getBoundingClientRect();
+      return t && plot ? (t.left + t.right) / 2 < plot.left + plot.width / 2 : null;
+    });
+    if (chart.lineLabel != null) record("dashboard readout", "the budget line's label sits at the left, away from the rising projection", labelSide === true, `left half=${labelSide}`);
+    // The header's ▲/▼ vs last month takes a colour by the verdict's rule:
+    // only when the whole projected range is on one side of last month's total.
+    const paceTone = await page.evaluate(async () => {
+      const el = document.querySelector("[data-pace-delta]");
+      if (!el) return null;
+      const month = document.querySelector("[data-month-picker] select")?.value;
+      const d = await (await fetch(`/api/dashboard${month ? `?month=${month}` : ""}`)).json();
+      const last = Math.max(0, ...d.pace.series.map((p) => p.prev ?? 0));
+      const r = d.pace.projectedRange;
+      const want = !r ? null : r.high < last ? "under" : r.low > last ? "over" : "on";
+      return { said: el.getAttribute("data-pace-delta"), want };
+    });
+    if (paceTone?.want) record("dashboard readout", "the chart header's colour vs last month is earned only when the whole range is on one side", paceTone.said === paceTone.want, JSON.stringify(paceTone));
     record("dashboard readout", "the chart is described in words for a screen reader", chart.role === "img" && /^(Spent \$[\d,]+ through|No spending yet)/.test(chart.said) && (chart.lineLabel == null || /Budget \$/.test(chart.said)), chart.said);
 
     // The row says what was spent and what's left; the budget isn't repeated
