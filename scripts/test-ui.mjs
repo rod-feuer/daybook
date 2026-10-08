@@ -503,14 +503,14 @@ async function dashboardAnatomy(browser) {
       const card = document.querySelector("[data-summary]");
       const bar = card.querySelector("[role=progressbar]").getBoundingClientRect();
       const mark = card.querySelector("[data-bar-mark]")?.getBoundingClientRect();
-      const verdict = card.querySelector("[data-status]")?.textContent ?? "";
+      const verdict = `${card.querySelector("[data-status]")?.textContent ?? ""} ${card.querySelector("[data-status-caption]")?.textContent ?? ""}`;
       const total = Number((card.querySelector("[data-bar-caption]")?.textContent.match(/of \$([\d,]+)/)?.[1] ?? "0").replace(/,/g, ""));
       if (!mark) return { absent: true, tooEarly: /too early/i.test(verdict) };
       const n = (x) => Number(x.replace(/,/g, ""));
-      // The sentence's range as spend: "$A–$B under", "up to $B over", "between $A under and $B over", "on budget".
+      // The range (the caption after the estimate) as spend: "likely $A–$B under", "likely up to $B over", "likely between $A under and $B over", "on budget".
       let lo = null, hi = null, m;
-      if ((m = verdict.match(/between \$([\d,]+) under and \$([\d,]+) over budget/))) { lo = total - n(m[1]); hi = total + n(m[2]); }
-      else if ((m = verdict.match(/finish (?:up to )?\$([\d,]+)(?:–\$([\d,]+))? (under|over) budget/))) {
+      if ((m = verdict.match(/between \$([\d,]+) under and \$([\d,]+) over/))) { lo = total - n(m[1]); hi = total + n(m[2]); }
+      else if ((m = verdict.match(/(?:likely|finish) (?:up to )?\$([\d,]+)(?:–\$([\d,]+))? (under|over)\b/))) {
         const a = /up to/.test(verdict) ? 0 : n(m[1]), b = n(m[2] ?? m[1]);
         [lo, hi] = m[3] === "under" ? [total - b, total - a] : [total + a, total + b];
       } else if (/on budget/.test(verdict)) { lo = hi = total; }
@@ -2511,7 +2511,7 @@ async function projectionRange(browser) {
     await page.goto(BASE + "/", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-pace-chart]");
     const r = await page.evaluate(() => ({
-      verdict: document.querySelector("[data-summary] [data-status]")?.textContent ?? "",
+      verdict: `${document.querySelector("[data-summary] [data-status]")?.textContent ?? ""} ${document.querySelector("[data-summary] [data-status-caption]")?.textContent ?? ""}`,
       said: document.querySelector("[data-pace-chart]")?.getAttribute("aria-label") ?? "",
       legend: document.body.innerText.includes("Projected range"),
       band: [...document.querySelectorAll("[data-pace-chart] .recharts-area-area")].some((p) => p.getAttribute("fill-opacity") === "0.12"),
@@ -2520,7 +2520,8 @@ async function projectionRange(browser) {
       record("projection range", "too early to project: no range is claimed", !/between|–/.test(r.verdict) && !r.band, r.verdict);
       return;
     }
-    record("projection range", "the verdict says both ends of the range", /\$[\d,]+–\$[\d,]+ (under|over) budget|up to \$[\d,]+ (under|over) budget|between \$[\d,]+ under and \$[\d,]+ over budget|on budget/.test(r.verdict), r.verdict);
+    // The estimate leads ("about $4,300 over budget"); the caption after it says both ends of the range.
+    record("projection range", "the verdict leads with the estimate, and its caption says both ends of the range", /finish (about \$[\d,]+ (under|over) budget|on budget)/.test(r.verdict) && /likely (\$[\d,]+–\$[\d,]+ (under|over)|up to \$[\d,]+ (under|over)|between \$[\d,]+ under and \$[\d,]+ over|on budget)/.test(r.verdict), r.verdict);
     record("projection range", "the chart draws the range as a band, and its legend names it", r.band && r.legend, `band=${r.band} legend=${r.legend}`);
     record("projection range", "the chart's sentence gives the same two ends", /Projected to finish between \$[\d,]+ and \$[\d,]+\./.test(r.said), r.said);
     if (errs.length) record("projection range", "page errors", false, errs[0]);

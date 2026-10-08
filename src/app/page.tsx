@@ -270,6 +270,9 @@ export default function DashboardPage() {
                     {v.text}
                   </span>
                 }
+                // The range under the projection: the headline is the
+                // estimate, this is how far it could miss.
+                caption={v.detail}
               />
             );
           })()}

@@ -213,7 +213,9 @@ test("the headline withholds a projection early in the month and qualifies it af
   if (daysAgo(1) <= `${month}-04`) assert.match(budgetLine(), /^\$\S+ of your \$5,000 budget used\. Too early to project [A-Z][a-z]+\.$/);
 
   for (const day of ["03", "06", "10"]) tx("Grocer", { amount: -150, date: `${month}-${day}`, categoryId: cat });
-  assert.match(budgetLine(), /^On pace to finish [A-Z][a-z]+ (\$[\d,]+(–\$[\d,]+)? (under|over)|up to \$[\d,]+ (under|over)|between \$[\d,]+ under and \$[\d,]+ over|on) budget\.$/);
+  assert.match(budgetLine(), /^On pace to finish [A-Z][a-z]+ (about \$[\d,]+ (under|over)|on) budget\.$/);
+  // The range follows the estimate, as on the dashboard.
+  assert.match(dailyDigest()!.lede?.[0] ?? "", /^Likely (\$[\d,]+(–\$[\d,]+)? (under|over)|up to \$[\d,]+ (under|over)|between \$[\d,]+ under and \$[\d,]+ over|on) budget\.$/);
 });
 
 
@@ -265,19 +267,19 @@ test("the headline says Still or Now against the last text, and the month going 
 
   const first = deps();
   assert.equal(await runDigest(dailyDigest, first.d), "sent");
-  assert.match(first.sent[0], /^Daybook: On pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? under budget\./, "the month's first word on it: neither Still nor Now");
+  assert.match(first.sent[0], /^Daybook: On pace to finish [A-Z][a-z]+ about \$[\d,]+ under budget\./, "the month's first word on it: neither Still nor Now");
 
   tx("Fence Co", { amount: LARGE, date: daysAgo(2), categoryId: other, hash: "r2" });
   const second = deps();
   assert.equal(await runDigest(dailyDigest, second.d), "sent");
-  assert.match(second.sent[0], /^Daybook: Still on pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? under budget\./);
+  assert.match(second.sent[0], /^Daybook: Still on pace to finish [A-Z][a-z]+ about \$[\d,]+ under budget\./);
 
   // Groceries run far past the budget: no new surprise, but the month has turned.
   // (Each run is under twice the usual $300, so none of them is itself a surprise.)
   for (const day of ["02", "03", "05", "06", "08", "09", "11", "12"]) tx("Grocer", { amount: -550, date: `${month}-${day}`, categoryId: cat });
   const third = deps();
   assert.equal(await runDigest(dailyDigest, third.d), "sent");
-  assert.match(third.sent[0], /^Daybook: Now on pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? over budget\.$/, "the turn is the whole message");
+  assert.match(third.sent[0], /^Daybook: Now on pace to finish [A-Z][a-z]+ about \$[\d,]+ over budget\.\nLikely [^\n]+ budget\.$/, "the turn, and its range, is the whole message");
   assert.equal(await runDigest(dailyDigest, deps().d), "quiet", "said once");
 });
 
@@ -314,7 +316,7 @@ test("the weekly is always sent, and keeps the projection it quoted for next wee
   const subjects: string[] = [];
   const run = deps({ send: async (m) => void subjects.push(m.subject) });
   assert.equal(await runDigest(weeklyDigest, run.d), "sent");
-  assert.match(subjects[0], /^Daybook: On pace to finish [A-Z][a-z]+ \$[\d,]+(–\$[\d,]+)? under budget$/, "the verdict is the subject line");
+  assert.match(subjects[0], /^Daybook: On pace to finish [A-Z][a-z]+ about \$[\d,]+ under budget$/, "the verdict is the subject line");
   const row = getDb().prepare("SELECT key, value FROM digest_sent WHERE key LIKE 'weekly:%'").get() as { key: string; value: number };
   assert.equal(row.key, `weekly:${daysAgo(0)}`);
   assert.ok(row.value > 1200, "the projected month-end spend it quoted");
@@ -327,18 +329,21 @@ test("the weekly says how the projection moved only against an earlier weekly in
   const cat = addCat("Groceries");
   setBudget(cat, 5000);
   for (const day of ["01", "04", "07", "10"]) tx("Grocer", { amount: -300, date: `${thisMonth()}-${day}`, categoryId: cat });
-  assert.deepEqual(weeklyDigest().lede, [], "no earlier weekly: nothing to compare with");
+  // The lede opens with the projection's range (the headline's caption); what
+  // follows it is how the projection moved.
+  const moved = () => weeklyDigest().lede!.filter((l) => !l.startsWith("Likely "));
+  assert.deepEqual(moved(), [], "no earlier weekly: nothing to compare with");
 
   const put = (key: string, value: number) => getDb().prepare("INSERT INTO digest_sent (key, sentAt, value) VALUES (?, 'x', ?)").run(key, value);
   put("weekly:2001-01-07", 9999);
-  assert.deepEqual(weeklyDigest().lede, [], "another month's projection is not a baseline");
+  assert.deepEqual(moved(), [], "another month's projection is not a baseline");
 
   const now = weeklyDigest().value as number;
   put(`weekly:${thisMonth()}-01`, now + 1900);
   // On the 1st that row is today's own: a weekly never measures itself, and
   // there can be no earlier one this month.
-  if (daysAgo(0).endsWith("-01")) assert.deepEqual(weeklyDigest().lede, []);
-  else assert.match(weeklyDigest().lede![0], /^Projected spending is down \$1,900 since [A-Z][a-z]{2} 1\.$/);
+  if (daysAgo(0).endsWith("-01")) assert.deepEqual(moved(), []);
+  else assert.match(moved()[0], /^Projected spending is down \$1,900 since [A-Z][a-z]{2} 1\.$/);
 });
 
 // WHY: "went over this week" must mean this week did it. An annual budget is

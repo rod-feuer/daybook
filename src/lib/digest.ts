@@ -15,7 +15,7 @@ import {
 } from "./queries";
 import { billDelta, billStatus } from "./bills";
 import { budgetOutlook, budgetSpent, isOverBudget } from "./budgetOutlook";
-import { rangeAgainstBudget } from "./verdict";
+import { pointAgainstBudget, rangeAgainstBudget } from "./verdict";
 import { categorizeSuggestions } from "./categorizeSuggest";
 import { allMergeSuggestions } from "./merges";
 import { nameCleanupSuggestions } from "./nameCleanup";
@@ -238,7 +238,7 @@ function surprises(today: string): Found[] {
 // "Now" when it has moved, neither when this is the month's first word on it.
 const KIND_VALUE = { under: -1, on: 0, over: 1 } as const;
 type Tone = "good" | "bad" | "neutral";
-function headline(today: string): { text: string; tone: Tone; state: { key: string; value: number } | null; flipped: boolean } {
+function headline(today: string): { text: string; detail?: string; tone: Tone; state: { key: string; value: number } | null; flipped: boolean } {
   const month = today.slice(0, 7);
   const name = monthName(month);
   // Always name the month: with none, dashboard() picks the latest month that
@@ -255,9 +255,11 @@ function headline(today: string): { text: string; tone: Tone; state: { key: stri
   const before = (db.prepare("SELECT value FROM digest_sent WHERE key = ?").get(key) as { value: number | null } | undefined)?.value;
   const moved = before != null && before !== KIND_VALUE[o.kind];
   const lead = before == null ? "On pace" : moved ? "Now on pace" : "Still on pace";
-  const tail = b.range ? rangeAgainstBudget(b.total, b.range) : o.kind === "on" ? "on budget" : `${dollars(o.delta)} ${o.kind} budget`;
+  // As on the dashboard: the projection leads, its range follows.
+  const tail = b.range ? pointAgainstBudget(b.total, b.projected) : o.kind === "on" ? "on budget" : `${dollars(o.delta)} ${o.kind} budget`;
+  const detail = b.range ? `Likely ${rangeAgainstBudget(b.total, b.range)}.` : undefined;
   const tone: Tone = o.kind === "over" ? "bad" : o.kind === "under" ? "good" : "neutral";
-  return { text: `${lead} to finish ${name} ${tail}.`, tone, state: { key, value: KIND_VALUE[o.kind] }, flipped: moved && o.kind === "over" };
+  return { text: `${lead} to finish ${name} ${tail}.`, detail, tone, state: { key, value: KIND_VALUE[o.kind] }, flipped: moved && o.kind === "over" };
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -307,6 +309,7 @@ export function dailyDigest(): Built | null {
   ].filter((s) => s.lines.length);
   return {
     headline: head.text,
+    lede: head.detail ? [head.detail] : undefined,
     sections,
     todo: chores(dashboard(today.slice(0, 7)).needsReview),
     keys: [...fresh.map((s) => s.key), ...(flip ? [flipKey] : [])],
@@ -433,7 +436,7 @@ export function weeklyDigest(): Built {
   // give it the next two facts, not the verdict again.
   const dueSection = sections.find((x) => x.heading?.label === "Due in the next 7 days");
   const preheader = [week.length ? `${dollars(sum(week))} spent this week outside your bills${typical != null ? `, against a typical ${dollars(typical)}` : ""}.` : null, dueSection ? `${dueSection.heading!.aside} in bills over the next 7 days.` : null].filter(Boolean).join(" ");
-  return { headline: head.text, tone: head.tone, lede, preheader, sections, todo: chores(dash.needsReview), keys: [`weekly:${today}`], value: projected, state: head.state };
+  return { headline: head.text, tone: head.tone, lede: head.detail ? [head.detail, ...lede] : lede, preheader, sections, todo: chores(dash.needsReview), keys: [`weekly:${today}`], value: projected, state: head.state };
 }
 
 type Rendered = Pick<Built, "headline" | "lede" | "sections" | "todo" | "tone" | "preheader">;
