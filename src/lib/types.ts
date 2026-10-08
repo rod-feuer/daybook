@@ -22,6 +22,7 @@ export type Transaction = {
   recurringId: number | null;
   source: string; // "seed" | "csv" | "mcp"
   note: string | null; // free-text per-transaction memo (null = none)
+  pendingAmount?: number | null; // what it showed while pending, when it posted for another amount
   hash: string; // dedupe key
 };
 

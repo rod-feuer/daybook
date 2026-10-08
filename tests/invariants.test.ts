@@ -1065,6 +1065,26 @@ test("a category set on a pending charge follows it when it posts for a differen
   assert.equal(kept.n, 1, "the second visit is not reconciled away");
 });
 
+test("a charge that posts for another amount keeps what it showed pending", () => {
+  // WHY: the pending row is deleted when its posted version arrives, so the
+  // amount the user saw at the register is gone unless the posted charge
+  // keeps it. The row's "+$2.80 tip" is read from it.
+  const acct = { account_id: "a1", name: "Amex Gold" };
+  const tx = (id: string, amount: number, pending: boolean) => ({ transaction_id: id, account_id: "a1", date: "2026-08-07", name: "Ben & Jerry's", merchant_name: "Ben & Jerry's", amount, pending });
+  importPlaidTransactions([{ accounts: [acct], transactions: [tx("pa-pending", 14.02, true)] }]);
+  importPlaidTransactions([{ accounts: [acct], transactions: [tx("pa-posted", 16.82, false)] }]);
+  const kept = getDb().prepare("SELECT amount, pendingAmount FROM transactions WHERE hash = 'pa-posted'").get() as { amount: number; pendingAmount: number | null };
+  assert.equal(kept.amount, -16.82);
+  assert.equal(kept.pendingAmount, -14.02, "the posted charge keeps the $14.02 it showed pending");
+
+  // A charge that posts as it showed has nothing to say.
+  const same = (id: string, pending: boolean) => ({ ...tx(id, 9.5, pending), date: "2026-08-20" });
+  importPlaidTransactions([{ accounts: [acct], transactions: [same("ps-pending", true)] }]);
+  importPlaidTransactions([{ accounts: [acct], transactions: [same("ps-posted", false)] }]);
+  const plain = getDb().prepare("SELECT pendingAmount FROM transactions WHERE hash = 'ps-posted'").get() as { pendingAmount: number | null };
+  assert.equal(plain.pendingAmount, null);
+});
+
 // WHY: the app holds transaction ids in an open page — a tapped charge fetches
 // by id. Pending rows were wiped and re-inserted on every sync, so a pending
 // charge came back under a new id and a tap in the seconds after launch (while

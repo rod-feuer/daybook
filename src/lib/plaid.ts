@@ -213,6 +213,11 @@ export function importPlaidTransactions(items: PlaidItem[]): {
        effectiveDate = COALESCE(effectiveDate, @effectiveDate)
      WHERE hash = @hash`
   );
+  // The amount it showed while pending, on a posted charge that settled for
+  // another: the row says "+$2.80 tip" or "was $1.00 pending" from it.
+  const keepPendingAmount = db.prepare(
+    "UPDATE transactions SET pendingAmount = @amount WHERE hash = @hash AND pendingAmount IS NULL AND amount != @amount"
+  );
   const carryEdits = (from: string, to: string) => {
     const e = pendingEdits.get(from);
     if (!e) return;
@@ -367,7 +372,10 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     for (const was of held.values()) {
       if (!was.pending || pulled.has(was.hash) || was.hash.includes(":s")) continue;
       const twin = postedTwin(was) ?? settledTwin(was);
-      if (twin) carryEdits(was.hash, twin.hash);
+      if (twin) {
+        carryEdits(was.hash, twin.hash);
+        keepPendingAmount.run({ hash: twin.hash, amount: was.amount });
+      }
       drop.run({ h: was.hash });
     }
   });

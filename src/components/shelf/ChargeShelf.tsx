@@ -4,7 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { CommitInput } from "@/components/InlineEdit";
 import { AmountCell } from "@/components/RowCells";
-import { usd, shortDate, monthDayYear } from "@/lib/format";
+import { usd, shortDate, monthDayYear, pendingNote } from "@/lib/format";
 import { useNewCategory } from "@/components/NewCategoryOption";
 import { useMutation } from "@/components/useMutation";
 import { postJson } from "@/lib/http";
@@ -137,7 +137,7 @@ export function ChargeBody({
           />
         </PropertyCard>
         <PropertyCard label="amount">
-          <AmountCell value={data.amount} excluded={excluded || !!data.categoryExcluded} className="text-[15px]" />
+          <AmountCell value={data.amount} note={pendingNote(data.amount, data.pendingAmount)} excluded={excluded || !!data.categoryExcluded} className="text-[15px]" />
         </PropertyCard>
       </div>
       <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]">

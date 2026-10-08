@@ -2822,6 +2822,32 @@ async function annualBudgetRow(browser) {
   });
 }
 
+// A charge that posted for another amount than it showed pending says so
+// under the amount, on the statement row and in its shelf alike ("+$2.80
+// tip"). Only the sync sets the pending amount, so the check sets it the way
+// the sync would, on a charge in the fixture.
+async function tipLine(browser) {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(DB);
+  const t = db.prepare("SELECT id, amount FROM transactions WHERE merchant = 'Netflix' AND date LIKE '2025-12%' AND amount < 0").get();
+  if (!t) { db.close(); return record("tip line", "a fixture charge to try it on", false, "no Netflix charge in Dec 2025"); }
+  const was = Math.round((t.amount / 1.2) * 100) / 100;
+  db.prepare("UPDATE transactions SET pendingAmount = ? WHERE id = ?").run(was, t.id);
+  db.close();
+  const tip = `+$${(Math.abs(t.amount) - Math.abs(was)).toFixed(2)} tip`;
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/transactions?month=2025-12&vendor=Netflix", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const row = await page.evaluate(() => [...document.querySelectorAll("[data-drawer-row] [data-amount-note]")].map((e) => e.textContent.trim()));
+    record("tip line", "the statement row says the tip under a charge that posted higher than it showed pending", row.length === 1 && row[0] === tip, `${row.join(" | ") || "none"} (want "${tip}")`);
+    await page.evaluate(() => [...document.querySelectorAll("[data-drawer-row]")].find((r) => r.querySelector("[data-amount-note]"))?.click());
+    await shelfIs(page, true); await shelfSettled(page);
+    const shelf = await page.evaluate((sel) => document.querySelector(`${sel} [data-amount-note]`)?.textContent.trim() ?? null, shelfSel);
+    record("tip line", "the charge's shelf says the same under its amount", shelf === tip, `"${shelf}"`);
+    if (errs.length) record("tip line", "page errors", false, errs[0]);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2832,7 +2858,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["model merge leave out", modelMergeLeaveOut], ["model merge pick", modelMergePick], ["model merge new name", modelMergeNewName], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold], ["tip line", tipLine],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
   ]) {
