@@ -18,6 +18,17 @@ export function rangeAgainstBudget(total: number, range: { low: number; high: nu
   return `between ${m(under)} under and ${m(over)} over budget`;
 }
 
+// The projection itself against the budget, rounded to $100: "about $4,300
+// over budget". In progress, this leads and the range follows as a detail. A
+// range said as the headline ("between $9,000 under and $17,700 over budget")
+// was true and told you nothing: on day 7 the honest range is $25,000 wide,
+// because large purchases can't be predicted (npm run backtest:pace), and
+// sizing it on the spending still to come measured no narrower.
+export function pointAgainstBudget(total: number, projected: number): string {
+  const d = Math.round((projected - total) / 100) * 100;
+  return d === 0 ? "on budget" : `about ${usd(Math.abs(d), { cents: false })} ${d > 0 ? "over" : "under"} budget`;
+}
+
 // One plain-language headline answering "how am I doing this month?" — so the
 // dashboard leads with a verdict instead of three co-equal numbers. Leads with
 // the budget (the user's own plan); for an in-progress month it speaks in pace
@@ -27,7 +38,7 @@ export function rangeAgainstBudget(total: number, range: { low: number; high: nu
 export function buildVerdict(
   data: Pick<DashboardData, "budget" | "expenses" | "net">,
   isCurrentMonth: boolean
-): { tone: "good" | "bad" | "neutral"; text: string } {
+): { tone: "good" | "bad" | "neutral"; text: string; detail?: string } {
   const m = (n: number) => usd(Math.abs(n), { cents: false });
   const b = data.budget;
   if (b && b.total > 0) {
@@ -37,11 +48,12 @@ export function buildVerdict(
     // budgetOutlook is the one rule for over / under / on budget, including
     // what counts as "on".
     const o = budgetOutlook(b.total, b.projected, isCurrentMonth, b.range);
-    // In progress, the projection is said as its range; the colour only once
-    // all of it is on one side of the budget.
+    // In progress, the projection leads and its range follows; the colour
+    // only once all of the range is on one side of the budget. The range is a
+    // caption under the headline, without its "budget" again.
     if (isCurrentMonth && b.range) {
       const tone = o.kind === "over" ? "bad" : o.kind === "under" ? "good" : "neutral";
-      return { tone, text: `On pace to finish ${rangeAgainstBudget(b.total, b.range)}` };
+      return { tone, text: `On pace to finish ${pointAgainstBudget(b.total, b.projected)}`, detail: `likely ${rangeAgainstBudget(b.total, b.range).replace(/ (under|over) budget$/, " $1")}` };
     }
     const verb = isCurrentMonth ? "On pace to finish" : "Finished";
     if (o.kind === "over") return { tone: "bad", text: `${verb} ${m(o.delta)} over budget` };

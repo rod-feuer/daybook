@@ -49,6 +49,7 @@ export function SummaryCard({
   alarm = false,
   status,
   statusDetail,
+  caption,
   note,
   aside,
   className = "",
@@ -70,6 +71,9 @@ export function SummaryCard({
   // Counts that follow the verdict ("· 12 upcoming · 70 paid"): bookkeeping,
   // so a caption beside it. At the verdict's size they outranked the figures.
   statusDetail?: ReactNode;
+  // A line under the verdict (the dashboard's projection range). Every card
+  // with a bar keeps this line, filled or not, so the cards stay one height.
+  caption?: ReactNode;
   note?: string; // a caveat on what the bar measures: a "?" beside the caption, so it costs no line
   aside?: ReactNode; // a page's own panel content where it has no bar (Accounts: what moved)
   className?: string;
@@ -185,6 +189,7 @@ export function SummaryCard({
               {statusDetail && <span data-status-detail className="flex flex-wrap items-baseline gap-x-2 text-xs font-normal">{statusDetail}</span>}
             </div>
           )}
+          {status && progress != null && <div data-status-caption className="min-h-4 text-xs text-[var(--muted)]">{caption}</div>}
         </div>}
       </div>
     </div>

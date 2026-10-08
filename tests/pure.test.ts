@@ -7,7 +7,7 @@ import { spendTrend } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
-import { buildVerdict, rangeAgainstBudget } from "../src/lib/verdict";
+import { buildVerdict, pointAgainstBudget, rangeAgainstBudget } from "../src/lib/verdict";
 import { billStatus, billDelta, BILL_DELTA_MIN } from "../src/lib/bills";
 import { variableStillToCome, LARGE_CHARGE, projectionBand, projectionRange } from "../src/lib/forecast";
 import { canonicalMerchant } from "../src/lib/queries";
@@ -369,14 +369,23 @@ test("the projection's range narrows through the month, and never reaches below 
 });
 
 // WHY: green or red is a promise about where the month ends. While the range
-// reaches both sides of the budget, neither is earned, so the words carry both
-// ends and the colour stays neutral.
-test("the verdict says the range, and takes a colour only when all of it is on one side of the budget", () => {
+// reaches both sides of the budget, neither is earned, so the colour stays
+// neutral and the range is said beside the estimate.
+// And the estimate leads: on 2026-10-07 the headline read "between $9,000
+// under and $17,700 over budget" — true, and no answer to "how am I doing?".
+// The projection ($4,300 over) was the answer; the range is how far it could miss.
+test("the verdict leads with the projection, says its range after, and takes a colour only when all of the range is on one side", () => {
   const v = (low: number, high: number) =>
     buildVerdict({ expenses: 3000, net: 0, budget: { total: 10000, spent: 3000, projected: (low + high) / 2, range: { low, high } } }, true);
-  assert.deepEqual(v(6000, 8000), { tone: "good", text: "On pace to finish $2,000–$4,000 under budget" });
-  assert.deepEqual(v(11000, 13000), { tone: "bad", text: "On pace to finish $1,000–$3,000 over budget" });
-  assert.deepEqual(v(7000, 12000), { tone: "neutral", text: "On pace to finish between $3,000 under and $2,000 over budget" });
+  assert.deepEqual(v(6000, 8000), { tone: "good", text: "On pace to finish about $3,000 under budget", detail: "likely $2,000–$4,000 under" });
+  assert.deepEqual(v(11000, 13000), { tone: "bad", text: "On pace to finish about $2,000 over budget", detail: "likely $1,000–$3,000 over" });
+  assert.deepEqual(v(7000, 12000), { tone: "neutral", text: "On pace to finish about $500 under budget", detail: "likely between $3,000 under and $2,000 over" });
+  // The October case: the estimate is a figure, not a span.
+  assert.equal(
+    buildVerdict({ expenses: 21071, net: 0, budget: { total: 47030, spent: 21071, projected: 51375, range: { low: 38017, high: 64732 } } }, true).text,
+    "On pace to finish about $4,300 over budget"
+  );
+  assert.equal(pointAgainstBudget(10000, 10040), "on budget", "within $50 of the budget, the estimate rounds to it");
   assert.equal(rangeAgainstBudget(10000, { low: 9960, high: 9980 }), "on budget", "a range within $50 of the budget, both ends round to it");
   assert.equal(rangeAgainstBudget(10000, { low: 6000, high: 9980 }), "up to $4,000 under budget", "one end at the budget");
   assert.equal(budgetOutlook(10000, 9500, true, { low: 8000, high: 11000 }).kind, "on", "spanning the budget is not under, though the middle is");
