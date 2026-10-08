@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { normalizeMerchant, merchantKey } from "../src/lib/merchant";
 import { classifyCadence, addCadence, txHash } from "../src/lib/core";
 import { medianGap, monthlyFactor, CADENCE_DAYS, PER_YEAR, CADENCE_LABEL } from "../src/lib/cadence";
-import { spendTrend, localToday } from "../src/lib/format";
+import { spendTrend, localToday, pendingNote } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
@@ -426,4 +426,15 @@ test("a vendor's charges on one day are one purchase", () => {
   const got = purchases([t("2026-10-02", "Delta", 700), t("2026-10-02", "Delta", 700), t("2026-10-02", "Delta", 700), t("2026-10-03", "Delta", 700), t("2026-10-02", "Kroger", 80), t("2026-10-02", "Delta", 40, 2)]);
   assert.deepEqual(got.map((p) => p.mag).sort((a, b) => a - b), [40, 80, 700, 2100]);
   assert.ok(got.some((p) => p.mag > LARGE_CHARGE), "three tickets together cross the large line, as one trip");
+});
+
+test("a charge that posted for another amount says how, and calls only a modest rise a tip", () => {
+  // WHY: the line under the amount answers "why isn't this what I saw at the
+  // register?". A tip is the usual answer, but a gas station's $1 hold that
+  // settles at $45 is not a $44 tip, and saying so would be a wrong figure.
+  assert.equal(pendingNote(-16.82, -14.02), "+$2.80 tip", "Ben & Jerry's: $14.02 pending, $16.82 with the tip");
+  assert.equal(pendingNote(-45, -1), "was $1.00 pending", "a pump's hold is not a tip");
+  assert.equal(pendingNote(-80, -100), "was $100.00 pending", "a charge that settled lower is not a tip");
+  assert.equal(pendingNote(-16.82, null), null, "a charge never seen pending says nothing");
+  assert.equal(pendingNote(-16.82, -16.82), null, "nor one that posted as it showed");
 });

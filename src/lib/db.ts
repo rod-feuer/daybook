@@ -51,6 +51,7 @@ function init(db: Database.Database) {
       source TEXT NOT NULL DEFAULT 'seed',
       note TEXT,
       categoryByHand INTEGER NOT NULL DEFAULT 0,
+      pendingAmount REAL,
       hash TEXT NOT NULL UNIQUE
     );
 
@@ -120,6 +121,13 @@ function init(db: Database.Database) {
   // overwrites it. Never touched by the importer's upsert.
   if (!cols.some((c) => c.name === "categoryByHand")) {
     db.exec("ALTER TABLE transactions ADD COLUMN categoryByHand INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Migration: `pendingAmount` — what a charge showed while pending, kept
+  // when it posted for another amount (a tip added, a hold settled). Set by
+  // the sync as the pending row gives way; null on every other charge.
+  if (!cols.some((c) => c.name === "pendingAmount")) {
+    db.exec("ALTER TABLE transactions ADD COLUMN pendingAmount REAL");
   }
 
   // Migration: add `excludeFromTotals` to categories created before it existed.

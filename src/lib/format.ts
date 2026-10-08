@@ -92,3 +92,16 @@ export function spendTrend(spent: number, prevSpent: number, prevThrough: number
   const prevName = new Date(Date.UTC(y, m - 2, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
   return `${pct > 0 ? "↑" : pct < 0 ? "↓" : "="} ${Math.abs(pct)}% vs ${prevThrough ? `${prevName} 1–${prevThrough}` : "last month"}`;
 }
+
+// The line under a charge that posted for another amount than it showed
+// pending. A rise of 35% or less on a purchase is a tip; anything else (a
+// gas station's $1 hold, a hotel's deposit) says only what it was, since
+// calling a $44 settle-up a tip would be a wrong figure.
+export const TIP_SHARE = 0.35;
+export function pendingNote(amount: number, pendingAmount: number | null | undefined): string | null {
+  if (pendingAmount == null || pendingAmount === amount) return null;
+  const rise = Math.abs(amount) - Math.abs(pendingAmount);
+  if (amount < 0 && pendingAmount < 0 && rise > 0 && rise <= Math.abs(pendingAmount) * TIP_SHARE)
+    return `+${usd(rise)} tip`;
+  return `was ${usd(Math.abs(pendingAmount))} pending`;
+}
