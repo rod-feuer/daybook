@@ -35,6 +35,13 @@ export function defaultMonth(months: string[]): string {
   return months.find((m) => m <= current) ?? months[0] ?? "";
 }
 
+// Today on this machine's calendar, as YYYY-MM-DD. toISOString() is UTC: after
+// 8pm Eastern it's already tomorrow, and a bank sync at 9pm on Oct 7 dated the
+// balances Oct 8.
+export function localToday(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 export function shortDate(iso: string): string {
   return new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", {
     month: "short",

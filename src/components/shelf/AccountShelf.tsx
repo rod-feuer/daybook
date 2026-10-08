@@ -64,17 +64,14 @@ export function AccountBody({
       {ledger ? (
         <EquityLedger data={data} onOpenAccount={onOpenAccount} />
       ) : (
-      <div className="grid grid-cols-2 gap-2">
+        // One card: the figure, and where and when it came from. A date in a
+        // card of its own, at the figure's size, read as a second figure.
         <PropertyCard
           label={owed ? "owed" : manual ? "value" : "balance"}
-          detail={latest?.source === "estimate" ? (owed ? "estimated from payments" : "an estimate") : manual ? "set by you" : "from the bank"}
+          detail={[latest?.source === "estimate" ? (owed ? "estimated from payments" : "an estimate") : manual ? "set by you" : "from the bank", latest && `as of ${shortDate(latest.asOf)}`].filter(Boolean).join(" · ")}
         >
           <div className="text-[15px] font-semibold tabular-nums">{latest ? usd(latest.amount, { cents: false }) : "—"}</div>
         </PropertyCard>
-        <PropertyCard label="as of">
-          <div className="text-[15px] font-semibold tabular-nums">{latest ? shortDate(latest.asOf) : "—"}</div>
-        </PropertyCard>
-      </div>
       )}
       <p className="-mt-2 text-[11px] text-[var(--muted)]" data-account-caption>
         {ledger
