@@ -18,6 +18,7 @@ type PreviewTx = { date: string; amount: number; account: string };
 // queue is empty, so it's safe to drop into any page.
 // The names a card folds in, and the vendor they fold into (when it has
 // charges of its own under that name).
+const NEW_NAME = " new"; // the picker's "New name…" (names are trimmed, so no vendor is this)
 const strays = (g: MergeSuggestion) => g.variants.filter((v) => v.merchant !== g.canonical);
 const target = (g: MergeSuggestion) => g.variants.find((v) => v.merchant === g.canonical);
 // The model's card joins every name it paired, so one wrong name ("Apple
@@ -34,6 +35,12 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
   // The name the owner picked to keep on a model's card, by card key; the
   // card proposes the cleanest (nameMess), and the owner has the last word.
   const [picked, setPicked] = useState<Record<string, string>>({});
+  // A name the owner is typing for the combined vendor, by card key: none of
+  // the bank's spellings is clean ("Applecombill", "Apple.com-bill Internet
+  // Charge"). Present (even empty) while "New name…" is chosen.
+  const [named, setNamed] = useState<Record<string, string>>({});
+  const newName = (g: MergeSuggestion) => named[g.key]?.trim() || undefined;
+  const naming = (g: MergeSuggestion) => g.key in named;
   const as = (g: MergeSuggestion) =>
     picked[g.key] && g.variants.some((v) => v.merchant === picked[g.key]) ? { ...g, canonical: picked[g.key] } : g;
 
@@ -70,11 +77,12 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
           action,
           keys: g.dismissKeys,
           canonical: g.canonical,
+          name: action === "approve" ? newName(g) : undefined,
           variants: g.variants.map((v) => v.merchant),
           categoryId: g.categoryId,
         }),
       {
-        success: action === "approve" ? `Combined into “${g.canonical}”` : undefined,
+        success: action === "approve" ? `Combined into “${newName(g) ?? g.canonical}”` : undefined,
         error: "Couldn't update — please try again",
       },
       { refresh: "error" } // restore the optimistic removal on failure
@@ -136,7 +144,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                 className="min-w-0 cursor-pointer"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-medium">{g.canonical}</span>
+                  <span className="text-[13px] font-medium">{newName(g) ?? g.canonical}</span>
                   {g.source === "model" && (
                     // The category queue's tag for a model's proposal; the note says its reason.
                     <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-2 text-[11px] font-medium text-[var(--accent)]" data-merge-source="model">
@@ -157,21 +165,49 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                   {g.source === "model" && !g.fixed ? (
                     // A native select (DESIGN.md §2): the name to keep, any of
                     // the card's names. Clicks on it don't open the evidence.
-                    <select
-                      value={g.canonical}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      onChange={(e) => setPicked((p) => ({ ...p, [g.key]: e.target.value }))}
-                      aria-label="The name to keep"
-                      data-merge-into
-                      className="btn-ghost select-caret cursor-pointer appearance-none pr-8 text-left text-xs font-medium"
-                    >
-                      {g.variants.map((v) => (
-                        <option key={v.merchant} value={v.merchant}>
-                          {v.merchant} ({v.count})
-                        </option>
-                      ))}
-                    </select>
+                    <>
+                      <select
+                        value={naming(g) ? NEW_NAME : g.canonical}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === NEW_NAME) return setNamed((n) => ({ ...n, [g.key]: "" }));
+                          setNamed((n) => {
+                            const rest = { ...n };
+                            delete rest[g.key];
+                            return rest;
+                          });
+                          setPicked((p) => ({ ...p, [g.key]: v }));
+                        }}
+                        aria-label="The name to keep"
+                        data-merge-into
+                        className="btn-ghost select-caret cursor-pointer appearance-none pr-8 text-left text-xs font-medium"
+                      >
+                        {g.variants.map((v) => (
+                          <option key={v.merchant} value={v.merchant}>
+                            {v.merchant} ({v.count})
+                          </option>
+                        ))}
+                        <option value={NEW_NAME}>New name…</option>
+                      </select>
+                      {naming(g) && (
+                        <input
+                          autoFocus
+                          value={named[g.key]}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter" && newName(g)) resolve(g, "approve");
+                          }}
+                          onChange={(e) => setNamed((n) => ({ ...n, [g.key]: e.target.value }))}
+                          placeholder="Name"
+                          aria-label="A new name for the combined vendor"
+                          data-merge-new-name
+                          className="tap-native ml-2 min-w-0 rounded-lg border border-[var(--border)] bg-card px-2 py-1 text-xs text-[var(--foreground)]"
+                        />
+                      )}
+                    </>
                   ) : (
                     <>
                       <span className="font-medium text-[var(--foreground)]">{g.canonical}</span>
@@ -199,7 +235,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                   ranks. The three queues share this. */}
               <div className="flex shrink-0 items-center gap-2">
                 <button
-                  disabled={busy === g.key}
+                  disabled={busy === g.key || (naming(g) && !newName(g))}
                   onClick={() => resolve(g, "approve")}
                   aria-label={`Combine ${strays(g).map((v) => v.merchant).join(", ")} into ${g.canonical}`}
                   data-queue-accept

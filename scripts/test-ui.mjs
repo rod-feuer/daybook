@@ -1081,6 +1081,36 @@ async function modelMergePick(browser) {
   });
 }
 
+// None of a vendor's bank spellings may be clean (Apple's), so the picker's
+// last choice is a new name: typed on the card, it titles the card, Combine
+// waits for it, and the combine sends it as the vendor's name.
+async function modelMergeNewName(browser) {
+  await withPage(browser, async (page) => {
+    const card = { canonical: "Apple.com-bill Internet Charge", key: "ai:Apple.com-bill Internet Charge|Applecombill", dismissKeys: ["ai:Apple.com-bill Internet Charge|Applecombill"], variants: [{ merchant: "Apple.com-bill Internet Charge", count: 9 }, { merchant: "Applecombill", count: 2 }], total: 11, note: "Apple", source: "model", fixed: false };
+    const state = { approved: null };
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (!req.url().endsWith("/api/merges")) return req.continue();
+      const body = req.postData() ?? "";
+      if (req.method() === "POST" && body.includes("judge")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ asked: 0, answered: 0 }) });
+      if (req.method() === "POST" && body.includes("approve")) { state.approved = JSON.parse(body); return req.respond({ status: 200, contentType: "application/json", body: '{"ok":true}' }); }
+      if (req.method() === "GET") return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(state.approved ? [] : [card]) });
+      req.continue();
+    });
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-merge-into]", { timeout: 8000 });
+    await page.select("[data-merge-into]", " new");
+    const input = await page.waitForSelector("[data-merge-new-name]", { timeout: 2000 }).catch(() => null);
+    const waits = await page.$eval("[data-merge-into]", (x) => x.closest("li").querySelector("[data-queue-accept]").disabled);
+    if (input) await page.type("[data-merge-new-name]", "Apple iCloud");
+    const title = await page.$eval("[data-merge-into]", (x) => x.closest("li").querySelector(".font-medium").textContent.trim());
+    if (input) await page.keyboard.press("Enter");
+    await page.waitForFunction(() => true); await sleep(500);
+    record("model merge new name", "New name… opens a field, and Combine waits for a name", !!input && waits, `field ${!!input} · combine disabled while empty ${waits}`);
+    record("model merge new name", "the typed name titles the card, and Enter combines under it", title === "Apple iCloud" && state.approved?.name === "Apple iCloud" && state.approved?.canonical === card.canonical, `title ${title} · sent ${JSON.stringify({ canonical: state.approved?.canonical, name: state.approved?.name })}`);
+  });
+}
+
 // The login screen asks the server for nothing. It used to request categories,
 // vendors and a bank sync before anyone had signed in: three 401s, the error
 // reply stored as if it were the category list, and the launch sync's 15-minute
@@ -2786,7 +2816,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["model merge leave out", modelMergeLeaveOut], ["model merge pick", modelMergePick], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["model merge leave out", modelMergeLeaveOut], ["model merge pick", modelMergePick], ["model merge new name", modelMergeNewName], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],

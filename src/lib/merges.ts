@@ -11,6 +11,7 @@ import {
   getRecurringSettings,
   merchantDisplayName,
   confirmedKey,
+  setRecurringSetting,
 } from "./queries";
 import { CADENCE_DAYS, monthDayGap, type Cadence } from "./cadence";
 import { sureJudgments, ownerMade } from "./vendorJudge";
@@ -622,12 +623,15 @@ export function allMergeSuggestions(): MergeSuggestion[] {
 
 // Approve: fold every variant into the canonical name; for a recurring-match,
 // also tag any still-uncategorized variant charges with the recurring's
-// category. The caller re-runs detection so recurrings regroup.
-export function approveMerge(canonical: string, variants: string[], categoryId?: number) {
+// category. `name`, when the owner typed one, is the combined vendor's display
+// name (its alias, as the shelf's Combine names it): none of the bank's
+// spellings need be clean. The caller re-runs detection so recurrings regroup.
+export function approveMerge(canonical: string, variants: string[], categoryId?: number, name?: string) {
   const db = getDb();
   ensureMergeDismissals(db);
   const others = variants.filter((v) => v !== canonical);
   for (const v of others) linkMerchant(v, canonical);
+  if (name?.trim()) setRecurringSetting(canonical, { alias: name.trim() });
   if (categoryId != null && others.length) {
     const ph = others.map(() => "?").join(",");
     db.prepare(
