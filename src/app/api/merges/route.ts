@@ -37,7 +37,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "canonical and variants required" }, { status: 400 });
     }
     const categoryId = typeof body.categoryId === "number" ? body.categoryId : undefined;
-    approveMerge(canonical, variants, categoryId);
+    const name = typeof body.name === "string" ? body.name.trim() || undefined : undefined;
+    approveMerge(canonical, variants, categoryId, name);
     detectRecurrings();
     return NextResponse.json({ ok: true });
   }

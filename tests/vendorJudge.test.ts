@@ -5,6 +5,7 @@ import { judgeVendorPairs, type Ask, type Candidate } from "../src/lib/vendorJud
 import { allMergeSuggestions, approveMerge, dismissMerge } from "../src/lib/merges";
 import { setChargeVendor } from "../src/lib/vendorMoves";
 import { getDb } from "../src/lib/db";
+import { getMerchantLinks, canonicalMerchant, merchantDisplayName, getRecurringSettings } from "../src/lib/queries";
 
 cleanDbBeforeEach();
 
@@ -134,6 +135,23 @@ test("a model's card folds into the cleanest name, unless the owner set one up",
   cards = into();
   assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].canonical, "Franklin Liqunineveh In", "the name the owner gave stays");
   assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].fixed, true, "and can't be swapped away on the card");
+});
+
+// WHY: none of Apple's bank spellings is clean ("Applecombill", "Apple.com-bill
+// Internet Charge"), so the cleanest of them was still a poor name. The owner
+// types one on the card: the combined vendor is shown by it, and the bank's
+// names are untouched.
+test("a combine can name the vendor something new", async () => {
+  monthly("Apple.com-bill Internet Charge", 1, 9, -2.99, 2);
+  monthly("Applecombill", 8, 2, -2.99, 2);
+  await judgeVendorPairs({ ask: fake({ same: true, confidence: 0.9 }).ask, today: TODAY });
+  const [card] = modelCards();
+  approveMerge(card.canonical, card.variants.map((v) => v.merchant), undefined, "  Apple iCloud ");
+  const links = getMerchantLinks();
+  const vendor = canonicalMerchant("Applecombill", links);
+  assert.equal(canonicalMerchant("Apple.com-bill Internet Charge", links), vendor, "one vendor");
+  assert.equal(merchantDisplayName(vendor, getRecurringSettings(), links), "Apple iCloud", "shown by the typed name, trimmed");
+  assert.equal(modelCards().length, 0);
 });
 
 test("dismissing a vendor's card rules out every pair on it", async () => {
