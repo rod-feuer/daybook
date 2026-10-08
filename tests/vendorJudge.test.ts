@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { judgeVendorPairs, type Ask, type Candidate } from "../src/lib/vendorJudge";
 import { allMergeSuggestions, approveMerge, dismissMerge } from "../src/lib/merges";
 import { setChargeVendor } from "../src/lib/vendorMoves";
+import { getDb } from "../src/lib/db";
 
 cleanDbBeforeEach();
 
@@ -110,6 +111,29 @@ test("the model's pairs among one vendor's spellings are one card", async () => 
   assert.deepEqual(cards[0].variants.map((v) => v.merchant).sort(), ["Culvers", "Culvers Carmel", "Culvers Of Esestero", "Culvers Of Franklin"]);
   approveMerge(cards[0].canonical, cards[0].variants.map((v) => v.merchant));
   assert.equal(modelCards().length, 0, "one Combine, and nothing comes back");
+});
+
+// WHY: the busiest spelling kept the card's name, and the busiest is often
+// the bank's messiest: "Franklin Liqunineveh In" over "Franklin Liquor",
+// "Card And Associ" over the name it cut short. The cleanest name is
+// proposed; one the owner named or set up still wins, since its settings are
+// kept under it.
+test("a model's card folds into the cleanest name, unless the owner set one up", async () => {
+  monthly("Franklin Liqunineveh In", 1, 9, -30, 4);
+  monthly("Franklin Liquor", 8, 2, -30, 4);
+  monthly("Card And Associ", 1, 9, -50, 8);
+  monthly("Card And Associates", 8, 2, -50, 8);
+  await judgeVendorPairs({ ask: fake({ same: true, confidence: 0.9 }).ask, today: TODAY });
+  const into = () => Object.fromEntries(modelCards().map((c) => [c.variants.map((v) => v.merchant).sort().join(" + "), c]));
+  let cards = into();
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].canonical, "Franklin Liquor", "no town glued on, though it has fewer charges");
+  assert.equal(cards["Card And Associ + Card And Associates"].canonical, "Card And Associates", "not the name the bank cut short");
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].fixed, false, "the owner can pick another on the card");
+
+  getDb().prepare("INSERT INTO recurring_settings (merchant, alias) VALUES ('Franklin Liqunineveh In', 'Franklin Liquor Store')").run();
+  cards = into();
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].canonical, "Franklin Liqunineveh In", "the name the owner gave stays");
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].fixed, true, "and can't be swapped away on the card");
 });
 
 test("dismissing a vendor's card rules out every pair on it", async () => {

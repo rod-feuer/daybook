@@ -31,6 +31,11 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null); // expanded card key
   const [previews, setPreviews] = useState<Record<string, Record<string, PreviewTx[]>>>({});
+  // The name the owner picked to keep on a model's card, by card key; the
+  // card proposes the cleanest (nameMess), and the owner has the last word.
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  const as = (g: MergeSuggestion) =>
+    picked[g.key] && g.variants.some((v) => v.merchant === picked[g.key]) ? { ...g, canonical: picked[g.key] } : g;
 
   const load = useCallback(async () => {
     const data = await fetch("/api/merges").then((r) => r.json());
@@ -120,7 +125,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
         totals, or dismiss.
       </p>
       <ul className="flex flex-col gap-2">
-        {merges.map((g) => (
+        {merges.map(as).map((g) => (
           <li key={g.key} className="rounded-lg border border-[var(--border)] p-3">
             <div className="flex items-start justify-between gap-3">
               <div
@@ -149,8 +154,30 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                     choice between equals. */}
                 <div className="mt-1 text-xs text-[var(--muted)]" data-merge-direction>
                   Combine {strays(g).map((v) => `${v.merchant} (${v.count})`).join(" · ")} into{" "}
-                  <span className="font-medium text-[var(--foreground)]">{g.canonical}</span>
-                  {target(g) && ` (${target(g)!.count})`}
+                  {g.source === "model" && !g.fixed ? (
+                    // A native select (DESIGN.md §2): the name to keep, any of
+                    // the card's names. Clicks on it don't open the evidence.
+                    <select
+                      value={g.canonical}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      onChange={(e) => setPicked((p) => ({ ...p, [g.key]: e.target.value }))}
+                      aria-label="The name to keep"
+                      data-merge-into
+                      className="btn-ghost select-caret cursor-pointer appearance-none pr-8 text-left text-xs font-medium"
+                    >
+                      {g.variants.map((v) => (
+                        <option key={v.merchant} value={v.merchant}>
+                          {v.merchant} ({v.count})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <>
+                      <span className="font-medium text-[var(--foreground)]">{g.canonical}</span>
+                      {target(g) && ` (${target(g)!.count})`}
+                    </>
+                  )}
                 </div>
                 {g.note && (
                   <div
