@@ -1,5 +1,5 @@
 import { getChargeMoves, vendorName } from "./chargeVendors";
-import { variableStillToCome, projectionBand, projectionRange, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS, CHART_RANGE_FROM_DAY } from "./forecast";
+import { variableStillToCome, purchases, projectionBand, projectionRange, LARGE_CHARGE, EXTRAORDINARY, HISTORY_MONTHS, CHART_RANGE_FROM_DAY } from "./forecast";
 import { seriesKey, seriesVendor, isSeriesKey, dayLabel, amountLabel } from "./series";
 import { merchantKey } from "./merchant";
 import crypto from "node:crypto";
@@ -1272,13 +1272,14 @@ export function dashboard(month?: string): DashboardData {
 
   const rows = db
     .prepare(
-      `SELECT t.amount, COALESCE(t.effectiveDate, t.date) AS date, ${countedPlanId("t")} AS recurringId, t.categoryId AS cid, c.name AS cname, c.color AS ccolor, c.icon AS cicon, c.kind AS ckind
+      `SELECT t.amount, t.merchant, COALESCE(t.effectiveDate, t.date) AS date, ${countedPlanId("t")} AS recurringId, t.categoryId AS cid, c.name AS cname, c.color AS ccolor, c.icon AS cicon, c.kind AS ckind
        FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
        WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND ${counted()}
        ORDER BY COALESCE(t.effectiveDate, t.date)`
     )
     .all(m) as {
     amount: number;
+    merchant: string;
     date: string;
     recurringId: number | null;
     cid: number | null;
@@ -1299,7 +1300,7 @@ export function dashboard(month?: string): DashboardData {
   const spendById = new Map<number, number>();
   // Variable (non-recurring) charges, overall and per category: what the
   // forecasts read (see forecast.ts) — never the lumpy recurring bills.
-  const variableCharges: { mag: number; cid: number | null }[] = [];
+  const variableCharges: { mag: number; cid: number | null; date: string; vendor: string }[] = [];
   for (const r of rows) {
     if (r.amount >= 0) income += r.amount;
     else expenses += -r.amount;
@@ -1316,7 +1317,7 @@ export function dashboard(month?: string): DashboardData {
         spendById.set(r.cid, (spendById.get(r.cid) ?? 0) - r.amount);
       }
     }
-    if (r.amount < 0 && r.recurringId == null) variableCharges.push({ mag: -r.amount, cid: r.cid });
+    if (r.amount < 0 && r.recurringId == null) variableCharges.push({ mag: -r.amount, cid: r.cid, date: r.date, vendor: r.merchant });
   }
 
   // Spending pace: cumulative EXPENSES per day (climbs from $0), plus a
@@ -1381,14 +1382,18 @@ export function dashboard(month?: string): DashboardData {
     const withData = new Set(
       (db.prepare(`SELECT DISTINCT substr(COALESCE(effectiveDate, date),1,7) AS ym FROM transactions WHERE substr(COALESCE(effectiveDate, date),1,7) IN (${prior.map(() => "?").join(",")})`).all(...prior) as { ym: string }[]).map((r) => r.ym)
     );
-    const big = db
+    // Grouped into purchases first (forecast.ts), as this month's charges are.
+    const charges = db
       .prepare(
-        `SELECT substr(COALESCE(t.effectiveDate, t.date),1,7) AS ym, t.categoryId AS cid, -t.amount AS mag
+        `SELECT substr(COALESCE(t.effectiveDate, t.date),1,7) AS ym, COALESCE(t.effectiveDate, t.date) AS date, t.merchant AS vendor, t.categoryId AS cid, -t.amount AS mag
          FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
          WHERE ${counted()} AND ${countedPlanId("t")} IS NULL
-           AND -t.amount > ? AND -t.amount <= ? AND substr(COALESCE(t.effectiveDate, t.date),1,7) IN (${prior.map(() => "?").join(",")})`
+           AND t.amount < 0 AND substr(COALESCE(t.effectiveDate, t.date),1,7) IN (${prior.map(() => "?").join(",")})`
       )
-      .all(LARGE_CHARGE, EXTRAORDINARY, ...prior) as { ym: string; cid: number | null; mag: number }[];
+      .all(...prior) as { ym: string; date: string; vendor: string; cid: number | null; mag: number }[];
+    const big = purchases(charges)
+      .filter((p) => p.mag > LARGE_CHARGE && p.mag <= EXTRAORDINARY)
+      .map((p) => ({ ym: p.date.slice(0, 7), cid: p.cid, mag: p.mag }));
     return prior
       .filter((ym) => withData.has(ym))
       .map((ym) => ({
@@ -1403,7 +1408,7 @@ export function dashboard(month?: string): DashboardData {
   if (remainingDays > 0 && lastDataDay >= MIN_ELAPSED_DAYS) {
     const scheduled = scheduledRemaining.reduce((a, r) => a + Math.abs(r.avgAmount), 0);
     const projectedExtra =
-      variableStillToCome({ seen: variableCharges.map((v) => v.mag), daysElapsed: lastDataDay, daysRemaining: remainingDays, history: largeHistory() }) + scheduled;
+      variableStillToCome({ seen: purchases(variableCharges).map((v) => v.mag), daysElapsed: lastDataDay, daysRemaining: remainingDays, history: largeHistory() }) + scheduled;
     projectedMonthEnd = Number((expenses + projectedExtra).toFixed(2));
     projectedRange = projectionRange(projectedMonthEnd, expenses, band);
     // Linear ramp for the dashed segment; anchor it to the last actual point.
@@ -1476,7 +1481,7 @@ export function dashboard(month?: string): DashboardData {
       projected =
         spent +
         variableStillToCome({
-          seen: variableCharges.filter((v) => v.cid != null && budgetedSet.has(v.cid)).map((v) => v.mag),
+          seen: purchases(variableCharges).filter((v) => v.cid != null && budgetedSet.has(v.cid)).map((v) => v.mag),
           daysElapsed: lastDataDay,
           daysRemaining: remainingDays,
           history: largeHistory(budgetedSet),

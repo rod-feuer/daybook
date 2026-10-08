@@ -9,7 +9,7 @@ import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
 import { buildVerdict, pointAgainstBudget, rangeAgainstBudget } from "../src/lib/verdict";
 import { billStatus, billDelta, BILL_DELTA_MIN } from "../src/lib/bills";
-import { variableStillToCome, LARGE_CHARGE, projectionBand, projectionRange } from "../src/lib/forecast";
+import { variableStillToCome, purchases, LARGE_CHARGE, projectionBand, projectionRange } from "../src/lib/forecast";
 import { canonicalMerchant } from "../src/lib/queries";
 import { CATEGORY_EMOJIS } from "../src/lib/emoji";
 import { createLatestGuard } from "../src/lib/latestGuard";
@@ -415,4 +415,15 @@ test("today is the local calendar day, not UTC's", () => {
   } finally {
     if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz;
   }
+});
+
+// WHY: eight Delta and Southwest tickets, each under $1,000, bought a few at a
+// time, were each read as everyday spending and run-rated to month-end, and
+// the month's range ran to absurd. Charges at one vendor on one day are one
+// purchase; a different day, vendor or category is another.
+test("a vendor's charges on one day are one purchase", () => {
+  const t = (date: string, vendor: string, mag: number, cid: number | null = 1) => ({ date, vendor, mag, cid });
+  const got = purchases([t("2026-10-02", "Delta", 700), t("2026-10-02", "Delta", 700), t("2026-10-02", "Delta", 700), t("2026-10-03", "Delta", 700), t("2026-10-02", "Kroger", 80), t("2026-10-02", "Delta", 40, 2)]);
+  assert.deepEqual(got.map((p) => p.mag).sort((a, b) => a - b), [40, 80, 700, 2100]);
+  assert.ok(got.some((p) => p.mag > LARGE_CHARGE), "three tickets together cross the large line, as one trip");
 });
