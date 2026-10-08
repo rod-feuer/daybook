@@ -181,17 +181,19 @@ async function run(ask: Ask, today?: Date) {
   return { asked: pending.length, answered };
 }
 
-// The pairs the model is sure are one payee, as they stand now: both names
-// still separate vendors (a Combine since leaves nothing to ask).
-export function sureJudgments(): { a: string; b: string; why: string }[] {
+// The pairs the model is sure are one payee, as they stand now: each name
+// read as the vendor it was since combined into, so an answer about "Bp"
+// still holds once "Bp" is filed under the owner's BP vendor; a pair now one
+// vendor leaves nothing to ask. `pair` is the pair as asked (its dismiss key).
+export function sureJudgments(): { a: string; b: string; why: string; pair: string }[] {
   const db = getDb();
   ensureVendorJudgments(db);
   const links = getMerchantLinks();
   const rows = db.prepare("SELECT pair, why FROM vendor_judgments WHERE same = 1 AND confidence >= ?").all(SURE) as { pair: string; why: string }[];
   return rows
     .map((r) => {
-      const [a, b] = r.pair.split("|");
-      return { a, b, why: r.why };
+      const [a, b] = r.pair.split("|").map((n) => canonicalMerchant(n, links));
+      return { a, b, why: r.why, pair: r.pair };
     })
-    .filter((r) => canonicalMerchant(r.a, links) === r.a && canonicalMerchant(r.b, links) === r.b);
+    .filter((r) => r.a !== r.b);
 }

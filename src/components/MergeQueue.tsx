@@ -27,7 +27,7 @@ const target = (g: MergeSuggestion) => g.variants.find((v) => v.merchant === g.c
 // Store" among Apple's bills) is left out on its own: its pairs on the card
 // are dismissed, and the rest stay one Combine. Keys are "ai:<a>|<b>".
 const pairKeysOf = (g: MergeSuggestion, merchant: string) =>
-  g.dismissKeys.filter((k) => k.startsWith("ai:") && k.slice(3).split("|").includes(merchant));
+  g.pairKeys?.[merchant] ?? g.dismissKeys.filter((k) => k.startsWith("ai:") && k.slice(3).split("|").includes(merchant));
 
 export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; version?: number }) {
   const [merges, setMerges] = useState<MergeSuggestion[]>([]);
