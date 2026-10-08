@@ -6,6 +6,8 @@ import { AmountCell } from "@/components/RowCells";
 import { SummaryCard } from "@/components/SummaryCard";
 import { LoadError, LoadingRows } from "@/components/LoadState";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
+import { HeaderMenu } from "@/components/HeaderMenu";
+import { SyncBankButton } from "@/components/Actions";
 import { useAccountShelf, useShelfActive } from "@/components/TransactionDrawer";
 import { ValueForm } from "@/components/shelf/AccountShelf";
 import { KIND_LABEL, accountKind, accountWhen } from "@/components/accountLabels";
@@ -116,7 +118,16 @@ export default function AccountsPage() {
       title="Accounts"
       // The comparison's basis is said once, here, as the dashboard does.
       subtitle={latest ? `As of ${shortDate(latest)}${data?.trend.prev ? ` · vs ${shortDate(data.trend.prev.date)}` : ""}` : undefined}
-      actions={<button type="button" onClick={() => setAdding((v) => !v)} className="btn-ghost">Add account</button>}
+      actions={
+        <>
+          <button type="button" onClick={() => setAdding((v) => !v)} className="btn-ghost">Add account</button>
+          {/* A balance is only as new as the last sync: pull one now, as the
+              dashboard's menu does. */}
+          <HeaderMenu>
+            <SyncBankButton onDone={() => void load()} />
+          </HeaderMenu>
+        </>
+      }
     >
       {adding && (
         <AddAccount

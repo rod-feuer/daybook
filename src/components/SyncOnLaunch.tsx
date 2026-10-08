@@ -8,8 +8,8 @@ import { useToast } from "@/components/Toast";
 // reloads and new tabs don't spam it (client navigations don't remount the
 // layout, so this only re-runs on a full load anyway). Quiet by design: a toast
 // only when new data actually arrives, and silence on errors (e.g. the Plaid CLI
-// isn't set up) so it never nags on launch. On success it emits `copilot:synced`
-// so any open page can refresh without a full reload.
+// isn't set up) so it never nags on launch. When charges or balances arrive it
+// emits `copilot:synced` so any open page can refresh without a full reload.
 const THROTTLE_MS = 15 * 60 * 1000; // 15 minutes
 
 export function SyncOnLaunch() {
@@ -41,10 +41,10 @@ export function SyncOnLaunch() {
         if (!res.ok || cancelled) return; // Plaid not configured / errored → stay quiet
         const data = await res.json();
         const changed = (data.inserted ?? 0) + (data.updated ?? 0);
-        if (changed > 0) {
-          toast(`Synced ${data.inserted} new · ${data.updated} updated`, "success");
-          window.dispatchEvent(new Event("copilot:synced"));
-        }
+        if (changed > 0) toast(`Synced ${data.inserted} new · ${data.updated} updated`, "success");
+        // New balances alone are new data too: on a day without new charges,
+        // Accounts kept showing yesterday's balances until a reload.
+        if (changed > 0 || (data.balances ?? 0) > 0) window.dispatchEvent(new Event("copilot:synced"));
       } catch {
         // network or other — silent on launch
       }
