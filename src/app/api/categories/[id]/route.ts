@@ -7,6 +7,7 @@ import {
   setCategoryExcluded,
   updateCategory,
 } from "@/lib/queries";
+import { localToday } from "@/lib/format";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,7 +60,7 @@ export async function PATCH(
   const month =
     typeof body.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(body.month)
       ? body.month
-      : new Date().toISOString().slice(0, 7);
+      : localToday().slice(0, 7);
   const clear = body.budget === null || body.budget === "" || body.budget === undefined;
   // One month's own budget (scope "only"): empty returns it to the usual one.
   if (body.scope === "only") {

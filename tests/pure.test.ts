@@ -1,9 +1,11 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
+import fs from "node:fs";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { normalizeMerchant, merchantKey } from "../src/lib/merchant";
 import { classifyCadence, addCadence, txHash } from "../src/lib/core";
 import { medianGap, monthlyFactor, CADENCE_DAYS, PER_YEAR, CADENCE_LABEL } from "../src/lib/cadence";
-import { spendTrend, localToday, pendingNote } from "../src/lib/format";
+import { spendTrend, localToday, pendingNote, isCurrentMonth } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
@@ -437,4 +439,40 @@ test("a charge that posted for another amount says how, and calls only a modest 
   assert.equal(pendingNote(-80, -100), "was $100.00 pending", "a charge that settled lower is not a tip");
   assert.equal(pendingNote(-16.82, null), null, "a charge never seen pending says nothing");
   assert.equal(pendingNote(-16.82, -16.82), null, "nor one that posted as it showed");
+});
+
+test("at 9pm Eastern on the last day of a month, the app is still in that month", () => {
+  // WHY: toISOString() is UTC, and after 8pm Eastern UTC is already tomorrow.
+  // From 8pm on Oct 31 the app took November as the current month: the
+  // category chart's average, the budgets and the Recurrings page's "today"
+  // all moved a day early. Every "today" is the local calendar's.
+  const tz = process.env.TZ;
+  process.env.TZ = "America/Indianapolis";
+  mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-01T01:00:00Z") }); // Oct 31, 9pm EDT
+  try {
+    assert.equal(localToday(), "2026-10-31");
+    assert.ok(isCurrentMonth("2026-10"), "October is still the current month");
+    assert.ok(!isCurrentMonth("2026-11"), "November hasn't started");
+  } finally {
+    mock.timers.reset();
+    if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz;
+  }
+});
+
+test("no code takes today's date from the UTC clock", () => {
+  // WHY: one site left on toISOString() puts that one surface a day ahead
+  // every evening; localToday() is the local calendar's day.
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) walk(f);
+      else if (/\.(ts|tsx)$/.test(e.name))
+        fs.readFileSync(f, "utf8").split("\n").forEach((line, i) => {
+          if (/new Date\(\)\.toISOString\(\)\.slice\(0, (7|10)\)/.test(line)) hits.push(`${f}:${i + 1}`);
+        });
+    }
+  };
+  walk("src");
+  assert.deepEqual(hits, []);
 });

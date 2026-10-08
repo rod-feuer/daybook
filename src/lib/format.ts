@@ -26,7 +26,7 @@ export function monthName(month: string): string {
 }
 
 export function isCurrentMonth(month: string): boolean {
-  return month === new Date().toISOString().slice(0, 7);
+  return month === localToday().slice(0, 7);
 }
 
 export function defaultMonth(months: string[]): string {

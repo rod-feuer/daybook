@@ -14,7 +14,7 @@ import { KIND_LABEL, accountKind, accountWhen } from "@/components/accountLabels
 import { rowButtonProps, ROW_FOCUS } from "@/components/rowButton";
 import { useMutation } from "@/components/useMutation";
 import { getJson, postJson } from "@/lib/http";
-import { usd, shortDate, monthDayYear } from "@/lib/format";
+import { usd, shortDate, monthDayYear, localToday } from "@/lib/format";
 import type { LookItem, NetWorth, NetWorthTrend } from "@/lib/accounts";
 import { TREND_MIN_DAYS } from "@/lib/accountKinds";
 import { pairLoans, equityOf, movers, type Mover } from "@/lib/accountPairs";
@@ -63,7 +63,7 @@ export default function AccountsPage() {
   // The day the figures are as of: the newest balance. An account that hasn't
   // reported since says its own date on its row.
   const latest = data?.accounts.reduce((m, a) => (a.asOf > m ? a.asOf : m), "") || null;
-  const today = data?.today ?? new Date().toISOString().slice(0, 10);
+  const today = data?.today ?? localToday();
   const counted = data?.accounts.filter((a) => a.counted) ?? [];
   const prev = data?.trend.prev ?? null;
   const prevLabel = prev ? shortDate(prev.date) : null;

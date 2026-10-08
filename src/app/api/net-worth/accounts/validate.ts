@@ -1,4 +1,5 @@
 import { MANUAL_KINDS, TERM_FIELDS, type ManualKind, type OwnerValue, type TermField } from "@/lib/accounts";
+import { localToday } from "@/lib/format";
 
 // Shared checks for the account routes. Each returns the clean value or an
 // error string the route sends back as a 400.
@@ -19,7 +20,7 @@ export function cleanValue(body: { amount?: unknown; asOf?: unknown; estimate?: 
   if (!Number.isFinite(amount) || amount < 0) return { error: "the value must be a number, zero or more" };
   const asOf = String(body.asOf ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(asOf + "T00:00:00Z"))) return { error: "the date must be YYYY-MM-DD" };
-  if (asOf > new Date().toISOString().slice(0, 10)) return { error: "the date can't be in the future" };
+  if (asOf > localToday()) return { error: "the date can't be in the future" };
   return { amount: Math.round(amount * 100) / 100, asOf, estimate: !!body.estimate };
 }
 

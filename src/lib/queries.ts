@@ -15,6 +15,7 @@ import type { TransactionWithCategory, Recurring, Category } from "./types";
 import { nameAffinity, LOW_MATCH } from "./similarity";
 import { CADENCE_DAYS, PER_YEAR, monthlyFactor, medianGap, addCadence, type Cadence } from "./cadence";
 import { vendorScope, getChargeMoves, vendorName } from "./chargeVendors";
+import { localToday } from "./format";
 
 // ---- Merchant linking ----------------------------------------------------
 // User-declared "these descriptors are the same vendor" (e.g. a gas bill whose
@@ -132,7 +133,7 @@ export function distinctMerchants(): { merchant: string; count: number }[] {
 export function monthThroughDay(month: string): number {
   const [y, m] = month.split("-").map(Number);
   const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  if (month !== new Date().toISOString().slice(0, 7)) return days;
+  if (month !== localToday().slice(0, 7)) return days;
   const row = getDb()
     .prepare(
       `SELECT MAX(CAST(substr(COALESCE(t.effectiveDate, t.date), 9, 2) AS INTEGER)) AS d
@@ -902,7 +903,7 @@ export function setSeriesCategory(recurringId: number, categoryId: number | null
 // when a charge is late or the series has paused. Display-only: the stored
 // nextDate is left alone (the dashboard's "upcoming" filter relies on it).
 function nextDueFromToday(nextDate: string, cadence: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   if (nextDate >= today) return nextDate;
   let d = nextDate;
   let guard = 0;
@@ -2011,7 +2012,7 @@ export function categoriesWithTotals(month?: string): CategoryWithTotals[] {
        ORDER BY c.kind DESC, COALESCE(c.excludeFromTotals, 0) ASC, total DESC`
     )
     .all({ month }) as (Category & { total: number; txCount: number })[];
-  const budgets = getBudgetsFull(month ?? new Date().toISOString().slice(0, 7));
+  const budgets = getBudgetsFull(month ?? localToday().slice(0, 7));
   const baseline = recurringMonthlyByCategory();
 
   const ytdById = ytdSpentByCategory();
@@ -2021,10 +2022,9 @@ export function categoriesWithTotals(month?: string): CategoryWithTotals[] {
   // sensible monthly figure), to the nearest $5. Drives the one-tap
   // "use" on unbudgeted categories. Window is "now", independent of the viewed
   // month, so the suggestion reflects real recent behaviour.
-  const now = new Date();
-  const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1))
-    .toISOString()
-    .slice(0, 10);
+  // The local month: from 8pm Eastern on the last day, UTC's is next month's.
+  const [y, mo] = localToday().split("-").map(Number);
+  const cutoff = new Date(Date.UTC(y, mo - 1 - 11, 1)).toISOString().slice(0, 10);
   // Spend AND the number of months the category was actually active. The average
   // is per-active-month, NOT per-12: a $259/mo bill we've only seen once should
   // suggest $259, not $259/12. Months counts only months with qualifying spend.
@@ -2404,7 +2404,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   // dashboard's rule (monthThroughDay; core.ts applies the same counted()): through the latest day with any
   // counted charge, since bank data trails the calendar.
   let prevThrough: number | null = null;
-  if (month === new Date().toISOString().slice(0, 7)) {
+  if (month === localToday().slice(0, 7)) {
     const [yy, mm] = month.split("-").map(Number);
     const last = monthThroughDay(month);
     if (last > 0 && last < new Date(Date.UTC(yy, mm, 0)).getUTCDate()) prevThrough = last;
@@ -2469,7 +2469,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
   // hasn't charged within ~1.5 cycles isn't "upcoming"; it's inactive), and not
   // one the user marked ended: the Epic Pass, ended Sep 27, was still listed
   // as $100 due Oct 1. The dashboard, Recurrings and the digest already skip it.
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = localToday().slice(0, 7);
   const upcoming =
     month !== currentMonth
       ? []
@@ -2504,7 +2504,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
     history,
     // The average month the shelf's chart draws: the finished months of the
     // twelve. Mid-month the viewed one is partial and would pull it down.
-    monthlyAvg: Number((month === new Date().toISOString().slice(0, 7) ? (t12 - cur.s) / 11 : t12 / 12).toFixed(2)),
+    monthlyAvg: Number((month === localToday().slice(0, 7) ? (t12 - cur.s) / 11 : t12 / 12).toFixed(2)),
     budget: getBudgets(month)[cat.id] ?? null,
     budgetEntry: (() => {
       const c = categoriesWithTotals(month).find((x) => x.id === cat.id);
@@ -2517,7 +2517,7 @@ export function categorySummary(categoryId: number, month: string): CategorySumm
         ytdSpent: c?.ytdSpent ?? 0,
         plan: budgetPlan(cat.id, month).map((p) => ({
           ...p,
-          spent: p.month <= new Date().toISOString().slice(0, 7) ? Number((byMonth.get(p.month) ?? 0).toFixed(2)) : null,
+          spent: p.month <= localToday().slice(0, 7) ? Number((byMonth.get(p.month) ?? 0).toFixed(2)) : null,
           lastYear: Number((byMonth.get(shiftMonth(p.month, -12)) ?? 0).toFixed(2)),
         })),
       };

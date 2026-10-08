@@ -5,7 +5,7 @@ import { InlineEdit, CommitInput } from "@/components/InlineEdit";
 import { recurringState } from "@/components/RecurringGlyph";
 import { Tooltip } from "@/components/Tooltip";
 import { InfoHint } from "@/components/InfoHint";
-import { usd, monthDayYear, shortDate } from "@/lib/format";
+import { usd, monthDayYear, shortDate, localToday } from "@/lib/format";
 import { merchantKey } from "@/lib/merchant";
 import { useNewCategory } from "@/components/NewCategoryOption";
 import { CADENCE_LABEL, cadenceLabel } from "@/lib/cadence";
@@ -1091,7 +1091,7 @@ export function MerchantBody({
               </button>
             ) : (
               <button
-                onClick={() => onSaveSettings({ endedDate: new Date().toISOString().slice(0, 10) })}
+                onClick={() => onSaveSettings({ endedDate: localToday() })}
                 className="btn-ghost flex-1 text-xs"
               >
                 Mark ended
