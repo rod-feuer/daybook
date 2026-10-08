@@ -7,6 +7,7 @@ import { applySplitRules } from "./splits";
 import { applyPlanMatches } from "./planMatch";
 import { recordBalances, recordBankTerms, projectAllLoanPayments, type BankTerms } from "./accounts";
 import { normalizeMerchant } from "./merchant";
+import { localToday } from "./format";
 import { nameAffinity, NAME_MATCH } from "./merges";
 
 const run = promisify(execFile);
@@ -365,7 +366,8 @@ export function importPlaidTransactions(items: PlaidItem[]): {
 // the bank since the last imported day, import, apply the split rules, and
 // rebuild the plans when anything changed.
 export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; balances: number; terms: number | null; total: number }> {
-  const end = new Date().toISOString().slice(0, 10);
+  // The local day: the balances below are dated by it.
+  const end = localToday();
   // Start after existing history so Plaid doesn't duplicate the back-import.
   // Clamp to `end` in case prior data is future-dated (nothing to pull then).
   const startDate = plaidSyncStartDate();

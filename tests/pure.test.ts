@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { normalizeMerchant, merchantKey } from "../src/lib/merchant";
 import { classifyCadence, addCadence, txHash } from "../src/lib/core";
 import { medianGap, monthlyFactor, CADENCE_DAYS, PER_YEAR, CADENCE_LABEL } from "../src/lib/cadence";
-import { spendTrend } from "../src/lib/format";
+import { spendTrend, localToday } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
@@ -382,4 +382,17 @@ test("the verdict says the range, and takes a colour only when all of it is on o
   assert.equal(budgetOutlook(10000, 9500, true, { low: 8000, high: 11000 }).kind, "on", "spanning the budget is not under, though the middle is");
   // A finished month has no range: it's stated as fact, as before.
   assert.equal(buildVerdict({ expenses: 3000, net: 0, budget: { total: 10000, spent: 10600, projected: 10600, range: null } }, false).text, "Finished $600 over budget");
+});
+
+// WHY: a bank sync at 9pm Eastern on Oct 7 dated the balances Oct 8 — UTC's
+// date, a day ahead of the user's. A balance is as of the user's day.
+test("today is the local calendar day, not UTC's", () => {
+  const tz = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  try {
+    assert.equal(localToday(new Date("2026-10-08T01:11:00Z")), "2026-10-07", "9:11pm on Oct 7 in Indiana is still Oct 7");
+    assert.equal(localToday(new Date("2026-10-08T14:00:00Z")), "2026-10-08");
+  } finally {
+    if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz;
+  }
 });
