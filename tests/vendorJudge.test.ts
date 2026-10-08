@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { judgeVendorPairs, type Ask, type Candidate } from "../src/lib/vendorJudge";
 import { allMergeSuggestions, approveMerge, dismissMerge } from "../src/lib/merges";
 import { setChargeVendor } from "../src/lib/vendorMoves";
+import { getDb } from "../src/lib/db";
 
 cleanDbBeforeEach();
 
@@ -87,6 +88,63 @@ test("a dismissed model card stays dismissed", async () => {
   const [card] = modelCards();
   for (const k of card.dismissKeys) dismissMerge(k);
   assert.equal(modelCards().length, 0);
+});
+
+// WHY: Culvers posts under many spellings, and the model was sure of four
+// pairs among Culvers, Culvers Carmel, Culvers Of Franklin and Culvers Of
+// Esestero. One card per pair meant Combine, then a new card under the same
+// name, three times over. Names joined by any pair are one card and one
+// Combine; Dismiss rules out every pair on it.
+test("the model's pairs among one vendor's spellings are one card", async () => {
+  monthly("Culvers", 1, 9, -12, 3);
+  monthly("Culvers Carmel", 3, 3, -14, 9);
+  monthly("Culvers Of Franklin", 4, 2, -11, 12);
+  tx("Culvers Of Esestero", { amount: -15, date: "2026-09-20", account: "Amex Gold" });
+  monthly("Netflix", 5, 5, -26.99, 23);
+  const pairs = new Set(["Culvers|Culvers Carmel", "Culvers|Culvers Of Franklin", "Culvers Carmel|Culvers Of Esestero", "Culvers Carmel|Culvers Of Franklin"]);
+  const ask: Ask = async (batch) => batch.map((c) => ({ same: pairs.has(c.pair), confidence: 0.9, why: "same chain" }));
+  await judgeVendorPairs({ ask, today: TODAY });
+
+  const cards = modelCards();
+  assert.equal(cards.length, 1, "one card, not one per pair");
+  assert.equal(cards[0].canonical, "Culvers", "folding into the spelling with the most charges");
+  assert.deepEqual(cards[0].variants.map((v) => v.merchant).sort(), ["Culvers", "Culvers Carmel", "Culvers Of Esestero", "Culvers Of Franklin"]);
+  approveMerge(cards[0].canonical, cards[0].variants.map((v) => v.merchant));
+  assert.equal(modelCards().length, 0, "one Combine, and nothing comes back");
+});
+
+// WHY: the busiest spelling kept the card's name, and the busiest is often
+// the bank's messiest: "Franklin Liqunineveh In" over "Franklin Liquor",
+// "Card And Associ" over the name it cut short. The cleanest name is
+// proposed; one the owner named or set up still wins, since its settings are
+// kept under it.
+test("a model's card folds into the cleanest name, unless the owner set one up", async () => {
+  monthly("Franklin Liqunineveh In", 1, 9, -30, 4);
+  monthly("Franklin Liquor", 8, 2, -30, 4);
+  monthly("Card And Associ", 1, 9, -50, 8);
+  monthly("Card And Associates", 8, 2, -50, 8);
+  await judgeVendorPairs({ ask: fake({ same: true, confidence: 0.9 }).ask, today: TODAY });
+  const into = () => Object.fromEntries(modelCards().map((c) => [c.variants.map((v) => v.merchant).sort().join(" + "), c]));
+  let cards = into();
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].canonical, "Franklin Liquor", "no town glued on, though it has fewer charges");
+  assert.equal(cards["Card And Associ + Card And Associates"].canonical, "Card And Associates", "not the name the bank cut short");
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].fixed, false, "the owner can pick another on the card");
+
+  getDb().prepare("INSERT INTO recurring_settings (merchant, alias) VALUES ('Franklin Liqunineveh In', 'Franklin Liquor Store')").run();
+  cards = into();
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].canonical, "Franklin Liqunineveh In", "the name the owner gave stays");
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].fixed, true, "and can't be swapped away on the card");
+});
+
+test("dismissing a vendor's card rules out every pair on it", async () => {
+  monthly("Culvers", 1, 9, -12, 3);
+  monthly("Culvers Carmel", 3, 3, -14, 9);
+  tx("Culvers Of Esestero", { amount: -15, date: "2026-09-20", account: "Amex Gold" });
+  await judgeVendorPairs({ ask: fake({ same: true, confidence: 0.9 }).ask, today: TODAY });
+  const [card, ...rest] = modelCards();
+  assert.equal(rest.length, 0);
+  for (const k of card.dismissKeys) dismissMerge(k);
+  assert.equal(modelCards().length, 0, "no pair from the dismissed card comes back on its own");
 });
 
 // WHY: when a rule already offers the pair, a second card from the model would

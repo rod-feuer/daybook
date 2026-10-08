@@ -20,12 +20,22 @@ type PreviewTx = { date: string; amount: number; account: string };
 // charges of its own under that name).
 const strays = (g: MergeSuggestion) => g.variants.filter((v) => v.merchant !== g.canonical);
 const target = (g: MergeSuggestion) => g.variants.find((v) => v.merchant === g.canonical);
+// The model's card joins every name it paired, so one wrong name ("Apple
+// Store" among Apple's bills) is left out on its own: its pairs on the card
+// are dismissed, and the rest stay one Combine. Keys are "ai:<a>|<b>".
+const pairKeysOf = (g: MergeSuggestion, merchant: string) =>
+  g.dismissKeys.filter((k) => k.startsWith("ai:") && k.slice(3).split("|").includes(merchant));
 
 export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; version?: number }) {
   const [merges, setMerges] = useState<MergeSuggestion[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null); // expanded card key
   const [previews, setPreviews] = useState<Record<string, Record<string, PreviewTx[]>>>({});
+  // The name the owner picked to keep on a model's card, by card key; the
+  // card proposes the cleanest (nameMess), and the owner has the last word.
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  const as = (g: MergeSuggestion) =>
+    picked[g.key] && g.variants.some((v) => v.merchant === picked[g.key]) ? { ...g, canonical: picked[g.key] } : g;
 
   const load = useCallback(async () => {
     const data = await fetch("/api/merges").then((r) => r.json());
@@ -73,6 +83,14 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
     setBusy(null);
   }
 
+  async function leaveOut(g: MergeSuggestion, merchant: string) {
+    setBusy(g.key);
+    await mutate(() => postJson("/api/merges", { action: "dismiss", keys: pairKeysOf(g, merchant) }), {
+      error: "Couldn't update — please try again",
+    });
+    setBusy(null);
+  }
+
   async function toggle(g: MergeSuggestion) {
     if (open === g.key) {
       setOpen(null);
@@ -107,7 +125,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
         totals, or dismiss.
       </p>
       <ul className="flex flex-col gap-2">
-        {merges.map((g) => (
+        {merges.map(as).map((g) => (
           <li key={g.key} className="rounded-lg border border-[var(--border)] p-3">
             <div className="flex items-start justify-between gap-3">
               <div
@@ -136,8 +154,30 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                     choice between equals. */}
                 <div className="mt-1 text-xs text-[var(--muted)]" data-merge-direction>
                   Combine {strays(g).map((v) => `${v.merchant} (${v.count})`).join(" · ")} into{" "}
-                  <span className="font-medium text-[var(--foreground)]">{g.canonical}</span>
-                  {target(g) && ` (${target(g)!.count})`}
+                  {g.source === "model" && !g.fixed ? (
+                    // A native select (DESIGN.md §2): the name to keep, any of
+                    // the card's names. Clicks on it don't open the evidence.
+                    <select
+                      value={g.canonical}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      onChange={(e) => setPicked((p) => ({ ...p, [g.key]: e.target.value }))}
+                      aria-label="The name to keep"
+                      data-merge-into
+                      className="btn-ghost select-caret cursor-pointer appearance-none pr-8 text-left text-xs font-medium"
+                    >
+                      {g.variants.map((v) => (
+                        <option key={v.merchant} value={v.merchant}>
+                          {v.merchant} ({v.count})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <>
+                      <span className="font-medium text-[var(--foreground)]">{g.canonical}</span>
+                      {target(g) && ` (${target(g)!.count})`}
+                    </>
+                  )}
                 </div>
                 {g.note && (
                   <div
@@ -184,9 +224,21 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                   const txs = previews[g.key]?.[v.merchant];
                   return (
                     <div key={v.merchant}>
-                      <div className="text-xs font-medium">
-                        {v.merchant}{" "}
-                        <span className="text-[var(--muted)]">({v.count})</span>
+                      <div className="flex items-baseline justify-between gap-3 text-xs font-medium">
+                        <span>
+                          {v.merchant} <span className="text-[var(--muted)]">({v.count})</span>
+                        </span>
+                        {g.source === "model" && strays(g).length > 1 && v.merchant !== g.canonical && (
+                          <button
+                            disabled={busy === g.key}
+                            onClick={() => leaveOut(g, v.merchant)}
+                            aria-label={`Leave ${v.merchant} out of this combine`}
+                            data-merge-leave-out={v.merchant}
+                            className="tap shrink-0 font-normal text-[var(--muted)] hover:text-[var(--foreground)] disabled:opacity-50"
+                          >
+                            Leave out
+                          </button>
+                        )}
                       </div>
                       {!previews[g.key] ? (
                         <div className="mt-1 text-xs text-[var(--muted)]">Loading…</div>

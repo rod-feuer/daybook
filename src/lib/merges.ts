@@ -60,6 +60,7 @@ export type MergeSuggestion = {
   categoryId?: number; // recurring-match: set uncategorized variant charges to this
   lowConfidence?: boolean; // 0.8–0.9 name band — surface for confirmation, not certain
   source?: "model"; // the model's judgment, not a rule's (vendorJudge.ts)
+  fixed?: boolean; // the canonical carries the owner's name or settings: it can't be swapped on the card
   // The bill a recurring-match card folds into, as a row elsewhere can say it
   // to decide there: "Same as Every ($20 monthly, the 4th)?".
   bill?: { name: string; amount: number; cadence: string; day: number };
@@ -499,10 +500,38 @@ function ownerSettings(settings: ReturnType<typeof getRecurringSettings>, links:
   return { hasName, hasSettings };
 }
 
-// The model's matches (vendorJudge.ts): two close names it is sure are one
-// payee, which no rule above surfaced. The vendor the owner named or set up
-// stays canonical, else the one with more charges. Dismiss key =
-// "ai:<a>|<b>" (the names sorted).
+// How much a bank has added to, or cut from, a payee's name: a town glued on
+// ("Franklin Liqunineveh In", "X Developer Platformbastrop" beside "X
+// Developer Platform"), a store or phone number ("Marathon
+// Petro110072franklin In"), a code mark, processor or web address
+// ("Godaddy#tempe", "Sp Bombas", "Westelm.com"), or a last word cut short
+// where another spelling has it whole ("Card And Associ"). A word that runs on
+// past another spelling's by a few letters is that word cut short in the
+// other ("Associ", "Associates"); by more, a town glued on ("Market",
+// "Marketfranklin"). Lower is cleaner. It can't see every glued town
+// ("Courtyard By Marriotarlington"), so the card lets the owner pick too.
+export function nameMess(name: string, others: string[]): number {
+  const words = (m: string) => m.toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(Boolean);
+  const mine = words(name);
+  const theirs = others.filter((o) => o !== name).flatMap(words);
+  const last = mine.at(-1) ?? "";
+  const cut = theirs.some((o) => o.startsWith(last) && o.length > last.length && o.length - last.length <= 4);
+  const glued = mine.some((w) => theirs.some((o) => o.length >= 4 && w.startsWith(o) && w.length - o.length >= 5));
+  return (
+    (stripLocationSuffix(name) || / [A-Z][a-z]$/.test(name) || glued ? 3 : 0) +
+    (/\d/.test(name) ? 2 : 0) +
+    (/[#*_]|\.com|www\.|^(sp|sq|tst|pwp) /i.test(name) ? 2 : 0) +
+    (cut ? 3 : 0)
+  );
+}
+
+// The model's matches (vendorJudge.ts): close names it is sure are one payee,
+// which no rule above surfaced. The names it pairs make one card, so a vendor
+// with many spellings (Culvers, and Culvers Carmel, Culvers Of Franklin, …) is
+// one Combine, not one card per pair that returns under the same name after
+// each. The vendor the owner named or set up stays canonical (its settings
+// are kept under its name), else the cleanest name (nameMess), else the one
+// with the most charges. Dismiss keys = each pair's "ai:<a>|<b>" (sorted).
 export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
   const db = getDb();
   const dismissed = dismissedKeys(db);
@@ -524,30 +553,49 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
     dismissed.has(`handoff:${a}>${b}`) ||
     dismissed.has(`handoff:${b}>${a}`) ||
     dismissedStems.some((n) => normName(a).startsWith(n) && normName(b).startsWith(n));
-  const seen = new Set<string>();
-  const out: MergeSuggestion[] = [];
+  // Join the pairs still open into groups: names linked by any chain of pairs.
+  const group = new Map<string, string>(); // name → a representative
+  const root = (n: string): string => {
+    while (group.get(n) !== n) n = group.get(n)!;
+    return n;
+  };
+  const pairs: { a: string; b: string; why: string; key: string }[] = [];
   for (const { a, b, why } of sureJudgments()) {
     const key = `ai:${a}|${b}`;
-    if (dismissed.has(key) || ruledOut(a, b) || exclude.has(a) || exclude.has(b) || seen.has(a) || seen.has(b)) continue;
+    if (dismissed.has(key) || ruledOut(a, b) || exclude.has(a) || exclude.has(b)) continue;
     // Both still vendors, and neither one the owner made (an answer kept from
     // before a move or split).
     if (!ownCharge.has(a) || !ownCharge.has(b)) continue;
-    seen.add(a).add(b); // one card per vendor
-    // Then the busier one. Preferring the name without a city kept bank
-    // truncations ("Harmony Harmo", "West Clay Win") on real data.
-    const keepA =
-      hasName(a) !== hasName(b) ? hasName(a)
-      : hasSettings(a) !== hasSettings(b) ? hasSettings(a)
-      : counts.get(a)! >= counts.get(b)!;
-    const variants = [a, b].map((m) => ({ merchant: m, count: counts.get(m)! }));
+    for (const n of [a, b]) if (!group.has(n)) group.set(n, n);
+    group.set(root(a), root(b));
+    pairs.push({ a, b, why, key });
+  }
+  const groups = new Map<string, typeof pairs>();
+  for (const p of pairs) groups.set(root(p.a), [...(groups.get(root(p.a)) ?? []), p]);
+
+  const out: MergeSuggestion[] = [];
+  for (const ps of groups.values()) {
+    const names = [...new Set(ps.flatMap((p) => [p.a, p.b]))];
+    // Cleanest, then busiest. Preferring any name without a city once kept
+    // bank truncations ("Harmony Harmo", "West Clay Win"): a cut word counts.
+    const rank = (m: string) => [hasName(m) ? 1 : 0, hasSettings(m) ? 1 : 0, -nameMess(m, names), counts.get(m)!];
+    const beats = (m: string, best: string) => {
+      const [x, y] = [rank(m), rank(best)];
+      return (x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3] - y[3]) > 0;
+    };
+    const canonical = names.reduce((best, m) => (beats(m, best) ? m : best));
+    const variants = names.map((m) => ({ merchant: m, count: counts.get(m)! })).sort((x, y) => y.count - x.count);
+    // The reason given for a pair with the canonical says why the card folds into it.
+    const said = ps.find((p) => p.a === canonical || p.b === canonical) ?? ps[0];
     out.push({
-      canonical: keepA ? a : b,
-      key,
-      dismissKeys: [key],
+      canonical,
+      key: ps.map((p) => p.key).sort()[0],
+      dismissKeys: ps.map((p) => p.key),
       variants,
       total: variants.reduce((s, v) => s + v.count, 0),
-      note: why,
+      note: said.why,
       source: "model",
+      fixed: hasName(canonical) || hasSettings(canonical),
     });
   }
   return out.sort((x, y) => y.total - x.total);

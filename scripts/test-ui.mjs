@@ -1014,10 +1014,70 @@ async function modelMergeCard(browser) {
     });
     await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
     const shown = await page.waitForSelector("[data-merge-source='model']", { timeout: 8000 }).then(() => true).catch(() => false);
-    const r = shown ? await page.$eval("[data-merge-source='model']", (tag) => { const li = tag.closest("li"); return { tag: tag.textContent.trim(), text: li.textContent.replace(/\s+/g, " ") }; }) : null;
-    record("model merge card", "the queue asks the model with no press, and its match arrives marked AI with its reason", shown && state.asks === 1 && r.tag === "AI" && r.text.includes("Same subscription after a price rise") && /Combine Roku \(1\) into The Roku Channel \(5\)/.test(r.text), r ? `${r.tag} · ${r.text.slice(0, 120)}` : `asks=${state.asks}, no card`);
+    const r = shown ? await page.$eval("[data-merge-source='model']", (tag) => { const li = tag.closest("li"); const into = li.querySelector("[data-merge-into]"); return { tag: tag.textContent.trim(), text: li.textContent.replace(/\s+/g, " "), into: into ? into.value : null }; }) : null;
+    record("model merge card", "the queue asks the model with no press, and its match arrives marked AI with its reason", shown && state.asks === 1 && r.tag === "AI" && r.text.includes("Same subscription after a price rise") && /Combine Roku \(1\) into/.test(r.text) && r.into === "The Roku Channel", r ? `${r.tag} · into ${r.into} · ${r.text.slice(0, 100)}` : `asks=${state.asks}, no card`);
     await sleep(600);
     record("model merge card", "having asked, it does not ask again on that visit", state.asks === 1, `asks=${state.asks}`);
+  });
+}
+
+// The model's card joins every name it paired (Culvers' spellings came one
+// pair at a time, each Combine bringing the next back under the same name),
+// so one wrong name is left out on its own: its pairs are dismissed, and the
+// card stays, one Combine for the rest.
+async function modelMergeLeaveOut(browser) {
+  await withPage(browser, async (page) => {
+    const keys = ["ai:Apple Store|Apple.com-bill", "ai:Apple.com-bill|Applecombill"];
+    const three = { canonical: "Apple.com-bill", key: keys[0], dismissKeys: keys, variants: [{ merchant: "Apple.com-bill", count: 40 }, { merchant: "Apple Store", count: 2 }, { merchant: "Applecombill", count: 1 }], total: 43, note: "Apple charges", source: "model" };
+    const two = { ...three, key: keys[1], dismissKeys: [keys[1]], variants: [three.variants[0], three.variants[2]], total: 41 };
+    const state = { left: false, dismissed: null };
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (!req.url().endsWith("/api/merges")) return req.continue();
+      const body = req.postData() ?? "";
+      if (req.method() === "POST" && body.includes("judge")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ asked: 0, answered: 0 }) });
+      if (req.method() === "POST" && body.includes("dismiss")) { state.left = true; state.dismissed = JSON.parse(body).keys; return req.respond({ status: 200, contentType: "application/json", body: '{"ok":true}' }); }
+      if (req.method() === "GET") return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify([state.left ? two : three]) });
+      req.continue();
+    });
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-merge-source='model']", { timeout: 8000 });
+    await page.$$eval("[data-merge-direction]", (els) => els[0].closest("li").querySelector("[data-merge-direction]").parentElement.click());
+    const btn = await page.waitForSelector("[data-merge-leave-out='Apple Store']", { timeout: 4000 }).catch(() => null);
+    const offered = await page.$$eval("[data-merge-leave-out]", (bs) => bs.map((b) => b.getAttribute("data-merge-leave-out")).sort());
+    if (btn) await btn.click();
+    const after = await page.waitForFunction(() => { const d = document.querySelector("[data-merge-direction]"); return d && !d.textContent.includes("Apple Store") ? d.textContent.replace(/\s+/g, " ") : false; }, { timeout: 3000 }).then((h) => h.jsonValue()).catch(() => null);
+    record("model merge leave out", "each folded-in name on a model's card can be left out, and only its pairs are dismissed", JSON.stringify(offered) === JSON.stringify(["Apple Store", "Applecombill"]) && JSON.stringify(state.dismissed) === JSON.stringify([keys[0]]), `offered ${offered.join(", ")} · dismissed ${JSON.stringify(state.dismissed)}`);
+    record("model merge leave out", "the card stays for the rest, one Combine", !!after && /Combine Applecombill \(1\) into Apple.com-bill \(40\)/.test(after), after ?? "card gone or unchanged");
+  });
+}
+
+// A model's card proposes the cleanest name to keep, and the owner can pick
+// another of its names on the card: the combine folds into the one picked.
+// A name the owner set up is kept, with no picker.
+async function modelMergePick(browser) {
+  await withPage(browser, async (page) => {
+    const card = { canonical: "Franklin Liquor", key: "ai:Franklin Liquor|Franklin Liqunineveh In", dismissKeys: ["ai:Franklin Liquor|Franklin Liqunineveh In"], variants: [{ merchant: "Franklin Liqunineveh In", count: 9 }, { merchant: "Franklin Liquor", count: 2 }], total: 11, note: "same store", source: "model", fixed: false };
+    const fixed = { ...card, key: "ai:Nike|Nike.com", dismissKeys: ["ai:Nike|Nike.com"], canonical: "Nike.com", variants: [{ merchant: "Nike.com", count: 4 }, { merchant: "Nike", count: 1 }], total: 5, fixed: true };
+    const state = { approved: null };
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (!req.url().endsWith("/api/merges")) return req.continue();
+      const body = req.postData() ?? "";
+      if (req.method() === "POST" && body.includes("judge")) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ asked: 0, answered: 0 }) });
+      if (req.method() === "POST" && body.includes("approve")) { state.approved = JSON.parse(body); return req.respond({ status: 200, contentType: "application/json", body: '{"ok":true}' }); }
+      if (req.method() === "GET") return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(state.approved ? [fixed] : [card, fixed]) });
+      req.continue();
+    });
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-merge-into]", { timeout: 8000 });
+    const pickers = await page.$$eval("[data-merge-into]", (ss) => ss.map((x) => x.value));
+    await page.select("[data-merge-into]", "Franklin Liqunineveh In");
+    const after = await page.$eval("[data-merge-into]", (x) => { const li = x.closest("li"); return { title: li.querySelector(".font-medium").textContent.trim(), opened: !!li.querySelector(".border-dashed") }; });
+    await page.$eval("[data-merge-into]", (x) => x.closest("li").querySelector("[data-queue-accept]").click());
+    await page.waitForFunction(() => true); await sleep(500);
+    record("model merge pick", "the card proposes the cleanest name, and a name the owner set up has no picker", JSON.stringify(pickers) === JSON.stringify(["Franklin Liquor"]), `pickers: ${JSON.stringify(pickers)}`);
+    record("model merge pick", "picking another name retitles the card without opening it, and Combine folds into it", after.title === "Franklin Liqunineveh In" && !after.opened && state.approved?.canonical === "Franklin Liqunineveh In", `title ${after.title} · opened ${after.opened} · approved into ${state.approved?.canonical}`);
   });
 }
 
@@ -2726,7 +2786,7 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
-    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
+    ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["model merge leave out", modelMergeLeaveOut], ["model merge pick", modelMergePick], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
     ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
