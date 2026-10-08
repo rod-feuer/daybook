@@ -1026,6 +1026,45 @@ test("a category set on a pending Plaid charge survives the next sync and follow
   assert.equal(pendingGone.n, 0, "the pending row is reconciled away");
 });
 
+test("a category set on a pending charge follows it when it posts for a different amount", () => {
+  // WHY: Ben & Jerry's showed pending at $14.02 and posted at $16.82 with the
+  // tip. The posted twin was matched on the exact amount, so the category the
+  // user had set was dropped with the pending row, and the charge came back
+  // to "needs a category" after the user had answered it.
+  const acct = { account_id: "a1", name: "Amex Gold" };
+  const pend = { transaction_id: "bj-pending", account_id: "a1", date: "2026-06-07", name: "Ben & Jerry's", merchant_name: "Ben & Jerry's", amount: 14.02, pending: true };
+  importPlaidTransactions([{ accounts: [acct], transactions: [pend] }]);
+  getDb().prepare("UPDATE transactions SET categoryId = ? WHERE hash = 'bj-pending'").run(CAT);
+
+  importPlaidTransactions([{ accounts: [acct], transactions: [
+    { transaction_id: "bj-posted", account_id: "a1", date: "2026-06-07", name: "Ben & Jerry's", merchant_name: "Ben & Jerry's", amount: 16.82, pending: false },
+  ] }]);
+  const posted = getDb().prepare("SELECT categoryId FROM transactions WHERE hash = 'bj-posted'").get() as { categoryId: number | null };
+  assert.equal(posted.categoryId, CAT, "the category follows the charge onto its posted amount");
+
+  // Two posted visits to the vendor: which one the pending became is unknown,
+  // so neither takes its edit.
+  // (Another vendor: Ben & Jerry's now has a history that files its charges.)
+  const pend2 = { ...pend, transaction_id: "bj2-pending", date: "2026-06-20", name: "Culver's", merchant_name: "Culver's" };
+  importPlaidTransactions([{ accounts: [acct], transactions: [pend2] }]);
+  getDb().prepare("UPDATE transactions SET categoryId = ? WHERE hash = 'bj2-pending'").run(CAT);
+  importPlaidTransactions([{ accounts: [acct], transactions: [
+    { ...pend2, transaction_id: "bj2-a", amount: 16.82, pending: false },
+    { ...pend2, transaction_id: "bj2-b", date: "2026-06-21", amount: 9.5, pending: false },
+  ] }]);
+  const two = getDb().prepare("SELECT categoryId FROM transactions WHERE hash IN ('bj2-a','bj2-b')").all() as { categoryId: number | null }[];
+  assert.ok(two.every((r) => r.categoryId !== CAT), "an ambiguous match carries nothing");
+
+  // A pending visit beside a posted one at another amount is a second visit,
+  // not a twin: it stays.
+  importPlaidTransactions([{ accounts: [acct], transactions: [
+    { ...pend, transaction_id: "bj3-posted", date: "2026-07-01", amount: 16.82, pending: false },
+    { ...pend, transaction_id: "bj3-pending", date: "2026-07-02", amount: 5.25, pending: true },
+  ] }]);
+  const kept = getDb().prepare("SELECT COUNT(*) n FROM transactions WHERE hash = 'bj3-pending'").get() as { n: number };
+  assert.equal(kept.n, 1, "the second visit is not reconciled away");
+});
+
 // WHY: the app holds transaction ids in an open page — a tapped charge fetches
 // by id. Pending rows were wiped and re-inserted on every sync, so a pending
 // charge came back under a new id and a tap in the seconds after launch (while

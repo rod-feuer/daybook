@@ -187,6 +187,22 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     (findPosted.all({ account: r.account, amount: r.amount, date: r.date }) as { hash: string; merchant: string }[]).find(
       (q) => nameAffinity(r.merchant, q.merchant) >= NAME_MATCH
     );
+  // A charge that posts for a different amount than it showed pending (a tip
+  // added, a gas station's hold settled) has no twin by amount. Its posted
+  // charge is the one charge from that vendor on that account within 3 days,
+  // in the same direction. Used only to place a dropped pending row's edits:
+  // never to skip a pending row, which could hide a second real visit.
+  const findSettled = db.prepare(
+    `SELECT hash, merchant FROM transactions
+     WHERE source = 'plaid' AND pending = 0 AND account = @account AND amount * @amount > 0
+       AND ABS(julianday(date) - julianday(@date)) <= 3`
+  );
+  const settledTwin = (r: { account: string; amount: number; date: string; merchant: string }) => {
+    const hits = (findSettled.all({ account: r.account, amount: r.amount, date: r.date }) as { hash: string; merchant: string }[]).filter(
+      (q) => nameAffinity(r.merchant, q.merchant) >= NAME_MATCH
+    );
+    return hits.length === 1 ? hits[0] : undefined;
+  };
   // Carry a vanishing pending row's edits onto its posted twin. categoryId is
   // overridden so the value the row carried wins over a fresh rules/history
   // guess; note and effectiveDate fill only when the twin doesn't have one.
@@ -350,7 +366,7 @@ export function importPlaidTransactions(items: PlaidItem[]): {
     // Split parts aren't Plaid's rows: they go only with their parent.
     for (const was of held.values()) {
       if (!was.pending || pulled.has(was.hash) || was.hash.includes(":s")) continue;
-      const twin = postedTwin(was);
+      const twin = postedTwin(was) ?? settledTwin(was);
       if (twin) carryEdits(was.hash, twin.hash);
       drop.run({ h: was.hash });
     }
