@@ -63,6 +63,7 @@ export type MergeSuggestion = {
   source?: "model"; // the model's judgment, not a rule's (vendorJudge.ts)
   fixed?: boolean; // the canonical carries the owner's name or settings: it can't be swapped on the card
   shownAs?: string; // the canonical's name on screen, when the owner gave it one ("Zoom Video")
+  pairKeys?: Record<string, string[]>; // model cards: each name's pairs, so one name can be left out
   // The bill a recurring-match card folds into, as a row elsewhere can say it
   // to decide there: "Same as Every ($20 monthly, the 4th)?".
   bill?: { name: string; amount: number; cadence: string; day: number };
@@ -563,8 +564,8 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
     return n;
   };
   const pairs: { a: string; b: string; why: string; key: string }[] = [];
-  for (const { a, b, why } of sureJudgments()) {
-    const key = `ai:${a}|${b}`;
+  for (const { a, b, why, pair } of sureJudgments()) {
+    const key = `ai:${pair}`;
     if (dismissed.has(key) || ruledOut(a, b) || exclude.has(a) || exclude.has(b)) continue;
     // Both still vendors, and neither one the owner made (an answer kept from
     // before a move or split).
@@ -594,6 +595,9 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
       canonical,
       key: ps.map((p) => p.key).sort()[0],
       dismissKeys: ps.map((p) => p.key),
+      // By vendor, not by the names asked: a pair asked as "Bp|…" is the BP
+      // vendor's once "Bp" is combined into it.
+      pairKeys: Object.fromEntries(names.map((n) => [n, ps.filter((p) => p.a === n || p.b === n).map((p) => p.key)])),
       variants,
       total: variants.reduce((s, v) => s + v.count, 0),
       note: said.why,

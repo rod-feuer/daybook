@@ -156,6 +156,32 @@ test("a combine can name the vendor something new", async () => {
   assert.equal(modelCards().length, 0);
 });
 
+// WHY: the model was sure "Bp" and "Bp#1914300ninnineveh In" are one
+// station chain, but the owner had since combined "Bp" into their BP vendor.
+// The answer was about a name no longer its own vendor, so it was dropped, and
+// BP's card offered only two Nineveh spellings. An answer follows the names
+// into the vendors they were combined into.
+test("the model's answer about a combined name holds for the vendor it joined", async () => {
+  monthly("Bp", 6, 4, -45, 2);
+  monthly("Bp#8479750fair Oaks", 1, 5, -40, 5);
+  monthly("Bp#1914300ninnineveh In", 1, 9, -50, 9);
+  monthly("Bp#1790955trafalgar", 6, 2, -55, 12);
+  const pairs = new Set(["Bp|Bp#1914300ninnineveh In", "Bp|Bp#1790955trafalgar"]);
+  const ask: Ask = async (batch) => batch.map((c) => ({ same: pairs.has(c.pair), confidence: 0.9, why: "same chain" }));
+  await judgeVendorPairs({ ask, today: TODAY });
+  approveMerge("Bp#8479750fair Oaks", ["Bp#8479750fair Oaks", "Bp"], undefined, "BP");
+
+  const cards = modelCards();
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].canonical, "Bp#8479750fair Oaks", "the owner's BP vendor, which now holds Bp");
+  assert.equal(cards[0].shownAs, "BP");
+  assert.deepEqual(cards[0].variants.map((v) => v.merchant).sort(), ["Bp#1790955trafalgar", "Bp#1914300ninnineveh In", "Bp#8479750fair Oaks"]);
+  // Leave out finds a name's pairs though they were asked under "Bp".
+  assert.deepEqual(cards[0].pairKeys?.["Bp#1790955trafalgar"], ["ai:Bp|Bp#1790955trafalgar"]);
+  dismissMerge("ai:Bp|Bp#1790955trafalgar");
+  assert.deepEqual(modelCards()[0].variants.map((v) => v.merchant).sort(), ["Bp#1914300ninnineveh In", "Bp#8479750fair Oaks"]);
+});
+
 test("dismissing a vendor's card rules out every pair on it", async () => {
   monthly("Culvers", 1, 9, -12, 3);
   monthly("Culvers Carmel", 3, 3, -14, 9);
