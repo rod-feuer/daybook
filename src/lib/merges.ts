@@ -62,6 +62,7 @@ export type MergeSuggestion = {
   lowConfidence?: boolean; // 0.8–0.9 name band — surface for confirmation, not certain
   source?: "model"; // the model's judgment, not a rule's (vendorJudge.ts)
   fixed?: boolean; // the canonical carries the owner's name or settings: it can't be swapped on the card
+  shownAs?: string; // the canonical's name on screen, when the owner gave it one ("Zoom Video")
   // The bill a recurring-match card folds into, as a row elsewhere can say it
   // to decide there: "Same as Every ($20 monthly, the 4th)?".
   bill?: { name: string; amount: number; cadence: string; day: number };
@@ -537,7 +538,8 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
   const db = getDb();
   const dismissed = dismissedKeys(db);
   const links = getMerchantLinks();
-  const { hasName, hasSettings } = ownerSettings(getRecurringSettings(), links);
+  const settings = getRecurringSettings();
+  const { hasName, hasSettings } = ownerSettings(settings, links);
   const moves = getChargeMoves();
   const counts = new Map<string, number>();
   const ownCharge = new Set<string>(); // vendors with a charge the owner didn't place there (vendorJudge's ownerMade)
@@ -597,6 +599,9 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
       note: said.why,
       source: "model",
       fixed: hasName(canonical) || hasSettings(canonical),
+      // The owner's name for it, not the bank's ("Zoom Video", not "Zoom
+      // Video Communicasan Jose"): the card names the vendor as the app does.
+      ...(hasName(canonical) && { shownAs: merchantDisplayName(canonical, settings, links) }),
     });
   }
   return out.sort((x, y) => y.total - x.total);

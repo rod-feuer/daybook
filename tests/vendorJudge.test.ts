@@ -135,6 +135,8 @@ test("a model's card folds into the cleanest name, unless the owner set one up",
   cards = into();
   assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].canonical, "Franklin Liqunineveh In", "the name the owner gave stays");
   assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].fixed, true, "and can't be swapped away on the card");
+  assert.equal(cards["Franklin Liqunineveh In + Franklin Liquor"].shownAs, "Franklin Liquor Store", "the card shows the owner's name, not the bank's");
+  assert.equal(cards["Card And Associ + Card And Associates"].shownAs, undefined, "a vendor with no name of the owner's is shown as the bank names it");
 });
 
 // WHY: none of Apple's bank spellings is clean ("Applecombill", "Apple.com-bill

@@ -19,6 +19,8 @@ type PreviewTx = { date: string; amount: number; account: string };
 // The names a card folds in, and the vendor they fold into (when it has
 // charges of its own under that name).
 const NEW_NAME = " new"; // the picker's "New name…" (names are trimmed, so no vendor is this)
+// A name as the app shows it: the owner's name for the card's vendor, if any.
+const label = (g: MergeSuggestion, merchant: string) => (merchant === g.canonical && g.shownAs) || merchant;
 const strays = (g: MergeSuggestion) => g.variants.filter((v) => v.merchant !== g.canonical);
 const target = (g: MergeSuggestion) => g.variants.find((v) => v.merchant === g.canonical);
 // The model's card joins every name it paired, so one wrong name ("Apple
@@ -82,7 +84,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
           categoryId: g.categoryId,
         }),
       {
-        success: action === "approve" ? `Combined into “${newName(g) ?? g.canonical}”` : undefined,
+        success: action === "approve" ? `Combined into “${newName(g) ?? label(g, g.canonical)}”` : undefined,
         error: "Couldn't update — please try again",
       },
       { refresh: "error" } // restore the optimistic removal on failure
@@ -144,7 +146,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                 className="min-w-0 cursor-pointer"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-medium">{newName(g) ?? g.canonical}</span>
+                  <span className="text-[13px] font-medium">{newName(g) ?? label(g, g.canonical)}</span>
                   {g.source === "model" && (
                     // The category queue's tag for a model's proposal; the note says its reason.
                     <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-2 text-[11px] font-medium text-[var(--accent)]" data-merge-source="model">
@@ -162,7 +164,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                     choice between equals. */}
                 <div className="mt-1 text-xs text-[var(--muted)]" data-merge-direction>
                   Combine {strays(g).map((v) => `${v.merchant} (${v.count})`).join(" · ")} into{" "}
-                  {g.source === "model" && !g.fixed ? (
+                  {g.source === "model" ? (
                     // A native select (DESIGN.md §2): the name to keep, any of
                     // the card's names. Clicks on it don't open the evidence.
                     <>
@@ -184,11 +186,16 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                         data-merge-into
                         className="btn-ghost select-caret cursor-pointer appearance-none pr-8 text-left text-xs font-medium"
                       >
-                        {g.variants.map((v) => (
-                          <option key={v.merchant} value={v.merchant}>
-                            {v.merchant} ({v.count})
-                          </option>
-                        ))}
+                        {/* A vendor the owner named or set up keeps its name
+                            (its settings live under it): the choice is it,
+                            or a new name for it. */}
+                        {g.variants
+                          .filter((v) => !g.fixed || v.merchant === g.canonical)
+                          .map((v) => (
+                            <option key={v.merchant} value={v.merchant}>
+                              {label(g, v.merchant)} ({v.count})
+                            </option>
+                          ))}
                         <option value={NEW_NAME}>New name…</option>
                       </select>
                       {naming(g) && (
@@ -210,7 +217,7 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                     </>
                   ) : (
                     <>
-                      <span className="font-medium text-[var(--foreground)]">{g.canonical}</span>
+                      <span className="font-medium text-[var(--foreground)]">{label(g, g.canonical)}</span>
                       {target(g) && ` (${target(g)!.count})`}
                     </>
                   )}
