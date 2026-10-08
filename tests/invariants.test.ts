@@ -1073,6 +1073,31 @@ test("stripLocationSuffix peels a trailing City ST, keeps specific names, reject
   assert.equal(stripLocationSuffix("Acme Widgets Go"), null, "trailing token is not a US state");
 });
 
+// WHY: a store's number rides along with its city, so "Target 018481indianapolis
+// In" and "Target" sat as two vendors and the queue never offered them: the
+// rule only knew a city spelled in letters. Found by the vendor-identity test
+// (2026-10-07), where Target, Get Go and Jay C Foods made up most of the
+// uncombined duplicates. Code settles these; the model is for what code can't.
+test("stripLocationSuffix takes a store number with the city", () => {
+  assert.equal(stripLocationSuffix("Target 018481indianapolis In"), "Target");
+  assert.equal(stripLocationSuffix("Get Go # 0000075carmel In"), "Get Go");
+  assert.equal(stripLocationSuffix("Jay C Foods #079 000edinburgh In"), "Jay C Foods");
+  assert.equal(stripLocationSuffix("Teds Montana Grill 4indianapolis In"), "Teds Montana Grill");
+});
+
+// WHY: a looser rule must not re-offer what the owner already decided. "Love's #
+// Outsidelafayette In" and "Love's # Outsidedemotte In" were combined into
+// "Love's #"; with the store marker stripped they group under "Love's", and
+// the queue would ask again about a pair that is already one vendor.
+test("a location group the owner already combined under another name is not offered again", () => {
+  tx("Love's # Outsidelafayette In", { amount: -40 });
+  tx("Love's # Outsidedemotte In", { amount: -45 });
+  tx("Get Go # 0000075carmel In", { amount: -30 });
+  tx("Get Go", { amount: -35 });
+  approveMerge("Love's #", ["Love's # Outsidelafayette In", "Love's # Outsidedemotte In"]);
+  assert.deepEqual(mergeSuggestions().map((g) => g.canonical), ["Get Go"], "only the pair not yet combined");
+});
+
 test("merge suggestions group location-suffix variants and honor dismissal", () => {
   tx("Turf Kings Carmel In", { amount: -80, categoryId: CAT });
   tx("Turf Kings Fishers In", { amount: -80, categoryId: CAT });

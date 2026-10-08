@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { allMergeSuggestions, approveMerge, dismissMerge } from "@/lib/merges";
 import { detectRecurrings } from "@/lib/core";
+import { judgeVendorPairs } from "@/lib/vendorJudge";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// The "possible duplicate vendors" review queue (location-suffix variants +
-// behaviour-based recurring matches).
+// The "possible duplicate vendors" review queue (location-suffix variants,
+// behaviour-based recurring matches, and the model's matches already asked).
 export async function GET() {
   return NextResponse.json(allMergeSuggestions());
 }
@@ -15,6 +16,12 @@ export async function GET() {
 // regroup); dismiss remembers the rejection so the suggestion never reappears.
 export async function POST(req: NextRequest) {
   const body = await req.json();
+
+  // Ask the model about close-named vendors nobody has asked about; the queue
+  // calls this on its own when it loads, then reads again.
+  if (body.action === "judge") {
+    return NextResponse.json(await judgeVendorPairs());
+  }
 
   if (body.action === "dismiss") {
     const keys = Array.isArray(body.keys) ? body.keys.map(String) : [];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation } from "@/components/useMutation";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
 import { postJson } from "@/lib/http";
@@ -37,6 +37,19 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
     load();
   }, [load, version]); // `version`: re-read when the page behind this queue changes
   useSyncedRefresh(load);
+  // The model is asked without a press, once per visit, about the close-named
+  // vendors nobody has asked about; what it is sure of joins the queue. A
+  // failure is quiet: the rules' cards stand, and the next visit asks again.
+  const judged = useRef(false);
+  useEffect(() => {
+    if (judged.current) return;
+    judged.current = true;
+    postJson("/api/merges", { action: "judge" })
+      .then((r) => {
+        if ((r as { answered?: number }).answered) load();
+      })
+      .catch(() => {});
+  }, [load]);
 
   async function resolve(g: MergeSuggestion, action: "approve" | "dismiss") {
     setBusy(g.key);
@@ -106,6 +119,12 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
               >
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-medium">{g.canonical}</span>
+                  {g.source === "model" && (
+                    // The category queue's tag for a model's proposal; the note says its reason.
+                    <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-2 text-[11px] font-medium text-[var(--accent)]" data-merge-source="model">
+                      AI
+                    </span>
+                  )}
                   {g.lowConfidence && (
                     <span className="rounded-full bg-[var(--warn)]/15 px-2 py-1 text-[11px] font-medium text-[var(--warn)]">
                       possible match

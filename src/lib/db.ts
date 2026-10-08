@@ -324,6 +324,23 @@ export function ensureMergeDismissals(db: Database.Database) {
   db.exec("CREATE TABLE IF NOT EXISTS merchant_merge_dismissals (canonical TEXT PRIMARY KEY)");
 }
 
+// What the model said about two vendors with close names: one row per pair
+// (the two names, sorted, joined by "|"). `basis` is each side's charge count
+// when it was asked, so an answer short of a sure "same" is asked again once
+// either side has charged since (a rename's first charge says little; its
+// third says more).
+export function ensureVendorJudgments(db: Database.Database) {
+  db.exec(`CREATE TABLE IF NOT EXISTS vendor_judgments (
+    pair TEXT PRIMARY KEY,
+    basis TEXT NOT NULL,
+    same INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    why TEXT NOT NULL,
+    model TEXT NOT NULL,
+    judgedAt TEXT NOT NULL
+  )`);
+}
+
 // User-declared merchant identity: fold an `alias` descriptor into a
 // `primaryMerchant` so they count as one vendor everywhere that groups by
 // merchant (detection, paid-matching, the vendor drawer). Keyed by alias so it
