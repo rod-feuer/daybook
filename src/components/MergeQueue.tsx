@@ -20,6 +20,11 @@ type PreviewTx = { date: string; amount: number; account: string };
 // charges of its own under that name).
 const strays = (g: MergeSuggestion) => g.variants.filter((v) => v.merchant !== g.canonical);
 const target = (g: MergeSuggestion) => g.variants.find((v) => v.merchant === g.canonical);
+// The model's card joins every name it paired, so one wrong name ("Apple
+// Store" among Apple's bills) is left out on its own: its pairs on the card
+// are dismissed, and the rest stay one Combine. Keys are "ai:<a>|<b>".
+const pairKeysOf = (g: MergeSuggestion, merchant: string) =>
+  g.dismissKeys.filter((k) => k.startsWith("ai:") && k.slice(3).split("|").includes(merchant));
 
 export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; version?: number }) {
   const [merges, setMerges] = useState<MergeSuggestion[]>([]);
@@ -70,6 +75,14 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
       { refresh: "error" } // restore the optimistic removal on failure
     );
     if (ok && action === "approve") onChange?.();
+    setBusy(null);
+  }
+
+  async function leaveOut(g: MergeSuggestion, merchant: string) {
+    setBusy(g.key);
+    await mutate(() => postJson("/api/merges", { action: "dismiss", keys: pairKeysOf(g, merchant) }), {
+      error: "Couldn't update — please try again",
+    });
     setBusy(null);
   }
 
@@ -184,9 +197,21 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
                   const txs = previews[g.key]?.[v.merchant];
                   return (
                     <div key={v.merchant}>
-                      <div className="text-xs font-medium">
-                        {v.merchant}{" "}
-                        <span className="text-[var(--muted)]">({v.count})</span>
+                      <div className="flex items-baseline justify-between gap-3 text-xs font-medium">
+                        <span>
+                          {v.merchant} <span className="text-[var(--muted)]">({v.count})</span>
+                        </span>
+                        {g.source === "model" && strays(g).length > 1 && v.merchant !== g.canonical && (
+                          <button
+                            disabled={busy === g.key}
+                            onClick={() => leaveOut(g, v.merchant)}
+                            aria-label={`Leave ${v.merchant} out of this combine`}
+                            data-merge-leave-out={v.merchant}
+                            className="tap shrink-0 font-normal text-[var(--muted)] hover:text-[var(--foreground)] disabled:opacity-50"
+                          >
+                            Leave out
+                          </button>
+                        )}
                       </div>
                       {!previews[g.key] ? (
                         <div className="mt-1 text-xs text-[var(--muted)]">Loading…</div>

@@ -499,10 +499,12 @@ function ownerSettings(settings: ReturnType<typeof getRecurringSettings>, links:
   return { hasName, hasSettings };
 }
 
-// The model's matches (vendorJudge.ts): two close names it is sure are one
-// payee, which no rule above surfaced. The vendor the owner named or set up
-// stays canonical, else the one with more charges. Dismiss key =
-// "ai:<a>|<b>" (the names sorted).
+// The model's matches (vendorJudge.ts): close names it is sure are one payee,
+// which no rule above surfaced. The names it pairs make one card, so a vendor
+// with many spellings (Culvers, and Culvers Carmel, Culvers Of Franklin, …) is
+// one Combine, not one card per pair that returns under the same name after
+// each. The vendor the owner named or set up stays canonical, else the one
+// with the most charges. Dismiss keys = each pair's "ai:<a>|<b>" (sorted).
 export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
   const db = getDb();
   const dismissed = dismissedKeys(db);
@@ -524,29 +526,47 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
     dismissed.has(`handoff:${a}>${b}`) ||
     dismissed.has(`handoff:${b}>${a}`) ||
     dismissedStems.some((n) => normName(a).startsWith(n) && normName(b).startsWith(n));
-  const seen = new Set<string>();
-  const out: MergeSuggestion[] = [];
+  // Join the pairs still open into groups: names linked by any chain of pairs.
+  const group = new Map<string, string>(); // name → a representative
+  const root = (n: string): string => {
+    while (group.get(n) !== n) n = group.get(n)!;
+    return n;
+  };
+  const pairs: { a: string; b: string; why: string; key: string }[] = [];
   for (const { a, b, why } of sureJudgments()) {
     const key = `ai:${a}|${b}`;
-    if (dismissed.has(key) || ruledOut(a, b) || exclude.has(a) || exclude.has(b) || seen.has(a) || seen.has(b)) continue;
+    if (dismissed.has(key) || ruledOut(a, b) || exclude.has(a) || exclude.has(b)) continue;
     // Both still vendors, and neither one the owner made (an answer kept from
     // before a move or split).
     if (!ownCharge.has(a) || !ownCharge.has(b)) continue;
-    seen.add(a).add(b); // one card per vendor
-    // Then the busier one. Preferring the name without a city kept bank
+    for (const n of [a, b]) if (!group.has(n)) group.set(n, n);
+    group.set(root(a), root(b));
+    pairs.push({ a, b, why, key });
+  }
+  const groups = new Map<string, typeof pairs>();
+  for (const p of pairs) groups.set(root(p.a), [...(groups.get(root(p.a)) ?? []), p]);
+
+  const out: MergeSuggestion[] = [];
+  for (const ps of groups.values()) {
+    const names = [...new Set(ps.flatMap((p) => [p.a, p.b]))];
+    // Then the busiest. Preferring the name without a city kept bank
     // truncations ("Harmony Harmo", "West Clay Win") on real data.
-    const keepA =
-      hasName(a) !== hasName(b) ? hasName(a)
-      : hasSettings(a) !== hasSettings(b) ? hasSettings(a)
-      : counts.get(a)! >= counts.get(b)!;
-    const variants = [a, b].map((m) => ({ merchant: m, count: counts.get(m)! }));
+    const rank = (m: string) => [hasName(m) ? 1 : 0, hasSettings(m) ? 1 : 0, counts.get(m)!];
+    const beats = (m: string, best: string) => {
+      const [x, y] = [rank(m), rank(best)];
+      return (x[0] - y[0] || x[1] - y[1] || x[2] - y[2]) > 0;
+    };
+    const canonical = names.reduce((best, m) => (beats(m, best) ? m : best));
+    const variants = names.map((m) => ({ merchant: m, count: counts.get(m)! })).sort((x, y) => y.count - x.count);
+    // The reason given for a pair with the canonical says why the card folds into it.
+    const said = ps.find((p) => p.a === canonical || p.b === canonical) ?? ps[0];
     out.push({
-      canonical: keepA ? a : b,
-      key,
-      dismissKeys: [key],
+      canonical,
+      key: ps.map((p) => p.key).sort()[0],
+      dismissKeys: ps.map((p) => p.key),
       variants,
       total: variants.reduce((s, v) => s + v.count, 0),
-      note: why,
+      note: said.why,
       source: "model",
     });
   }

@@ -89,6 +89,40 @@ test("a dismissed model card stays dismissed", async () => {
   assert.equal(modelCards().length, 0);
 });
 
+// WHY: Culvers posts under many spellings, and the model was sure of four
+// pairs among Culvers, Culvers Carmel, Culvers Of Franklin and Culvers Of
+// Esestero. One card per pair meant Combine, then a new card under the same
+// name, three times over. Names joined by any pair are one card and one
+// Combine; Dismiss rules out every pair on it.
+test("the model's pairs among one vendor's spellings are one card", async () => {
+  monthly("Culvers", 1, 9, -12, 3);
+  monthly("Culvers Carmel", 3, 3, -14, 9);
+  monthly("Culvers Of Franklin", 4, 2, -11, 12);
+  tx("Culvers Of Esestero", { amount: -15, date: "2026-09-20", account: "Amex Gold" });
+  monthly("Netflix", 5, 5, -26.99, 23);
+  const pairs = new Set(["Culvers|Culvers Carmel", "Culvers|Culvers Of Franklin", "Culvers Carmel|Culvers Of Esestero", "Culvers Carmel|Culvers Of Franklin"]);
+  const ask: Ask = async (batch) => batch.map((c) => ({ same: pairs.has(c.pair), confidence: 0.9, why: "same chain" }));
+  await judgeVendorPairs({ ask, today: TODAY });
+
+  const cards = modelCards();
+  assert.equal(cards.length, 1, "one card, not one per pair");
+  assert.equal(cards[0].canonical, "Culvers", "folding into the spelling with the most charges");
+  assert.deepEqual(cards[0].variants.map((v) => v.merchant).sort(), ["Culvers", "Culvers Carmel", "Culvers Of Esestero", "Culvers Of Franklin"]);
+  approveMerge(cards[0].canonical, cards[0].variants.map((v) => v.merchant));
+  assert.equal(modelCards().length, 0, "one Combine, and nothing comes back");
+});
+
+test("dismissing a vendor's card rules out every pair on it", async () => {
+  monthly("Culvers", 1, 9, -12, 3);
+  monthly("Culvers Carmel", 3, 3, -14, 9);
+  tx("Culvers Of Esestero", { amount: -15, date: "2026-09-20", account: "Amex Gold" });
+  await judgeVendorPairs({ ask: fake({ same: true, confidence: 0.9 }).ask, today: TODAY });
+  const [card, ...rest] = modelCards();
+  assert.equal(rest.length, 0);
+  for (const k of card.dismissKeys) dismissMerge(k);
+  assert.equal(modelCards().length, 0, "no pair from the dismissed card comes back on its own");
+});
+
 // WHY: when a rule already offers the pair, a second card from the model would
 // ask the same question twice; the rule's card says why in its own terms.
 test("a pair a rule already offers gets no model card", async () => {
