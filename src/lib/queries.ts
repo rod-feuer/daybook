@@ -176,21 +176,28 @@ export function distinctVendors(): { merchant: string; displayName: string; coun
 // common start ("Cha", "South") never pairs Chatham with Charleston's. The
 // user ticks off a wrong pair ("American Airlines" / "American Express")
 // before combining; nothing happens on its own. Keyed by canonical vendor.
+// A store number run onto the name ("Bp#1914300ninnineveh In") ends the
+// brand there, so the town after it isn't read as part of the name, and a
+// brand that short ("Bp") still matches its own name whole: "#" and a number
+// say the letters before them are the brand, not a common start.
 export function similarVendors(
   merchant: string
 ): { merchant: string; displayName: string; count: number; categoryName: string | null }[] {
   const links = getMerchantLinks();
   const me = canonicalMerchant(merchant, links);
-  // A name's first word, past a leading article: "The Roku Channel" is Roku's.
+  // A name's first word, past a leading article ("The Roku Channel" is
+  // Roku's), up to a store number's "#"; `store` when one follows it.
   const head = (name: string) => {
     const words = name.toLowerCase().trim().split(/\s+/);
-    const first = words.length > 1 && ["the", "a", "an"].includes(words[0]) ? words[1] : words[0];
-    return (first ?? "").replace(/[^a-z]/g, "");
+    const first = (words.length > 1 && ["the", "a", "an"].includes(words[0]) ? words[1] : words[0]) ?? "";
+    const [brand, rest] = first.split("#");
+    return { h: brand.replace(/[^a-z]/g, ""), store: /^\d/.test(rest ?? "") };
   };
-  const alike = (a: string, b: string) => {
-    if (!a || !b) return false;
-    if (a.length < 7 || b.length < 7) return a === b && a.length >= 4;
-    return a.slice(0, 7) === b.slice(0, 7);
+  type Head = ReturnType<typeof head>;
+  const alike = (a: Head, b: Head) => {
+    if (!a.h || !b.h) return false;
+    if (a.h.length < 7 || b.h.length < 7) return a.h === b.h && (a.h.length >= 4 || a.store || b.store);
+    return a.h.slice(0, 7) === b.h.slice(0, 7);
   };
   const mine = new Set([head(me), head(merchantDisplayName(me, getRecurringSettings(), links))]);
   const out = distinctVendors().filter(
