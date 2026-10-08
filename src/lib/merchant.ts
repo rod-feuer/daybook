@@ -47,6 +47,9 @@ export function normalizeMerchant(raw: string): string {
 
   // Volatile suffixes / embedded reference data:
   s = s.replace(/\b(ppd|ccd|web|tel|arc|ipp)\s*id:?.*$/i, ""); // ACH ref-id blocks
+  // A payment's own reference ("ACH PMT M6710"): new on every payment, so
+  // each Amex payment was its own vendor. The older text read "Ach".
+  s = s.replace(/\bach pmt [a-z]\d{3,}\b/i, "ach");
   s = s.replace(/\bending in\b.*$/i, ""); // card "ending in 2601 06/01"
   s = s.replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, " "); // dates mm/dd(/yy)
   s = s.replace(/\b\d{4,}\b/g, " "); // long digit runs (account/store/ref numbers)

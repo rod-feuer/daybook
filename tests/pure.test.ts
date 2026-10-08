@@ -345,6 +345,17 @@ test("Chase's newer ACH text names the payee the way its older text did", () => 
   assert.equal(achToLegacy("Spotify USA"), "Spotify USA", "other text passes through");
 });
 
+test("an Amex payment's reference isn't its name", () => {
+  // WHY: since June each payment posts with its own reference ("ACH PMT
+  // M3744"), so all 15 became separate vendors, and the merge queue offered
+  // them a pair at a time: combine one, and the next card read the same.
+  // The 94 payments before June are "American Express Ach"; these join them.
+  for (const raw of ["AMERICAN EXPRESS ACH PMT M3744 WEB ID: 2005032111", "AMERICAN EXPRESS ACH PMT W1992 WEB ID: 2005032111", "AMERICAN EXPRESS ACH PMT A5700 WEB ID: 2005032111"])
+    assert.equal(normalizeMerchant(raw), "American Express Ach", raw);
+  assert.equal(normalizeMerchant(normalizeMerchant("AMERICAN EXPRESS ACH PMT M3744 WEB ID: 2005032111")), "American Express Ach", "idempotent");
+  assert.equal(normalizeMerchant("American Express Ach"), "American Express Ach", "the older name is unchanged");
+});
+
 test("two payees don't look alike just because Chase labels both the same way", () => {
   // WHY: on the labels, an Amex payment scored as the Chase mortgage's vendor,
   // the merge queue offered Combine, and the payment read as the mortgage.
