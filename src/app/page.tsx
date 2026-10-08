@@ -1,6 +1,7 @@
 "use client";
 
 import { buildVerdict } from "@/lib/verdict";
+import { budgetOutlook } from "@/lib/budgetOutlook";
 import { withoutAmountQualifier, dayLabel } from "@/lib/series";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
@@ -295,6 +296,7 @@ export default function DashboardPage() {
                 {data.pace.projectedMonthEnd != null && data.prev != null && (
                   <PaceDelta
                     projected={data.pace.projectedMonthEnd}
+                    range={data.pace.projectedRange}
                     series={data.pace.series}
                     prevMonth={data.prev.month}
                   />
@@ -377,7 +379,9 @@ export default function DashboardPage() {
                               y={budgetLine}
                               stroke="var(--muted)"
                               strokeDasharray="2 3"
-                              label={{ value: `Budget ${usd(budgetLine, { cents: false })}`, position: "insideTopRight", fontSize: 11, fill: "var(--muted)" }}
+                              // At the left: the projection rises to the right
+                              // and ran through the label there.
+                              label={{ value: `Budget ${usd(budgetLine, { cents: false })}`, position: "insideTopLeft", fontSize: 11, fill: "var(--muted)" }}
                             />
                           )}
                           {/* Prior-month curve, drawn first so it sits beneath: muted,
@@ -650,13 +654,17 @@ function chartScale(
 // the trend the chart shows visually, instead of repeating the projected dollar
 // figure that already appears in the summary card. ▲/▼ and dollars as DeltaLine,
 // plus its own "vs <month>", since it compares with a different total; spending
-// less is favorable.
+// less is favorable. Coloured by the budget verdict's rule (budgetOutlook):
+// green or red only when the whole projected range is on one side of last
+// month. On the projection alone it was red beside a grey verdict.
 function PaceDelta({
   projected,
+  range,
   series,
   prevMonth,
 }: {
   projected: number;
+  range: { low: number; high: number } | null;
   series: Dash["pace"]["series"];
   prevMonth: string;
 }) {
@@ -667,10 +675,12 @@ function PaceDelta({
   if (Math.round(delta) === 0)
     return <span className="text-xs font-medium text-[var(--muted)]">On pace to match {label}</span>;
   const under = delta < 0;
+  const kind = budgetOutlook(lastMonthEnd, projected, true, range).kind;
   return (
     <span
+      data-pace-delta={kind}
       className={`flex items-center gap-1 text-xs font-medium ${
-        under ? "text-[var(--good)]" : "text-[var(--bad)]"
+        kind === "under" ? "text-[var(--good)]" : kind === "over" ? "text-[var(--bad)]" : "text-[var(--muted)]"
       }`}
     >
       {/* Says which two things it compares: the dashed line's end and last
