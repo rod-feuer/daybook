@@ -279,16 +279,22 @@ function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; 
     .map((h, i) => `${name(h.month, "short")} ${usd(h.spent, { cents: false })}${partial && i === history.length - 1 ? " so far" : ""}`)
     .join(", ");
   const px = (v: number) => (v / top) * BAR_AREA;
+  // The year's total, of exactly the bars drawn (the viewed month to date
+  // included), so it adds up from what's on screen. A lumpy category (one
+  // trip in April) is planned by the year, and the average hides that.
+  const total = history.reduce((s, h) => s + h.spent, 0);
   return (
     <div data-month-bars>
       <div className="mb-2 flex items-baseline justify-between">
-        <div className="stat-label">Last 12 months</div>
+        <div className="stat-label">
+          Last 12 months · <span data-ltm-total>{usd(total, { cents: false })}</span>
+        </div>
         <span className="flex items-center gap-1 text-[11px] text-[var(--muted)]" data-avg-legend>
           <span aria-hidden className="w-3 border-t border-dashed border-[var(--muted)]" />
           Avg {usd(avg, { cents: false })}
         </span>
       </div>
-      <div role="img" aria-label={`Spending by month: ${said}. Average month ${usd(avg, { cents: false })}.`}>
+      <div role="img" aria-label={`Spending by month: ${said}. Total ${usd(total, { cents: false })}. Average month ${usd(avg, { cents: false })}.`}>
         {/* Room above the tallest bar for its figure. */}
         <div className="relative flex items-end gap-1" style={{ height: BAR_AREA + 16 }}>
           {history.map((h, i) => {

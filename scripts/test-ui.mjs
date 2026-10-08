@@ -1920,6 +1920,18 @@ async function categoryShelfSummary(browser) {
     }, shelfSel);
     record("category shelf summary", "12 bars, each with its figure (420, 9.9k, 14k) sitting on it and fitting its column, the average dashed and named \"Avg $X\", the viewed month set apart, and all of it said to a screen reader", chart.bars === 12 && chart.figs.length === 12 && chart.figs.every((f) => /^(\d{1,3}|\d\.\dk|\d+k)$/.test(f)) && chart.fits && chart.onBar && /^Avg \$[\d,]+$/.test(chart.legend) && chart.line && chart.lastDiffers && /Spending by month: .*Average month \$/.test(chart.label), `${chart.bars} bars; figures ${chart.figs.join(" ")}; fit=${chart.fits}; on bars=${chart.onBar}; legend "${chart.legend}"`);
 
+    // The title carries the year's total, the sum of the bars drawn: each
+    // month is said to a screen reader in whole dollars, so the sum may be
+    // off by rounding, at most 50 cents a bar.
+    const ltm = await page.evaluate((sel) => {
+      const c = document.querySelector(`${sel} [data-month-bars]`);
+      const num = (t) => Number(t.replace(/[$,]/g, ""));
+      const months = (c.querySelector("[role=img]").getAttribute("aria-label").match(/Spending by month: (.*?)\. Total/)?.[1] ?? "").split(", ").map((m) => num(m.match(/\$[\d,]+/)?.[0] ?? "NaN"));
+      const total = c.querySelector("[data-ltm-total]")?.textContent ?? "";
+      return { total, n: num(total), sum: months.reduce((a, b) => a + b, 0), count: months.length };
+    }, shelfSel);
+    record("category shelf summary", "the chart's title gives the year's total, the sum of the twelve bars", ltm.count === 12 && /^\$[\d,]+$/.test(ltm.total) && Math.abs(ltm.n - ltm.sum) <= 6, `title ${ltm.total}; bars sum to $${ltm.sum} over ${ltm.count} months`);
+
     const sizes = await page.evaluate((sel) => { const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)]; return { sizes: cards.map((c) => getComputedStyle(c.firstElementChild).fontSize), heights: cards.map((c) => Math.round(c.getBoundingClientRect().height)) }; }, shelfSel);
     record("category shelf summary", "the two cards' figures are one size (24px), in cards of one height", sizes.sizes.length === 2 && sizes.sizes.every((z) => z === "24px") && sizes.heights[0] === sizes.heights[1], JSON.stringify(sizes));
 
