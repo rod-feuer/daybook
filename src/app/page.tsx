@@ -60,11 +60,15 @@ function chartSummary(data: Dash, budgetLine: number | null) {
   const pts = data.pace.series;
   const now = [...pts].reverse().find((p) => p.actual != null);
   const range = data.pace.projectedRange;
+  // Said as the chart draws it: a range once its band is drawn (day 10), a
+  // figure before; the verdict says the range in words either way.
+  const banded = pts.some((p) => p.range != null);
+  const end = data.pace.projectedMonthEnd;
   const prevEnd = Math.max(0, ...pts.map((p) => p.prev ?? 0));
   const $ = (v: number) => usd(v, { cents: false });
   return [
     now ? `Spent ${$(now.actual as number)} through ${shortDate(now.date)}.` : "No spending yet.",
-    range != null ? `Projected to finish between ${$(range.low)} and ${$(range.high)}.` : null,
+    range != null && banded ? `Projected to finish between ${$(range.low)} and ${$(range.high)}.` : end != null ? `Projected to finish at ${$(end)}.` : null,
     prevEnd > 0 ? `Last month finished at ${$(prevEnd)}.` : null,
     budgetLine != null ? `Budget ${$(budgetLine)}.` : null,
   ].filter(Boolean).join(" ");
@@ -318,6 +322,7 @@ export default function DashboardPage() {
                   <>
                     <ChartLegend
                       showProjected={data.pace.projectedMonthEnd != null}
+                      showRange={data.pace.series.some((p) => p.range != null)}
                       showPrev={data.prev != null}
                       showBudget={budgetLine != null}
                     />
@@ -550,10 +555,12 @@ export default function DashboardPage() {
 // and the dashed projection are self-explanatory, not mystery lines.
 function ChartLegend({
   showProjected,
+  showRange,
   showPrev,
   showBudget,
 }: {
   showProjected: boolean;
+  showRange: boolean;
   showPrev: boolean;
   showBudget: boolean;
 }) {
@@ -566,9 +573,10 @@ function ChartLegend({
       {showProjected && (
         <span className="flex items-center gap-2">
           {/* The dashed line on its band: where the month is headed, and how far
-              past months' projections missed by from this day. */}
-          <span className="inline-block h-2.5 w-3.5 bg-[var(--accent)]/15 [background-image:linear-gradient(var(--accent),var(--accent))] bg-[length:100%_2px] bg-center bg-no-repeat" />
-          Projected range
+              past months' projections missed by from this day. Before day 10
+              the line alone (CHART_RANGE_FROM_DAY). */}
+          <span className={`inline-block h-2.5 w-3.5 ${showRange ? "bg-[var(--accent)]/15" : ""} [background-image:linear-gradient(var(--accent),var(--accent))] bg-[length:100%_2px] bg-center bg-no-repeat`} />
+          {showRange ? "Projected range" : "Projected"}
         </span>
       )}
       {showPrev && (
