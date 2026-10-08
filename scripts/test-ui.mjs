@@ -1930,6 +1930,15 @@ async function categoryShelfSummary(browser) {
       const total = c.querySelector("[data-ltm-total]")?.textContent ?? "";
       return { total, n: num(total), sum: months.reduce((a, b) => a + b, 0), count: months.length };
     }, shelfSel);
+    // The title and the "Avg $X" legend share one baseline: measured on their
+    // words, since the legend's dash once dropped it 2-3px. Their sizes
+    // differ (12px, 11px), so the boxes' bottoms differ by a pixel on one line.
+    const lines = await page.evaluate((sel) => {
+      const c = document.querySelector(`${sel} [data-month-bars]`);
+      const words = (el) => { const r = document.createRange(); const t = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()); r.selectNodeContents(t); return r.getBoundingClientRect().bottom; };
+      return { title: words(c.querySelector(".stat-label")), avg: words(c.querySelector("[data-avg-legend]")) };
+    }, shelfSel);
+    record("category shelf summary", "the chart's title and its \"Avg $X\" legend sit on one line", Math.abs(lines.title - lines.avg) <= 1.5, `title words end at ${lines.title.toFixed(1)}px, Avg at ${lines.avg.toFixed(1)}px`);
     record("category shelf summary", "the chart's title gives the year's total, the sum of the twelve bars", ltm.count === 12 && /^\$[\d,]+$/.test(ltm.total) && Math.abs(ltm.n - ltm.sum) <= 6, `title ${ltm.total}; bars sum to $${ltm.sum} over ${ltm.count} months`);
 
     const sizes = await page.evaluate((sel) => { const cards = [...document.querySelectorAll(`${sel} [data-property-card]`)]; return { sizes: cards.map((c) => getComputedStyle(c.firstElementChild).fontSize), heights: cards.map((c) => Math.round(c.getBoundingClientRect().height)) }; }, shelfSel);

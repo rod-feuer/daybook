@@ -289,8 +289,12 @@ function MonthBars({ history, avg, partial }: { history: CatSummary["history"]; 
         <div className="stat-label">
           Last 12 months · <span data-ltm-total>{usd(total, { cents: false })}</span>
         </div>
-        <span className="flex items-center gap-1 text-[11px] text-[var(--muted)]" data-avg-legend>
-          <span aria-hidden className="w-3 border-t border-dashed border-[var(--muted)]" />
+        {/* Baseline-aligned with the title by its words: the dash has no text,
+            so it centres on its own and the legend's baseline is the words'.
+            As the first baseline item, the dash's bottom edge stood in for a
+            baseline and dropped "Avg $X" half a line below the title. */}
+        <span className="flex items-baseline gap-1 text-[11px] text-[var(--muted)]" data-avg-legend>
+          <span aria-hidden className="w-3 self-center border-t border-dashed border-[var(--muted)]" />
           Avg {usd(avg, { cents: false })}
         </span>
       </div>
