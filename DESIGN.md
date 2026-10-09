@@ -105,9 +105,8 @@ and §3 carry over unchanged.
   vendor's other charges at that amount join), **Add** (a plan the detector
   found: it counts, and its charges carry ↻, only once added, from the
   suggestions queue or its shelf), **Combine / Separate** (bank
-  names that are one vendor), **Change vendor** (a charge, or this and future
-  charges of its amount under its bank name, that belong to another vendor:
-  one bank name that carries two, as "Google" carries Google One and
+  names that are one vendor), **Change vendor** (a charge that belongs to another vendor than its bank
+  name's: one bank name that carries two, as "Google" carries Google One and
   Workspace; "edited", and Reset undoes it). **Exclude from totals** and **split** are money verbs and live on
   the Transactions tab; the shelf only shows "not counted". Never "series",
   "excluded", "not detected" or "configure" in the UI. *(Teach, One-pattern)*
@@ -136,7 +135,7 @@ and §3 carry over unchanged.
   brought back), or would need an undo. When the object you touched shows the
   result — a row leaves a queue, a pill flips, a field shows its new value —
   it says nothing. Errors always speak. *(Honest, One-pattern)*
-- **Review queues** surface low-confidence work (uncategorized, merge / name-cleanup
+- **Review queues** surface low-confidence work (uncategorized charges, merge
   candidates) for one-tap confirmation instead of auto-applying it. One decision
   per vendor: a vendor in two queues at once is answered in the one with the
   evidence, and the other points at it (an uncategorized duplicate candidate
@@ -280,8 +279,7 @@ property cards, each marked auto or edited; one caption line; evidence as a
 flush, edge-aligned list with the membership pill (a charge's rows) or the ↻
 glyph (a category's vendors: the verb lives in the vendor shelf a tap away);
 then match, the vendor's split rules (each removable, which restores what it
-split), its rules moving charges at one amount to another vendor (each
-removable, which brings them back), and the action row. The footer link follows the content, not the panel edge. Three shelves,
+split), and the action row. The footer link follows the content, not the panel edge. Three shelves,
 one anatomy: a **vendor** (or one of its plans; a vendor with several plans
 lists them with their monthly total (only plans still billing: one that stopped, as when the bank renamed the vendor, is neither listed nor counted) in place of the cards, each opening its
 own shelf), a **category** (its badge and name in the header are its icon, colour,
@@ -298,8 +296,7 @@ edit it ("From October on; earlier months keep theirs");
 the Categories row only shows the budget), and a **charge** — the charge's cards are its date (the editor for an effective
 date) and its amount (bank data); its caption carries the category and its
 plan membership; under it, the vendor it is filed under, with Change (the
-vendor picker, then this charge or this and future charges of its amount, the
-latter listing the charges it moves before it does); then the note and its verbs (exclude from totals, split),
+vendor picker, then Move); then the note and its verbs (exclude from totals, split),
 the vendor's recent charges and its spend by year (evidence only: the
 vendor's controls stay on the vendor's shelf, where "category" means every
 charge).

@@ -181,14 +181,3 @@ export function applyPlanMatches(today?: string): number {
   })();
   return n;
 }
-
-// The middle band, for the review queue.
-export function planMatchSuggestions(today?: string): PlanMatch[] {
-  return scorePlanMatches(today).filter((m) => m.band === "suggest");
-}
-
-export function dismissPlanMatch(hash: string) {
-  const db = getDb();
-  ensurePlanMatches(db);
-  db.prepare("INSERT OR IGNORE INTO plan_match_dismissals (hash) VALUES (?)").run(hash);
-}

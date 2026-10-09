@@ -18,7 +18,6 @@ import { budgetOutlook, budgetSpent, isOverBudget } from "./budgetOutlook";
 import { pointAgainstBudget, rangeAgainstBudget } from "./verdict";
 import { categorizeSuggestions } from "./categorizeSuggest";
 import { allMergeSuggestions } from "./merges";
-import { nameCleanupSuggestions } from "./nameCleanup";
 import { merchantKey } from "./merchant";
 import { LARGE_CHARGE, EXTRAORDINARY } from "./forecast";
 import { usd, shortDate } from "./format";
@@ -270,8 +269,6 @@ function chores(needsReview: number): string[] {
   if (suggested > 0) out.push(`${plural(suggested, "category suggestion", "category suggestions")} to apply`);
   const merges = allMergeSuggestions().length;
   if (merges > 0) out.push(`${plural(merges, "vendor", "vendors")} to combine`);
-  const tidy = nameCleanupSuggestions().length;
-  if (tidy > 0) out.push(`${plural(tidy, "vendor name", "vendor names")} to tidy`);
   return out;
 }
 

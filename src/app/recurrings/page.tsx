@@ -2,7 +2,6 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import Shell, { Toolbar } from "@/components/Shell";
-import { HeaderMenu } from "@/components/HeaderMenu";
 import { useNewCategory } from "@/components/NewCategoryOption";
 import { AmountCell, CategoryProperty } from "@/components/RowCells";
 import { withoutAmountQualifier, isSeriesKey, seriesVendor } from "@/lib/series";
@@ -49,7 +48,6 @@ export default function RecurringsPage() {
   const period = usePeriodLabel(month); // the days the figures cover, said once
   const [recs, setRecs] = useState<Rec[]>([]);
   const [cats, setCats] = useState<Cat[]>([]);
-  const [busy, setBusy] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(true);
@@ -169,17 +167,6 @@ export default function RecurringsPage() {
     );
   }
 
-
-  async function recompute() {
-    setBusy(true);
-    try {
-      await fetch("/api/recompute", { method: "POST" });
-      await load(month);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const isCurrentMonth = isCurrentMonthOf(month);
   const byDue = (a: Rec, b: Rec) => a.dueDate.localeCompare(b.dueDate);
 
@@ -255,13 +242,6 @@ export default function RecurringsPage() {
       title="Recurrings"
       subtitle={period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
-      actions={
-        <HeaderMenu>
-          <button className="btn-ghost" disabled={busy} onClick={recompute}>
-            {busy ? "Scanning…" : "Re-scan"}
-          </button>
-        </HeaderMenu>
-      }
     >
       {status === "loading" ? (
         <LoadingRows />
