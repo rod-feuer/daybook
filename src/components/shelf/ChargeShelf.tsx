@@ -135,7 +135,7 @@ export function ChargeBody({
           />
         </PropertyCard>
         <PropertyCard label="amount">
-          <AmountCell value={data.amount} note={pendingNote(data.amount, data.pendingAmount)} excluded={excluded || !!data.categoryExcluded} className="text-[15px]" />
+          <AmountCell value={data.amount} note={pendingNote(data.amount, data.pendingAmount)} stacked excluded={excluded || !!data.categoryExcluded} className="text-[15px]" />
         </PropertyCard>
       </div>
       <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]">
