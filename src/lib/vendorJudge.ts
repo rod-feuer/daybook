@@ -185,11 +185,11 @@ async function run(ask: Ask, today?: Date) {
 // read as the vendor it was since combined into, so an answer about "Bp"
 // still holds once "Bp" is filed under the owner's BP vendor; a pair now one
 // vendor leaves nothing to ask. `pair` is the pair as asked (its dismiss key).
-export function sureJudgments(): { a: string; b: string; why: string; pair: string }[] {
+export function sureJudgments(min = SURE): { a: string; b: string; why: string; pair: string }[] {
   const db = getDb();
   ensureVendorJudgments(db);
   const links = getMerchantLinks();
-  const rows = db.prepare("SELECT pair, why FROM vendor_judgments WHERE same = 1 AND confidence >= ?").all(SURE) as { pair: string; why: string }[];
+  const rows = db.prepare("SELECT pair, why FROM vendor_judgments WHERE same = 1 AND confidence >= ?").all(min) as { pair: string; why: string }[];
   return rows
     .map((r) => {
       const [a, b] = r.pair.split("|").map((n) => canonicalMerchant(n, links));

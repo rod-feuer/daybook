@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore } from "react";
 import { useToast } from "@/components/Toast";
+import { combinedLine } from "@/lib/format";
 
 // A phone: below the sm breakpoint, where the header holds the title and the
 // picker on one row. Rendered as not-a-phone on the server, then corrected.
@@ -81,8 +82,9 @@ export function SyncBankButton({ onDone }: { onDone: () => void }) {
       if (!res.ok) {
         toast(`Bank sync failed: ${data.error}`, "error");
       } else {
+        const combined = combinedLine(data.combined);
         toast(
-          `Synced ${data.inserted} new · ${data.updated} updated`,
+          `Synced ${data.inserted} new · ${data.updated} updated${combined ? ` · ${combined}` : ""}`,
           "success"
         );
         onDone();

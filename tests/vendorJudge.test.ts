@@ -2,7 +2,7 @@ import { cleanDbBeforeEach, tx } from "./helpers"; // first: points the DB at a 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { judgeVendorPairs, type Ask, type Candidate } from "../src/lib/vendorJudge";
-import { allMergeSuggestions, approveMerge, dismissMerge } from "../src/lib/merges";
+import { allMergeSuggestions, approveMerge, dismissMerge, autoCombineSure } from "../src/lib/merges";
 import { setChargeVendor } from "../src/lib/vendorMoves";
 import { getDb } from "../src/lib/db";
 import { getMerchantLinks, canonicalMerchant, merchantDisplayName, getRecurringSettings } from "../src/lib/queries";
@@ -248,4 +248,32 @@ test("a dismissed location group rules out the model's pairs inside it", async (
   dismissMerge("Elite");
   await judgeVendorPairs({ ask: fake({ same: true, confidence: 0.95 }).ask, today: TODAY });
   assert.equal(modelCards().length, 0);
+});
+
+// WHY: of the pairs the model judged one vendor at 0.9 or higher, the owner
+// combined 104 of 110 by hand; clicking Combine on each was the chore
+// ("I have clicked Combine on Culvers multiple times"). So the sync combines
+// those on its own and says so; below 0.9 (105 of 180) it stays a card, and
+// a pair the owner dismissed stays dismissed.
+test("the sync combines what the model is surest of, and leaves the rest as cards", async () => {
+  roku();
+  monthly("Hulu", 5, 5, -17.99, 9);
+  tx("Hulu Llc", { amount: -17.99, date: "2026-10-09", account: "Amex Gold" });
+  monthly("Peacock", 5, 5, -7.99, 12);
+  tx("Peacock Tv", { amount: -7.99, date: "2026-10-12", account: "Amex Gold" });
+  const answers: Record<string, number> = { "Roku|The Roku Channel": 0.95, "Hulu|Hulu Llc": 0.85, "Peacock|Peacock Tv": 0.95 };
+  const ask: Ask = async (batch) => batch.map((c) => ({ same: true, confidence: answers[c.pair] ?? 0.5, why: "same service" }));
+  await judgeVendorPairs({ ask, today: TODAY });
+  const peacock = modelCards().find((g) => g.variants.some((v) => v.merchant === "Peacock"));
+  assert.ok(peacock, "Peacock was asked and judged sure");
+  for (const k of peacock!.dismissKeys) dismissMerge(k);
+
+  const done = autoCombineSure();
+  assert.deepEqual(done.map((c) => [c.into, c.names]), [["The Roku Channel", ["Roku"]]], "only the sure, undismissed pair is combined");
+  const links = getMerchantLinks();
+  assert.equal(canonicalMerchant("Roku", links), "The Roku Channel");
+  assert.equal(canonicalMerchant("Hulu Llc", links), "Hulu Llc", "0.85 is not combined");
+  assert.ok(modelCards().some((g) => g.variants.some((v) => v.merchant === "Hulu Llc")), "…it stays a card for the owner");
+  assert.equal(canonicalMerchant("Peacock Tv", links), "Peacock Tv", "a dismissed pair is not combined");
+  assert.deepEqual(autoCombineSure(), [], "and a second sync finds nothing more");
 });
