@@ -2885,6 +2885,33 @@ async function tipLine(browser) {
   });
 }
 
+// A note ends the card line ("Platinum Card®  ✎ Pacers vs. Mavs"): on a
+// line of its own it made a row with a note a line taller than every other.
+async function noteLine(browser) {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(DB);
+  const t = db.prepare("SELECT id, merchant FROM transactions WHERE date LIKE '2025-12-1%' AND amount < 0 AND (note IS NULL OR note = '') ORDER BY date DESC LIMIT 1").get();
+  if (!t) { db.close(); return record("note line", "a fixture charge to try it on", false, "no December 2025 charge"); }
+  db.prepare("UPDATE transactions SET note = ? WHERE id = ?").run("Pacers vs. Mavs, with the kids, plus parking and two rounds of snacks at the half, and the jerseys from the team store on the way out, which were on sale for the playoff run", t.id);
+  db.close();
+  await withPage(browser, async (page, errs) => {
+    await page.goto(BASE + "/transactions?month=2025-12", { waitUntil: "networkidle2" });
+    // Found by its words, not a hook, so the old layout is measured too.
+    const text = await page.waitForFunction(() => [...document.querySelectorAll("li span")].find((e) => e.textContent.startsWith("Pacers vs. Mavs") && !e.children.length), { timeout: 8000 });
+    const geo = await text.evaluate((words) => {
+      const note = words.parentElement;
+      const row = note.closest("li");
+      const meta = note.parentElement;
+      const others = [...row.parentElement.querySelectorAll(":scope > li")].filter((r) => r !== row && !r.textContent.includes("✎")).map((r) => r.getBoundingClientRect().height);
+      const n = note.getBoundingClientRect(), m = meta.getBoundingClientRect(), col = meta.parentElement.getBoundingClientRect();
+      return { height: Math.round(row.getBoundingClientRect().height), others: [...new Set(others.map(Math.round))], oneLine: Math.round(m.height) <= 17, inside: n.right <= col.right + 0.5, cut: words.scrollWidth > words.clientWidth };
+    });
+    record("note line", "a row with a note is as tall as the rows around it", geo.others.includes(geo.height), `noted ${geo.height}px; others ${geo.others.join(", ")}px`);
+    record("note line", "the note ends the card line, and a long one is cut short there", geo.oneLine && geo.inside && geo.cut, JSON.stringify(geo));
+    if (errs.length) record("note line", "page errors", false, errs[0]);
+  });
+}
+
 // Five small bugs the review filed as refactors (batch 1).
 async function batchOne(browser) {
   // A transaction row opens the charge (DESIGN.md §2): the dashboard's Recent
@@ -2947,7 +2974,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["model merge leave out", modelMergeLeaveOut], ["model merge pick", modelMergePick], ["model merge new name", modelMergeNewName], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold], ["tip line", tipLine], ["batch 1", batchOne], ["statement text", statementText],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold], ["tip line", tipLine], ["note line", noteLine], ["batch 1", batchOne], ["statement text", statementText],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

@@ -970,6 +970,16 @@ const TxRow = memo(function TxRow({
   // "•" is the app's placeholder for a category with no real emoji (see core.ts),
   // so it's not null — treat it (and empty) as no icon and use the merchant's
   // initial instead, which reads intentional rather than like a broken image.
+  // A set note (edited in the charge's shelf) ends the card line, and gives
+  // way first when the line runs out of room: on a line of its own it made a
+  // row with a note a line taller than every other. Zero basis, so it never
+  // wraps to a line of its own.
+  const noteEl = t.note ? (
+    <span data-tx-note className="flex min-w-0 flex-1 basis-0 items-baseline gap-1 italic">
+      <span className="shrink-0 not-italic opacity-70">✎</span>
+      <span className="truncate">{t.note}</span>
+    </span>
+  ) : null;
   return (
               <li
                 data-drawer-row
@@ -1028,6 +1038,7 @@ const TxRow = memo(function TxRow({
                               {!sameAcct ? "· " : ""}posted {shortDate(t.date)}
                             </span>
                           )}
+                          {noteEl}
                         </div>
                     </>
                   ) : (
@@ -1095,16 +1106,9 @@ const TxRow = memo(function TxRow({
                         <span className="hidden whitespace-nowrap sm:inline">· {t.account}</span>
                       </>
                     )}
+                    {noteEl}
                   </div>
                     </>
-                  )}
-                  {/* A set note takes its own line below (edited in the charge's
-                      shelf). Outside the mode ternary so statement view has it too. */}
-                  {t.note && (
-                    <div className="mt-1 flex max-w-full items-baseline gap-1 text-xs italic text-[var(--muted)]">
-                      <span className="shrink-0 not-italic opacity-70">✎</span>
-                      <span className="truncate">{t.note}</span>
-                    </div>
                   )}
                 </div>
                 {/* Desktop: the category as a quiet property in its own column
