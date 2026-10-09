@@ -17,7 +17,7 @@ import {
 import { usd, shortDate, defaultMonth, isCurrentMonth } from "@/lib/format";
 import type { DashboardData } from "@/lib/core";
 import type { TransactionRow } from "@/lib/queries";
-import { MonthPicker, ImportButton, SeedButton, SyncBankButton } from "@/components/Actions";
+import { MonthPicker, SyncBankButton } from "@/components/Actions";
 import { RecurringGlyph, RECURRING_LABEL, recurringState } from "@/components/RecurringGlyph";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { Money } from "@/components/Money";
@@ -152,14 +152,10 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-lg font-semibold">Nothing here yet</h2>
             <p className="mt-1 max-w-sm text-[13px] text-[var(--muted)]">
-              Load realistic sample data to explore the app, or import a CSV export
-              from your bank or Copilot.
+              Your charges arrive from your bank. Sync to bring them in.
             </p>
           </div>
-          <div className="flex gap-2">
-            <SeedButton onDone={refresh} />
-            <ImportButton onDone={refresh} />
-          </div>
+          <SyncBankButton onDone={refresh} />
         </div>
       </Shell>
     );
@@ -176,7 +172,6 @@ export default function DashboardPage() {
       actions={
         <HeaderMenu>
           <SyncBankButton onDone={refresh} />
-          <ImportButton onDone={refresh} />
         </HeaderMenu>
       }
     >

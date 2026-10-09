@@ -204,7 +204,7 @@ function currentAmount(amounts: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-// Re-exported: copilot-import and the tests import it from here.
+// Re-exported: the tests import it from here.
 export { addCadence } from "./cadence";
 
 // The most common category among a recurring's charges — robust to a single new
