@@ -31,7 +31,6 @@ import type { Category } from "@/lib/types";
 import { LoadError, LoadingRows } from "@/components/LoadState";
 import Shell from "@/components/Shell";
 import { usePeriodLabel } from "@/components/usePeriodLabel";
-import { HeaderMenu } from "@/components/HeaderMenu";
 import { useTxDrawer, useChargeShelf, useCategoryShelf, useShelfActive } from "@/components/TransactionDrawer";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
 import { useMonthBoot } from "@/components/useMonthBoot";
@@ -169,11 +168,6 @@ export default function DashboardPage() {
       // deltas (IBCS UN 2.2: time first, then scenario): "Oct 1–4 · vs Sep 1–4".
       subtitle={period && data?.prev ? `${period} · vs ${prevPeriodLabel(data.prev)}` : period}
       month={<MonthPicker months={months} value={month} onChange={changeMonth} />}
-      actions={
-        <HeaderMenu>
-          <SyncBankButton onDone={refresh} />
-        </HeaderMenu>
-      }
     >
       {status === "error" && <LoadError what="the dashboard" onRetry={start} />}
       {status === "loading" && !data && <LoadingRows />}

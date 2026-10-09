@@ -2233,10 +2233,10 @@ async function inlineEdit(browser) {
     record("inline edit", "categories · Escape reverts a rename", t.includes("Dining Out") && !t.includes("Garbage"));
     await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-drawer-row]");
-    const rec = await clickName(page);
-    await typeIntoFocused(page, "Netflix HD"); await page.keyboard.press("Enter");
-    await page.waitForFunction(() => document.body.innerText.includes("Netflix HD"), { timeout: 8000 });
-    record("inline edit", "recurrings · Enter commits a rename", true, `${rec} → Netflix HD`);
+    // One place to name a vendor: the row has no rename of its own; its
+    // shelf's header does it.
+    const rowRename = await page.evaluate(() => [...document.querySelectorAll("[data-drawer-row] button")].some((b) => b.querySelector("span.truncate")));
+    record("inline edit", "recurrings · the row has no rename of its own (the shelf names the vendor)", !rowRename);
     // The shelf closes on a mousedown outside it, which unmounts the name input
     // before its blur lands. The edit must still be saved (flush on unmount),
     // or a rename typed in the shelf is silently lost.
@@ -2383,6 +2383,9 @@ async function recurringsRow(browser) {
     {
       const canHover = await page.evaluate(() => matchMedia("(hover: hover)").matches);
       if (canHover) {
+        // Categories' rows: Recurrings' rows no longer rename (the shelf does).
+        await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
+        await page.waitForSelector("[data-drawer-row] button[aria-label^='Rename']");
         const nameText = await page.$("[data-drawer-row] button[aria-label^='Rename'] > span:first-child");
         await nameText.hover(); await new Promise((r) => setTimeout(r, 200));
         const cue = await page.$("[data-drawer-row] button[aria-label^='Rename'] > span:last-child");
