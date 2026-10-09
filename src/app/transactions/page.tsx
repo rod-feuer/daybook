@@ -33,7 +33,7 @@ import { NameCleanupQueue } from "@/components/NameCleanupQueue";
 import { CategorizeQueue } from "@/components/CategorizeQueue";
 import { SearchBox } from "@/components/SearchBox";
 import { Tooltip } from "@/components/Tooltip";
-import { patchJson } from "@/lib/http";
+import { getJson, patchJson } from "@/lib/http";
 import { usd, longDate, shortDate, defaultMonth, pendingNote } from "@/lib/format";
 import type { TransactionRow } from "@/lib/queries";
 import type { Category } from "@/lib/types";
@@ -287,9 +287,9 @@ function TransactionsView() {
     setLoadingMore(true);
     const token = guardRef.current.current(); // ride the current result set
     try {
-      const data = await fetch(
-        `/api/transactions?${buildTxQuery(f, loadedCountRef.current)}`
-      ).then((r) => r.json());
+      // getJson throws on a failed reply, so the catch below says so; a raw
+      // fetch read the error body and quietly appended nothing.
+      const data = await getJson<{ rows?: Tx[] }>(`/api/transactions?${buildTxQuery(f, loadedCountRef.current)}`);
       if (!guardRef.current.isCurrent(token)) return; // filters changed mid-flight — discard
       setTxs((prev) => [...prev, ...(data.rows ?? [])]);
     } catch {
@@ -1011,7 +1011,7 @@ const TxRow = memo(function TxRow({
                           </span>
                         ) : t.excluded ? (
                           <span className="pill shrink-0 bg-[var(--background)] text-[11px] text-[var(--muted)]">
-                            excluded
+                            not counted
                           </span>
                         ) : t.splitMissed ? (
                           <span data-split-drift-tag className="pill shrink-0 bg-[var(--warn)]/15 text-[11px] text-[var(--warn)]">
@@ -1059,7 +1059,7 @@ const TxRow = memo(function TxRow({
                       </span>
                     ) : t.excluded ? (
                       <span className="pill shrink-0 bg-[var(--background)] text-[11px] text-[var(--muted)]">
-                        excluded
+                        not counted
                       </span>
                     ) : t.splitMissed ? (
                       <span data-split-drift-tag className="pill shrink-0 bg-[var(--warn)]/15 text-[11px] text-[var(--warn)]">

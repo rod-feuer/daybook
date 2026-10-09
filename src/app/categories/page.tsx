@@ -301,7 +301,10 @@ function BudgetSummary({
               </button>
             </Tooltip>
           ) : (
-            <span className="text-[var(--muted)]">Nothing over budget</span>
+            // Not "Nothing": the month's total can be over its share of the
+            // budgets (the red figure) while no category is over its own (an
+            // annual one is judged on the year so far).
+            <span className="text-[var(--muted)]">No category over its budget</span>
           )}
         </>
       }

@@ -3954,3 +3954,16 @@ test("the dashboard's category rows judge an annual budget on the year so far, a
   assert.equal(row.ytdSpent, cats.ytdSpent, "the same year-so-far figure the Categories page uses");
   assert.ok(row.ytdSpent <= row.budget, "$2,400 of $3,000 this year: not over");
 });
+
+// WHY: the per-charge amount the owner edits is the plan's going rate (a price
+// went up). Every list, the bill matching and the recurrings totals use it;
+// the shelf's "per year expected" still multiplied the detected amount, so the
+// two figures on one shelf disagreed after an edit.
+test("a plan's per-year figure follows the per-charge amount the owner set", () => {
+  const ym = (i: number) => `2026-${String(i).padStart(2, "0")}`;
+  for (let m = 1; m <= 6; m++) tx("Stream Co", { amount: -16.99, date: `${ym(m)}-06`, categoryId: CAT });
+  detectRecurrings();
+  assert.equal(merchantSummary("Stream Co").recurringDetail?.annualized, Number((16.99 * 12).toFixed(2)), "fixture: detected");
+  setRecurringSetting("Stream Co", { expectedAmount: 19.99 });
+  assert.equal(merchantSummary("Stream Co").recurringDetail?.annualized, Number((19.99 * 12).toFixed(2)), "the edited $19.99, twelve times");
+});

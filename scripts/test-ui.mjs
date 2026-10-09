@@ -2869,6 +2869,58 @@ async function tipLine(browser) {
   });
 }
 
+// Five small bugs the review filed as refactors (batch 1).
+async function batchOne(browser) {
+  // A transaction row opens the charge (DESIGN.md §2): the dashboard's Recent
+  // activity opened the vendor. The charge shelf's header drills up to its vendor.
+  await withPage(browser, async (page) => {
+    await page.goto(BASE + "/", { waitUntil: "networkidle2" });
+    const rows = await page.$$("ul [data-drawer-row]");
+    if (rows.length) { await rows[0].click(); await shelfIs(page, true); await shelfSettled(page); }
+    const charge = await page.$(`${shelfSel} [data-open-vendor]`);
+    record("batch 1", "a dashboard Recent activity row opens the charge, not the vendor", rows.length > 0 && !!charge, `${rows.length} rows; charge shelf=${!!charge}`);
+  });
+  // The pill for a charge left out of totals says "not counted", never "excluded".
+  await withPage(browser, async (page) => {
+    const month = new Date().toISOString().slice(0, 7);
+    const r = await (await fetch(`${BASE}/api/transactions?month=${month}`)).json();
+    const t = (r.rows ?? r).find((x) => x.amount < 0 && !x.excluded);
+    const patch = (excluded) => fetch(`${BASE}/api/transactions/${t.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded }) });
+    await patch(true);
+    await page.goto(`${BASE}/transactions?month=${month}`, { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    const pills = await page.$$eval("[data-drawer-row] .pill", (ps) => ps.map((p) => p.textContent.trim()));
+    record("batch 1", "a charge left out of totals reads \"not counted\", never \"excluded\"", pills.includes("not counted") && !pills.includes("excluded"), JSON.stringify([...new Set(pills)]));
+    await patch(false);
+  });
+  // A queue whose read fails says so, and the page doesn't crash: the error
+  // reply was stored as the list.
+  await withPage(browser, async (page, errs) => {
+    await page.setRequestInterception(true);
+    page.on("request", (req) => (/\/api\/(merges|category-suggestions)$/.test(new URL(req.url()).pathname) && req.method() === "GET" ? req.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "boom" }) }) : req.continue()));
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await sleep(800);
+    const said = await page.evaluate(() => document.body.innerText);
+    record("batch 1", "the review queues' failed reads say so, and nothing crashes", /Couldn't load the merge suggestions/.test(said) && /Couldn't load the category suggestions/.test(said) && errs.length === 0, errs[0] ?? "no page errors");
+  });
+  // After a shelf save, the vendor pickers' list is read again: a combine or a
+  // rename changed it, and it was read only once.
+  await withPage(browser, async (page) => {
+    await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
+    await page.waitForSelector("[data-drawer-row]");
+    await page.click("[data-drawer-row]");
+    await shelfIs(page, true); await shelfSettled(page);
+    let reads = 0;
+    page.on("request", (req) => { if (req.method() === "GET" && new URL(req.url()).pathname === "/api/vendors") reads++; });
+    await page.click(`${shelfSel} [aria-label="Note"]`);
+    await page.keyboard.type("batch one check");
+    await page.keyboard.press("Enter");
+    await sleep(1200);
+    record("batch 1", "a shelf save reads the vendor list again", reads >= 1, `${reads} read(s) after the save`);
+    await page.click(`${shelfSel} [aria-label="Note"]`, { clickCount: 3 }); await page.keyboard.press("Backspace"); await page.keyboard.press("Enter"); await sleep(600);
+  });
+}
+
 // ---------- main ----------
 const t0 = Date.now();
 let browser;
@@ -2879,7 +2931,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["model merge leave out", modelMergeLeaveOut], ["model merge pick", modelMergePick], ["model merge new name", modelMergeNewName], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold], ["tip line", tipLine],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold], ["tip line", tipLine], ["batch 1", batchOne],
     // Last: its Copilot import wipes the fixture (see statementText).
     ["statement text", statementText],
   ]) {
