@@ -2629,7 +2629,8 @@ async function shelfEditsLand(browser) {
     record("shelf edits land", "match text typed then clicking away is saved", outside && !!saved, `outside=${outside} posts=${posts.length}`);
     if (saved) await page.evaluate((m) => fetch("/api/recurrings/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: m, matchMode: null, matchText: null, amountTolerance: null }) }), saved.merchant);
   });
-  // A half-typed expected amount on vendor A, then open vendor B: A keeps it.
+  // A half-typed match text on vendor A, then open vendor B: A keeps it. (It
+  // was the expected amount, which is no longer edited.)
   await withPage(browser, async (page) => {
     const posts = settingsPosts(page);
     await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
@@ -2640,17 +2641,18 @@ async function shelfEditsLand(browser) {
     await rows[0].click();
     await shelfIs(page, true); await shelfSettled(page);
     const a = await page.$eval(`${shelfSel} header`, (h) => h.innerText.split("\n")[0].replace("✎", "").trim());
-    await page.click(`${shelfSel} input[aria-label="Expected amount"]`);
-    await page.keyboard.type("987.65");
+    await page.select(`${shelfSel} select[aria-label="Match rule"]`, "contains");
+    await page.click(`${shelfSel} input[aria-label="Match text"]`);
+    await page.keyboard.type("HALFTYPED");
     await rows[other].click();
     await page.waitForFunction((sel, a) => { const h = document.querySelector(`${sel} header`); return h && !h.innerText.startsWith(a); }, { timeout: 8000 }, shelfSel, a);
     await shelfSettled(page); await sleep(800);
     const b = await page.$eval(`${shelfSel} header`, (h) => h.innerText.split("\n")[0].replace("✎", "").trim());
-    const shown = await page.$$eval(`${shelfSel} input[aria-label="Expected amount"]`, (els) => els.map((e) => e.value));
-    const wrote = posts.filter((p) => p.expectedAmount === 987.65);
-    record("shelf edits land", "a half-typed amount doesn't follow you to the next vendor", other > 0 && a !== b && !shown.includes("987.65"), `A=${a} B=${b} B shows ${JSON.stringify(shown)} rows=${JSON.stringify(names.slice(0, 6))} other=${other}`);
+    const shown = await page.$$eval(`${shelfSel} input[aria-label="Match text"]`, (els) => els.map((e) => e.value));
+    const wrote = posts.filter((p) => p.matchText === "HALFTYPED");
+    record("shelf edits land", "a half-typed field doesn't follow you to the next vendor", other > 0 && a !== b && !shown.includes("HALFTYPED"), `A=${a} B=${b} B shows ${JSON.stringify(shown)} rows=${JSON.stringify(names.slice(0, 6))} other=${other}`);
     record("shelf edits land", "…and is saved to the vendor it was typed on, never the next", a !== b && wrote.length === 1 && a.toLowerCase().includes(String(wrote[0].merchant).toLowerCase().split(" ")[0]), `saved for ${wrote.map((w) => w.merchant).join(", ") || "nobody"}`);
-    for (const w of wrote) await page.evaluate((m) => fetch("/api/recurrings/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: m, expectedAmount: null }) }), w.merchant);
+    for (const w of wrote) await page.evaluate((m) => fetch("/api/recurrings/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchant: m, matchMode: null, matchText: null }) }), w.merchant);
   });
 }
 
