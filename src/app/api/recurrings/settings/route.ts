@@ -65,11 +65,6 @@ export async function POST(req: NextRequest) {
 
   const patch: Partial<RecurringSettings> = {};
   if ("alias" in body) patch.alias = body.alias ? String(body.alias).trim() : null;
-  if ("expectedAmount" in body)
-    patch.expectedAmount =
-      body.expectedAmount == null || body.expectedAmount === ""
-        ? null
-        : Math.abs(Number(body.expectedAmount));
   if ("cadence" in body)
     patch.cadence = CADENCES.includes(body.cadence) ? body.cadence : null;
   if ("nextDate" in body)

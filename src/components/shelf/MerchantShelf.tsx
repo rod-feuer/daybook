@@ -672,7 +672,7 @@ export function MerchantBody({
   const mixedVendor = !data.series && data.categoryMixed;
   const d = multi ? null : data.recurringDetail;
   const monthsActive = monthsSince(data.firstSeen);
-  // Placeholder for the expected-amount editor. Priority: a caller-supplied hint
+  // The amount a charge is expected at. Priority: a caller-supplied hint
   // (the suggestion row's exact figure, so the two never disagree) → the detected
   // per-charge for a confirmed recurring → the most recent charge (current price).
   const detectedAmount =
@@ -774,8 +774,8 @@ export function MerchantBody({
       {d ? (
         <>
           {/* The plan's properties, each a stat that IS its editor: one fact,
-              one place. Per charge edits the expected amount; next due edits
-              the date; the cadence select sits on the caption line with the
+              one place. Per charge is the latest charge (shown, not edited:
+              nobody corrected it); next due edits the date; the cadence select sits on the caption line with the
               per-year figure it drives. */}
           {/* Date on the left, amount on the right — the rows' order. */}
           <div className="grid grid-cols-2 gap-2">
@@ -790,26 +790,8 @@ export function MerchantBody({
               />
             </PropertyCard>
             <PropertyCard label="Per charge" edited={data.expectedAmount != null}>
-              <div className="flex items-center">
-                <span className="text-[15px] font-semibold text-[var(--muted)]">$</span>
-                <CommitInput
-                  key={data.expectedAmount != null ? data.expectedAmount.toFixed(2) : ""}
-                  defaultValue={data.expectedAmount != null ? data.expectedAmount.toFixed(2) : ""}
-                  placeholder={detectedAmount != null ? detectedAmount.toFixed(2) : "amount"}
-                  inputMode="decimal"
-                  aria-label="Expected amount"
-                  onCommit={(v) => {
-                    const t = v.trim();
-                    if (t === "") {
-                      if (data.expectedAmount != null) onSaveSettings({ expectedAmount: null });
-                      return;
-                    }
-                    const n = Math.abs(Number(t));
-                    if (!Number.isFinite(n)) return; // ignore non-numeric input
-                    if (n !== (data.expectedAmount ?? null)) onSaveSettings({ expectedAmount: n });
-                  }}
-                  className="w-full min-w-0 bg-transparent text-[15px] font-semibold tabular-nums placeholder:font-semibold placeholder:text-[var(--foreground)] focus:outline-none"
-                />
+              <div className="text-[15px] font-semibold tabular-nums" data-expected-amount>
+                {(data.expectedAmount ?? detectedAmount) != null ? usd((data.expectedAmount ?? detectedAmount)!) : "—"}
               </div>
             </PropertyCard>
           </div>
@@ -876,7 +858,7 @@ export function MerchantBody({
 
       {!d && !multi && (
         // A vendor with no plan keeps the same anatomy: two cards — what it
-        // cost over the last year, and the expected amount (its editor) —
+        // cost over the last year, and the expected amount —
         // then the caption line with the category and the per-month facts.
         <>
           <div className="grid grid-cols-2 gap-2">
@@ -884,26 +866,8 @@ export function MerchantBody({
             <div className="text-[15px] font-semibold tabular-nums">{usd(data.trailing12, { cents: false })}</div>
           </PropertyCard>
           <PropertyCard label="Expected" edited={data.expectedAmount != null}>
-            <div className="flex items-center">
-              <span className="text-[15px] font-semibold text-[var(--muted)]">$</span>
-              <CommitInput
-                key={data.expectedAmount != null ? data.expectedAmount.toFixed(2) : ""}
-                defaultValue={data.expectedAmount != null ? data.expectedAmount.toFixed(2) : ""}
-                placeholder={detectedAmount != null ? detectedAmount.toFixed(2) : "amount"}
-                inputMode="decimal"
-                aria-label="Expected amount"
-                onCommit={(v) => {
-                  const t = v.trim();
-                  if (t === "") {
-                    if (data.expectedAmount != null) onSaveSettings({ expectedAmount: null });
-                    return;
-                  }
-                  const n = Math.abs(Number(t));
-                  if (!Number.isFinite(n)) return;
-                  if (n !== (data.expectedAmount ?? null)) onSaveSettings({ expectedAmount: n });
-                }}
-                className="w-full min-w-0 bg-transparent text-[15px] font-semibold tabular-nums placeholder:font-semibold placeholder:text-[var(--foreground)] focus:outline-none"
-              />
+            <div className="text-[15px] font-semibold tabular-nums" data-expected-amount>
+              {(data.expectedAmount ?? detectedAmount) != null ? usd((data.expectedAmount ?? detectedAmount)!) : "—"}
             </div>
           </PropertyCard>
           </div>
