@@ -35,6 +35,7 @@ const server = spawn(NEXT, ["dev", "-p", String(PORT)], {
     ...process.env,
     COPILOT_DB_PATH: DB,
     NEXT_DIST_DIR: ".next-ui", // its own build folder: the dev server can stay up
+    COPILOT_FIXTURES: "1", // the seed and CSV routes build the fixture; the app has neither
     APP_PASSWORD: "", // no login gate (an already-set var wins over .env.local)
     PLAID_CLI_PATH: "/nonexistent/plaid", // launch sync fails fast and stays quiet
     // The suite never calls a model: both keys are blanked, so the queue (which
@@ -2666,14 +2667,20 @@ async function shelfEditsLand(browser) {
 // read as which bank, and said nothing of how it related to "Roku" above it).
 async function statementText(browser) {
   await withPage(browser, async (page, errs) => {
-    // The Copilot import keeps the bank's words and files the charge under the
-    // cleaned name. It also wipes the database first (a re-import never
-    // doubles), so this check runs LAST: anything after it sees an empty month.
+    // The bank sync keeps the bank's words beside the cleaned name. Only the
+    // sync sets them, so the check sets them the way it would, on a charge
+    // the fixture files under a cleaned name.
     const raw = "SQ *BLUE BOTTLE COFFEE";
-    await fetch(BASE + "/api/import-copilot", { method: "POST", body: `Date,Name,Amount,Status,Account,Parent Category\n${day(0, 2)},${raw},12.34,posted,Credit,Dining` });
+    await fetch(BASE + "/api/import", { method: "POST", body: `date,merchant,amount,account\n${day(0, 2)},Blue Bottle Coffee,-12.34,Credit` });
     const month = day(0, 2).slice(0, 7);
     const rows = await (await fetch(`${BASE}/api/transactions?month=${month}`)).json();
     const t = (rows.rows ?? rows).find((r) => Math.abs(r.amount + 12.34) < 0.001);
+    if (t) {
+      const { default: Database } = await import("better-sqlite3");
+      const db = new Database(DB);
+      db.prepare("UPDATE transactions SET descriptor = ? WHERE id = ?").run(raw, t.id);
+      db.close();
+    }
     const detail = t ? await (await fetch(`${BASE}/api/transactions/${t.id}`)).json() : null;
     await page.goto(`${BASE}/transactions?month=${month}`, { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-drawer-row]");
@@ -2931,9 +2938,7 @@ try {
   for (const [name, fn] of [
     ["load states", honestLoadStates], ["keyboard rows", keyboardRows], ["page header", pageHeader], ["dashboard", dashboardAnatomy], ["budget bars", budgetBars], ["resting actions", restingActions],
     ["qualifiers", partialMonthQualifiers], ["statement mode", statementMode], ["vendor header", vendorHeaderCounts], ["vendor header category", vendorHeaderCategory], ["split drift", splitDrift], ["split rules", splitRulesInShelf], ["queue buttons", queueButtons], ["model suggestions", modelSuggestionTiers], ["model merge card", modelMergeCard], ["model merge leave out", modelMergeLeaveOut], ["model merge pick", modelMergePick], ["model merge new name", modelMergeNewName], ["queue picks", queuePicksSurvive], ["quiet login", quietLogin], ["accounts sync", accountsSync], ["phone layout", phoneLayout], ["open vendor", openVendorFromCharge], ["ios autofill tag", iosAutofillTag], ["app name", appName], ["start a plan", startAPlan], ["vendor shelf", multiPlanVendor], ["card heights", cardHeights], ["split → undo", splitUndo], ["similar names", similarNames], ["change vendor", changeVendor],
-    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold], ["tip line", tipLine], ["batch 1", batchOne],
-    // Last: its Copilot import wipes the fixture (see statementText).
-    ["statement text", statementText],
+    ["shelf settings", shelfSettings], ["money colour", moneyColour], ["category badge", categoryBadge], ["recurring glyph", recurringGlyph], ["inline edit", inlineEdit], ["recurrings row", recurringsRow], ["tap targets", tapTargets], ["stale shelf read", staleShelfRead], ["dashboard proposal", dashboardProposal], ["defer to merge", deferToMerge], ["not counted", notCountedPlans], ["header nav", headerNav], ["mixed vendor", mixedVendorCategory], ["named plan", namedPlanStays], ["added plan", addedPlan], ["suggested plan", suggestedPlanShelf], ["dashboard readout", dashboardReadout], ["category shelf budget", categoryShelfBudget], ["category shelf recurring", categoryShelfRecurring], ["category shelf summary", categoryShelfSummary], ["needs a look", needsALook], ["shelf edits land", shelfEditsLand], ["projection range", projectionRange], ["annual budget row", annualBudgetRow], ["drag no select", dragNoSelect], ["drag threshold", dragThreshold], ["tip line", tipLine], ["batch 1", batchOne], ["statement text", statementText],
   ]) {
     try { await fn(browser); } catch (e) { record(name, "threw", false, String(e.message).split("\n")[0]); }
   }

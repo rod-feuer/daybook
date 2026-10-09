@@ -21,8 +21,7 @@ import { CategoryBadge } from "@/components/CategoryBadge";
 import { AmountCell, CategoryProperty } from "@/components/RowCells";
 import { rowButtonProps, ROW_FOCUS } from "@/components/rowButton";
 import { LoadError, LoadingRows } from "@/components/LoadState";
-import { MonthPicker, ImportButton } from "@/components/Actions";
-import { HeaderMenu } from "@/components/HeaderMenu";
+import { MonthPicker } from "@/components/Actions";
 import { useToast } from "@/components/Toast";
 import { useMutation } from "@/components/useMutation";
 import { useChargeShelf, useShelfActive } from "@/components/TransactionDrawer";
@@ -551,11 +550,6 @@ function TransactionsView() {
           : undefined
       }
       month={<MonthPicker months={months} value={month} onChange={setMonth} allowAll />}
-      actions={
-        <HeaderMenu>
-          <ImportButton onDone={() => loadStatic().then(() => setRefreshKey((k) => k + 1))} />
-        </HeaderMenu>
-      }
     >
       {showQueues && (
         <>

@@ -34,13 +34,11 @@ npm install
 npm run dev            # http://localhost:3000
 ```
 
-The SQLite database is created automatically on first run under `data/`. To populate
-it, open the app and either:
+The SQLite database is created automatically on first run under `data/`. Charges
+arrive from your bank: open the app and click **Sync from bank** (see
+[Data sources](#data-sources)).
 
-- click **Load sample data** (≈6 months of realistic transactions), or
-- click **Import CSV** (see [Data sources](#data-sources)).
-
-No environment variables are required for the core app — everything above works offline.
+Bank sync needs the Plaid setup below; the rest of the app needs no environment variables.
 
 ## Environment variables
 
@@ -109,18 +107,12 @@ in the UI, never silently faked).
 
 ## Data sources
 
-- **Copilot export** (recommended): `POST /api/import-copilot` with the raw CSV from
-  Copilot's "Export your transactions." Full-replace import. See `src/lib/copilot-import.ts`.
-  It handles the Copilot-specific quirks:
-  - **Sign flip** — Copilot exports positive = expense; this app uses negative = expense.
-  - **Parent categories** (~22) instead of the 138 child categories.
-  - **Exclusions** — `type=internal transfer` and `excluded=true` rows are stored but
-    kept out of totals. **Exception:** income rows are kept IN even when Copilot marks
-    them excluded (this account excludes 100% of income), so Income/Net stay meaningful.
-  - **Recurrings** come from Copilot's `recurring` column, not local detection.
-- **Generic CSV**: headers `Date, Name/Merchant/Description, Amount[, Account]`, negative =
-  expense. Idempotent (`POST /api/import`). See `src/lib/import.ts`.
-- **Sample data**: `POST /api/seed`.
+- **Bank sync** (Plaid): the only source in the app. It runs on launch, from
+  **Sync from bank**, and before each digest. See `src/lib/plaid.ts`.
+- **Test fixtures only**: `POST /api/seed` (sample data) and `POST /api/import`
+  (generic CSV: `Date, Name/Merchant/Description, Amount[, Account]`, negative =
+  expense) exist only when `COPILOT_FIXTURES=1`, which `npm run test:ui` sets. In
+  the app they return 404.
 
 ## Maintenance actions
 

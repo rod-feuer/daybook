@@ -601,20 +601,6 @@ export function undoRenormalizeMerchants(db: Database.Database): number {
   return undo.tx.length;
 }
 
-// Remove all data (used before a fresh full import). Categories/rules/recurrings
-// are recreated by the importer.
-export function wipeAll() {
-  const db = getDb();
-  ensureBudgetEntries(db);
-  db.exec(`
-    DELETE FROM transactions;
-    DELETE FROM recurrings;
-    DELETE FROM rules;
-    DELETE FROM budget_entries;
-    DELETE FROM categories;
-  `);
-}
-
 export function getDb(): Database.Database {
   const p = dbPath();
   // Reuse the cached connection only if it's for the same path (so switching to
