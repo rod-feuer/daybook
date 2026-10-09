@@ -13,7 +13,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMutation } from "@/components/useMutation";
 import { getJson, postJson, patchJson, deleteJson } from "@/lib/http";
-import { usd } from "@/lib/format";
 import { LoadError } from "@/components/LoadState";
 import type { ChargeDetail } from "@/lib/queries";
 import type { Cat, CatSummary, SettingsPatch, Summary, Vendor } from "@/components/shelf/types";
@@ -645,9 +644,6 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                     error: "Couldn't remove the split — please try again",
                   })
                 }
-                onRemoveVendorRule={(id) =>
-                  write(() => deleteJson(`/api/vendor-rules/${id}`), { success: "Rule removed; its charges are back", error: "Couldn't remove the rule — please try again" })
-                }
               />
             ) : target.kind === "category" && cData ? (
               <CategoryBody
@@ -696,19 +692,12 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
                 onOpenVendor={() => drillToMerchant(xData.vendor)}
                 onMakeRecurring={() => setRecurring(xData.vendor, true)}
                 vendors={vendors}
-                onChangeVendor={(vendor, rule) =>
+                onChangeVendor={(vendor) =>
                   write(
-                    () => postJson(`/api/transactions/${xData.id}/vendor`, { vendor, rule }),
-                    // A rule moves charges off screen, so it says how many;
-                    // one charge shows its new vendor on the shelf itself.
-                    {
-                      success: rule ? `“${xData.merchant}” charges of ${usd(Math.abs(xData.amount))} now go to ${vendors.find((v) => v.merchant === vendor)?.displayName ?? vendor}` : undefined,
-                      error: "Couldn't change the vendor — please try again",
-                    }
+                    () => postJson(`/api/transactions/${xData.id}/vendor`, { vendor }),
+                    // The charge shows its new vendor on the shelf itself.
+                    { error: "Couldn't change the vendor — please try again" }
                   )
-                }
-                onRemoveVendorRule={(id) =>
-                  write(() => deleteJson(`/api/vendor-rules/${id}`), { success: "Rule removed; its charges are back", error: "Couldn't remove the rule — please try again" })
                 }
                 onOpenCharge={(id) => {
                   setTarget({ kind: "charge", id });

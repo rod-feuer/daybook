@@ -912,7 +912,6 @@ async function similarNames(browser) {
 // Change vendor: a charge the bank filed under the wrong name (one bank name
 // carrying two subscriptions) moves to its vendor from its own shelf. The
 // shelf then reads the new vendor, marked edited, and Reset puts it back.
-// The rule option lists the charges it would move before it does.
 async function changeVendor(browser) {
   await withPage(browser, async (page, errs) => {
     await page.goto(BASE + "/transactions?vendor=Chipotle", { waitUntil: "networkidle2" });
@@ -925,6 +924,10 @@ async function changeVendor(browser) {
     await page.type(`${shelfSel} [data-vendor-panel] input`, "Whole");
     await page.keyboard.press("Enter");
     await page.waitForSelector(`${shelfSel} [data-move-vendor]`);
+    // One way: Move this charge. "This and future charges" was never used
+    // (0 rules on the owner's data) and was cut.
+    const radios = await page.$$eval(`${shelfSel} [data-vendor-panel] input[type=radio]`, (r) => r.length);
+    record("change vendor", "the panel moves this charge, with no 'this and future charges' option", radios === 0, `${radios} options`);
     await page.click(`${shelfSel} [data-move-vendor]`);
     const moved = await page.waitForFunction((sel) => /Whole Foods/.test(document.querySelector(`${sel} [data-vendor-name]`)?.textContent ?? ""), { timeout: 8000 }, shelfSel).then(() => true, () => false);
     const after = await line(shelfSel);
@@ -934,18 +937,6 @@ async function changeVendor(browser) {
     const reset = await line(shelfSel);
     record("change vendor", "Reset files it under its bank name's vendor again, with no tag", back && !reset.edited, JSON.stringify(reset));
 
-    // The rule's preview: Netflix's three charges at its price, listed before anything moves.
-    await page.goto(BASE + "/transactions?vendor=Netflix", { waitUntil: "networkidle2" });
-    await page.waitForSelector("[data-drawer-row]");
-    await page.click("[data-drawer-row]"); await shelfIs(page, true); await shelfSettled(page);
-    await page.click(`${shelfSel} [data-change-vendor]`);
-    await page.type(`${shelfSel} [data-vendor-panel] input`, "Spotify");
-    await page.keyboard.press("Enter");
-    await page.waitForSelector(`${shelfSel} [data-vendor-rule]`);
-    await page.click(`${shelfSel} [data-vendor-rule]`);
-    const preview = await page.$eval(`${shelfSel} [data-vendor-rule-preview]`, (e) => e.textContent.trim()).catch(() => "");
-    record("change vendor", "choosing 'this and future charges' lists the charges it would move, with a count, before it moves any", /^\d+ charges? so far: /.test(preview), preview);
-    await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-vendor-panel] button`)].find((b) => b.textContent.trim() === "Cancel").click(), shelfSel);
     if (errs.length) record("change vendor", "page errors", false, errs[0]);
   });
 }
@@ -2089,7 +2080,8 @@ async function headerNav(browser) {
     }
     record("header nav", "every page's header is the same height", new Set(heights).size === 1, `heights ${heights.join(", ")}px`);
 
-    await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
+    // Categories' ⋯ (New category); Recurrings has none since Re-scan was cut.
+    await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
     await page.click("header button[aria-label='More actions']");
     await page.waitForSelector("[role=menu]");
     const menu = await page.evaluate(() => ({ items: document.querySelectorAll("[role=menu] [role=menuitem]").length, focused: document.activeElement?.getAttribute("role") }));

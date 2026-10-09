@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { getDb } from "../src/lib/db";
 import { detectRecurrings } from "../src/lib/core";
 import { applyRecategorize, distinctVendors, listTransactions, merchantSummary, setTransactionCategory, transactionById } from "../src/lib/queries";
-import { setChargeVendor, createVendorRule, deleteVendorRule, applyVendorRules, ruleMatches } from "../src/lib/vendorMoves";
+import { setChargeVendor } from "../src/lib/vendorMoves";
 
 cleanDbBeforeEach();
 
@@ -97,58 +97,29 @@ test("a moved charge takes its vendor's category, unless the owner set the charg
   void subs;
 });
 
-test("the owner's move beats a rule, a rule beats plan matching, and undoing one falls back a step", () => {
+test("the owner's move beats plan matching, and Reset puts the charge back under its bank name", () => {
   // WHY: the most specific word wins: the owner on this charge, then the
-  // owner's rule for charges like it, then the system's guess.
+  // system's guess.
   const { oct3 } = twoGoogles();
   const held = () => getDb().prepare("SELECT vendor, origin FROM charge_vendors WHERE hash = ?").get(oct3.hash) as { vendor: string; origin: string } | undefined;
   setChargeVendor(oct3.hash, "Google One", "auto");
   assert.deepEqual(held(), { vendor: "Google One", origin: "auto" });
-  createVendorRule("Google", 19.99, "Google One Go G.co Helppay");
-  assert.equal(held()?.origin, "rule", "a rule replaces a guess");
-  assert.equal(setChargeVendor(oct3.hash, "Google One", "auto"), false, "a guess doesn't replace a rule");
   setChargeVendor(oct3.hash, "Workspace", "user");
   assert.deepEqual(held(), { vendor: "Workspace", origin: "user" });
-  applyVendorRules();
-  assert.equal(held()?.origin, "user", "a rule doesn't replace the owner's move");
+  assert.equal(setChargeVendor(oct3.hash, "Google One", "auto"), false, "a guess doesn't replace the owner's move");
   setChargeVendor(oct3.hash, null, "user");
-  assert.equal(held()?.origin, "rule", "Reset falls back to the rule");
+  assert.equal(held(), undefined, "Reset: back under its bank name");
 });
 
-test("a rule moves the bank name's charges at its amount, past and arriving, and removing it puts them back", () => {
-  // WHY: the bank will keep sending Google One as "Google"; one correction
-  // a month is a chore. A rule is the standing answer, and is undoable.
-  const { oct3 } = twoGoogles();
-  assert.deepEqual(ruleMatches("Google", -19.99).map((m) => m.hash), [oct3.hash], "the preview lists the charges it would move");
-  const id = createVendorRule("Google", 19.99, "Google One");
-  tx("Google", { amount: -19.99, date: "2026-11-03", account: "Card" });
-  tx("Google", { amount: -8.4, date: "2026-11-01", account: "Card" });
-  assert.equal(applyVendorRules(), 1, "November's $19.99 moves as it lands; the $8.40 stays");
-  detectRecurrings();
-  assert.equal(view("Google One").count, 6);
-  assert.equal(view("Google").count, 5);
-  deleteVendorRule(id);
-  detectRecurrings();
-  assert.equal(view("Google One").count, 4);
-  assert.equal(view("Google").count, 7);
-  assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM charge_vendors").get() as { n: number }).n, 0);
-});
-
-test("the shelves show the move: the charge says its vendor and whose word it is, the bank name's vendor lists the rule", () => {
+test("the charge's shelf says which vendor it is filed under and whose word that is", () => {
   // WHY: a move the owner can't see can't be undone. The charge's shelf
-  // names the vendor and the rule; the vendor it left lists the rule with
-  // what it moved, where Remove brings them back.
+  // names the vendor and marks the owner's move, where Reset undoes it.
   const { oct3 } = twoGoogles();
   const before = transactionById(oct3.id)!;
   assert.equal(before.vendor, "Google");
   assert.equal(before.moved, null);
-  assert.deepEqual(before.sameAmount.map((c) => c.date), ["2026-10-03"], "the rule's preview: the one $19.99 under Google");
-  const id = createVendorRule("Google", 19.99, "Google One");
+  setChargeVendor(oct3.hash, "Google One", "user");
   detectRecurrings();
   const after = transactionById(oct3.id)!;
-  assert.deepEqual([after.vendor, after.vendorName, after.moved], ["Google One", "Google One", { origin: "rule", ruleId: id }]);
-  assert.deepEqual(
-    (merchantSummary("Google") as { vendorRules: { amount: number; vendorName: string; moved: number }[] }).vendorRules.map((r) => [r.amount, r.vendorName, r.moved]),
-    [[19.99, "Google One", 1]]
-  );
+  assert.deepEqual([after.vendor, after.vendorName, after.moved], ["Google One", "Google One", { origin: "user" }]);
 });

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { getDb } from "../src/lib/db";
 import { detectRecurrings } from "../src/lib/core";
 import { setTransactionRecurringExcluded, transactionById } from "../src/lib/queries";
-import { applyPlanMatches, scorePlanMatches, dismissPlanMatch } from "../src/lib/planMatch";
+import { applyPlanMatches, scorePlanMatches } from "../src/lib/planMatch";
 
 cleanDbBeforeEach();
 const TODAY = "2026-10-05";
@@ -89,7 +89,8 @@ test("amount and day alone are no match: an unrelated name is left alone, and a 
   setTransactionRecurringExcluded(id, true);
   detectRecurrings();
   const hash = (getDb().prepare("SELECT hash FROM transactions WHERE id = ?").get(id) as { hash: string }).hash;
-  dismissPlanMatch(hash);
+  // A dismissal from the review queue (since removed) still holds.
+  getDb().prepare("INSERT INTO plan_match_dismissals (hash) VALUES (?)").run(hash);
   assert.deepEqual(scorePlanMatches(TODAY), [], "dismissed");
 });
 

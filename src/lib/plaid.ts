@@ -1,4 +1,3 @@
-import { applyVendorRules } from "./vendorMoves";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensurePlanCharges, ensureChargeVendors, ensureTxDescriptor } from "./db";
@@ -400,8 +399,6 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   const items = await fetchPlaidTransactions(start, end);
   const result = importPlaidTransactions(items);
   const split = applySplitRules();
-  // New charges a vendor rule moves (vendorMoves.ts), before plans are found.
-  applyVendorRules();
   if (result.inserted > 0 || result.updated > 0) {
     detectRecurrings();
     // New charges a sibling vendor's plan claims by score; rebuild once to join them.

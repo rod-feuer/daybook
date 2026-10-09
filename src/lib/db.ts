@@ -509,63 +509,7 @@ export function renormalizeMerchants(db: Database.Database): number {
   return undo.tx.length;
 }
 
-// Apply ONE proposed name fix (from → to) from the cleanup recommendation queue:
-// rename just the transactions of `from` whose raw descriptor normalizes to `to`,
-// carry its settings/links only if `from` is fully consumed, and record an undo
-// (so the same Undo path reverses exactly this). Mirrors renormalizeMerchants,
-// scoped to a single pair. Returns the number of transactions renamed.
-export function applyNameCleanup(db: Database.Database, from: string, to: string): number {
-  migrateMerchants(db);
-  ensureRecurringSettings(db);
-  ensureMerchantLinks(db);
-  ensureCleanupLog(db);
-
-  const rows = db
-    .prepare("SELECT id, rawMerchant FROM transactions WHERE merchant = ? AND rawMerchant IS NOT NULL")
-    .all(from) as { id: number; rawMerchant: string }[];
-
-  const updTx = db.prepare("UPDATE transactions SET merchant = @to WHERE id = @id");
-  const undo: CleanupUndo = { tx: [], settings: [], linkPrimary: [], linkAlias: [] };
-
-  db.transaction(() => {
-    for (const r of rows) {
-      if (normalizeMerchant(r.rawMerchant) !== to) continue; // only the matching mapping
-      updTx.run({ id: r.id, to });
-      undo.tx.push([r.id, from]);
-    }
-    if (undo.tx.length === 0) return;
-
-    // Carry settings/links onto the new name only when `from` is fully renamed to
-    // `to` (no remaining rows under `from` mapping elsewhere) — same non-clobber
-    // guards as the bulk cleanup.
-    if (from !== to && undo.tx.length === rows.length) {
-      const exists = (sql: string, v: string) => !!db.prepare(sql).get(v);
-      if (!exists("SELECT 1 FROM recurring_settings WHERE merchant = ?", to)) {
-        const res = db
-          .prepare("UPDATE recurring_settings SET merchant = @to WHERE merchant = @from")
-          .run({ from, to });
-        if (res.changes > 0) undo.settings.push([from, to]);
-      }
-      const lp = db
-        .prepare("UPDATE merchant_links SET primaryMerchant = @to WHERE primaryMerchant = @from")
-        .run({ from, to });
-      if (lp.changes > 0) undo.linkPrimary.push([from, to]);
-      if (!exists("SELECT 1 FROM merchant_links WHERE alias = ?", to)) {
-        const la = db
-          .prepare("UPDATE merchant_links SET alias = @to WHERE alias = @from")
-          .run({ from, to });
-        if (la.changes > 0) undo.linkAlias.push([from, to]);
-      }
-    }
-    db.prepare("INSERT OR REPLACE INTO merchant_cleanup_log (id, payload) VALUES (1, ?)").run(
-      JSON.stringify(undo)
-    );
-  })();
-
-  return undo.tx.length;
-}
-
-// True when the last cleanup hasn't been undone yet (drives the Undo affordance).
+// True when the last cleanup hasn't been undone yet.
 export function cleanupUndoAvailable(db: Database.Database): boolean {
   ensureCleanupLog(db);
   return !!db.prepare("SELECT 1 FROM merchant_cleanup_log WHERE id = 1").get();

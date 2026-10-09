@@ -512,51 +512,6 @@ export function CombineControl({
 
 // Auto vs. edited legibility: shows whether a field holds the system's detected
 
-// Rules that move this vendor's charges at one amount to another vendor (the
-// bank sends Google One as "Google"), made by Change vendor on a charge.
-// Removing one puts the charges it moved back here; two steps, like a split.
-export function VendorRules({ rules, onRemove }: { rules: Summary["vendorRules"]; onRemove: (id: number) => void }) {
-  const [armed, setArmed] = useState<number | null>(null);
-  return (
-    <div data-vendor-rules>
-      <div className="mb-2 flex items-center gap-2">
-        <span className="stat-label">Moved to another vendor</span>
-        <InfoHint text="Every charge under this bank name of exactly this amount is filed under the other vendor: its name, category, totals and plans. Removing the rule brings them back here." />
-      </div>
-      <ul className="flex flex-col gap-2">
-        {rules.map((r) => (
-          <li key={r.id} className="flex items-start justify-between gap-3 text-xs">
-            <span className="min-w-0">
-              <span className="font-medium tabular-nums">{usd(r.amount)}</span>
-              <span className="text-[var(--muted)]"> charges go to </span>
-              {r.vendorName}
-              <span className="block text-[11px] text-[var(--muted)]">
-                {r.moved === 0 ? "none moved yet" : `${r.moved} charge${r.moved === 1 ? "" : "s"} moved`}
-              </span>
-            </span>
-            <button
-              type="button"
-              aria-label={`Remove the rule for ${usd(r.amount)} charges`}
-              onClick={() => {
-                if (armed !== r.id) {
-                  setArmed(r.id);
-                  setTimeout(() => setArmed((cur) => (cur === r.id ? null : cur)), 3000);
-                  return;
-                }
-                setArmed(null);
-                onRemove(r.id);
-              }}
-              className={`tap shrink-0 text-xs ${armed === r.id ? "font-semibold text-[var(--bad)]" : "text-[var(--muted)] hover:text-[var(--bad)]"}`}
-            >
-              {armed === r.id ? (r.moved ? `Bring ${r.moved} back?` : "Confirm remove?") : "Remove"}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 // The vendor's split rules. A rule was invisible unless you found a charge it
 // had split; here it can be read and removed. Remove means what "Undo split"
 // means on a charge — the rule and everything it did — so it is a two-step
@@ -681,7 +636,6 @@ export function MerchantBody({
   onCombineMany,
   onCategorizeMany,
   onRemoveSplit,
-  onRemoveVendorRule,
 }: {
   data: Summary;
   cats: Cat[];
@@ -697,7 +651,6 @@ export function MerchantBody({
   onCombineMany: (losers: string[], into?: string) => void; // several similar names into this vendor, or this vendor and the rest into one of them
   onCategorizeMany: (merchants: string[], categoryId: number) => void; // one category for several similar names, kept apart
   onRemoveSplit: (id: number, applied: number) => void;
-  onRemoveVendorRule: (id: number) => void;
   onOpenPlan: (series: string) => void; // one of this vendor's plans, with Back
 }) {
   // "+ New category…" in the Category field: create it here and apply it.
@@ -1059,7 +1012,6 @@ export function MerchantBody({
           </Tooltip>
         )}
         {data.splitRules.length > 0 && <SplitRules rules={data.splitRules} onRemove={onRemoveSplit} />}
-        {data.vendorRules.length > 0 && <VendorRules rules={data.vendorRules} onRemove={onRemoveVendorRule} />}
         {/* A plan the detector found and nobody added doesn't count yet: its
             charges show no ↻, and Add is the one verb that changes that. */}
         {data.recurring && !multi && !data.planConfirmed && (

@@ -17,10 +17,7 @@ import {
   categorySummary,
   getBudgetsFull,
 } from "../src/lib/queries";
-import { applyNameCleanup, undoRenormalizeMerchants } from "../src/lib/db";
-import { nameCleanupSuggestions } from "../src/lib/nameCleanup";
 import { categorizeSuggestions, applyCategorization, dismissCategorize, undismissCategorize } from "../src/lib/categorizeSuggest";
-import { normalizeMerchant } from "../src/lib/merchant";
 
 cleanDbBeforeEach();
 
@@ -187,32 +184,6 @@ test("category suggestions: proposes from the vendor's history, applies (fills +
   assert.equal(undismissCategorize(), 1, "one dismissal lifted");
   assert.ok(categorizeSuggestions().suggestions.find((s) => s.merchant === "Powells Books"), "back in the queue");
   assert.equal(categorizeSuggestions().dismissedCount, 0);
-});
-
-test("name-cleanup: suggests a stale name → its re-normalized form, applies just that pair, and undoes", () => {
-  const db = getDb();
-  const raw = "SQ *BLUE BOTTLE 0042 SAN FRANCISCO CA";
-  const to = normalizeMerchant(raw);
-  const ins = db.prepare(
-    "INSERT INTO transactions (date, merchant, rawMerchant, amount, account, source, hash) VALUES (?,?,?,?,?,?,?)"
-  );
-  ins.run("2026-01-01", "Stale Coffee", raw, -5, "Checking", "test", "nc1");
-  ins.run("2026-02-01", "Stale Coffee", raw, -5, "Checking", "test", "nc2");
-
-  const hit = nameCleanupSuggestions().find((s) => s.from === "Stale Coffee");
-  assert.ok(hit, "the stale name is suggested");
-  assert.equal(hit!.to, to, "proposes the re-normalized form");
-  assert.equal(hit!.count, 2);
-
-  assert.equal(applyNameCleanup(db, "Stale Coffee", to), 2, "renames both rows");
-  assert.equal(
-    nameCleanupSuggestions().find((s) => s.from === "Stale Coffee"),
-    undefined,
-    "suggestion clears once applied"
-  );
-
-  assert.equal(undoRenormalizeMerchants(db), 2, "undo restores both");
-  assert.ok(nameCleanupSuggestions().some((s) => s.from === "Stale Coffee"), "and the suggestion returns");
 });
 
 test("correcting a recurring's cadence re-anchors which months it's due (no second field to fix)", () => {
