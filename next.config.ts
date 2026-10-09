@@ -1,4 +1,5 @@
 import os from "node:os";
+import { execFileSync } from "node:child_process";
 import type { NextConfig } from "next";
 
 // Every name this machine answers to on the local network, read when the dev
@@ -19,8 +20,21 @@ const lanOrigins = [
   // Tailscale address (100.x) is an interface above, once Tailscale is up
   // before the server starts.
   os.hostname().replace(/\.local$/i, "").toLowerCase(),
+  // os.hostname() can be the router's name for us ("Mac.router941498.com"),
+  // and then the bare name was missing: the phone got 403 on every script.
+  // The Mac's own name for itself is its LocalHostName, which Tailscale uses.
+  ...macLocalHostName(),
   "*.ts.net",
 ];
+
+function macLocalHostName(): string[] {
+  if (process.platform !== "darwin") return [];
+  try {
+    return [execFileSync("scutil", ["--get", "LocalHostName"], { encoding: "utf8" }).trim().toLowerCase()].filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 const nextConfig: NextConfig = {
   // better-sqlite3 is a native module; keep it out of the bundler and let
