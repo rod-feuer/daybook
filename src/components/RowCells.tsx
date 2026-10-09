@@ -141,6 +141,7 @@ export function AmountCell({
   excluded = false,
   delta = null,
   note = null,
+  stacked = false,
   unsigned = false,
   sign = true,
   quiet = false,
@@ -152,6 +153,7 @@ export function AmountCell({
   excluded?: boolean; // doesn't count toward totals → an inflow is not green
   delta?: number | null; // paid − expected, when it differs
   note?: string | null; // what the amount is made of ("2 × $369.65"), in the difference's place when there is none
+  stacked?: boolean; // the difference or note sits under the amount at every width, as a second line beside a two-line row
   unsigned?: boolean; // a bill's amount: magnitude only — no sign, and never green
   sign?: boolean;
   quiet?: boolean; // a list where every amount is settled: medium, not semibold
@@ -173,14 +175,17 @@ export function AmountCell({
     // On a phone the difference sits under the amount (the column is 96px
     // there); from sm up, beside it. Stacked, the pair is set tight and gives
     // back its extra height, so a row with a difference is as tall as any other.
-    <span data-amount-state={state} className={`inline-flex flex-col-reverse items-end whitespace-nowrap tabular-nums sm:flex-row sm:items-baseline sm:justify-end ${delta != null || note ? "max-sm:-my-2 max-sm:leading-4" : ""} ${tone} ${className}`}>
+    // A stacked cell (Transactions, whose rows already have a second line)
+    // keeps the phone layout at every width, so a note never spills left into
+    // the category beside it.
+    <span data-amount-state={state} className={`inline-flex flex-col-reverse items-end whitespace-nowrap tabular-nums ${stacked ? "" : "sm:flex-row sm:items-baseline sm:justify-end"} ${delta != null || note ? (stacked ? "-my-2 leading-4" : "max-sm:-my-2 max-sm:leading-4") : ""} ${tone} ${className}`}>
       {delta != null ? (
-        <span className="text-[11px] font-medium text-[var(--muted)] max-sm:leading-3 sm:mr-2">
+        <span className={`text-[11px] font-medium text-[var(--muted)] ${stacked ? "leading-3" : "max-sm:leading-3 sm:mr-2"}`}>
           {delta > 0 ? "+" : "−"}
           {usd(Math.abs(delta), { cents })}
         </span>
       ) : note ? (
-        <span data-amount-note className="text-[11px] font-medium text-[var(--muted)] max-sm:leading-3 sm:mr-2">
+        <span data-amount-note className={`text-[11px] font-medium text-[var(--muted)] ${stacked ? "leading-3" : "max-sm:leading-3 sm:mr-2"}`}>
           {note}
         </span>
       ) : null}

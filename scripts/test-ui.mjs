@@ -2866,6 +2866,17 @@ async function tipLine(browser) {
     await page.waitForSelector("[data-drawer-row]");
     const row = await page.evaluate(() => [...document.querySelectorAll("[data-drawer-row] [data-amount-note]")].map((e) => e.textContent.trim()));
     record("tip line", "the statement row says the tip under a charge that posted higher than it showed pending", row.length === 1 && row[0] === tip, `${row.join(" | ") || "none"} (want "${tip}")`);
+    // Beside the amount, the note spilled left out of the 96px amount column
+    // and ran into the category's dropdown arrow. Under it, it is a second
+    // line like the card name on the left, inside the column, flush right.
+    const geo = await page.evaluate(() => {
+      const note = document.querySelector("[data-drawer-row] [data-amount-note]");
+      if (!note) return null;
+      const cell = note.parentElement, amount = cell.lastElementChild;
+      const [n, a, c] = [note, amount, cell].map((e) => e.getBoundingClientRect());
+      return { below: n.top >= a.bottom - 2, flush: Math.abs(n.right - a.right) <= 1, inside: n.left >= c.left - 0.5, n: [n.left, n.top, n.right].map(Math.round), a: [a.left, a.bottom, a.right].map(Math.round), cellLeft: Math.round(c.left) };
+    });
+    record("tip line", "the tip sits under the amount, flush right, inside the amount column", !!geo && geo.below && geo.flush && geo.inside, JSON.stringify(geo));
     await page.evaluate(() => [...document.querySelectorAll("[data-drawer-row]")].find((r) => r.querySelector("[data-amount-note]"))?.click());
     await shelfIs(page, true); await shelfSettled(page);
     const shelf = await page.evaluate((sel) => document.querySelector(`${sel} [data-amount-note]`)?.textContent.trim() ?? null, shelfSel);

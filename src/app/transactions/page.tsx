@@ -1127,7 +1127,7 @@ const TxRow = memo(function TxRow({
                     weight contrast has no job; medium keeps the name first.
                     A charge that posted for another amount than it showed
                     pending says so under it ("+$2.80 tip"). */}
-                <AmountCell value={t.amount} note={pendingNote(t.amount, t.pendingAmount)} excluded={!!t.excluded || !!t.categoryExcluded} quiet className="w-24 shrink-0" />
+                <AmountCell value={t.amount} note={pendingNote(t.amount, t.pendingAmount)} excluded={!!t.excluded || !!t.categoryExcluded} quiet stacked className="w-24 shrink-0" />
               </li>
   );
 });
