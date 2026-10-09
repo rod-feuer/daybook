@@ -198,8 +198,10 @@ step lighter; tints are the token at 10–25%. Semantic colour is never the
 accent and the accent is never semantic. Category colours are data, not chrome.
 A budget bar is its category's own budget, full width (`BudgetBar`, the same
 on the dashboard and the Categories page): the spend fills in the accent at
-60%, past the budget the overage is `--bad`, and one marker says how far
-through the budget's period we are (pace). A category's colour is on its
+60%, past the budget the overage is `--bad`, and one marker says what you
+would expect to have spent by today (pace): on a monthly budget, the bills due
+so far on their days plus the rest spread evenly over the month (`billsPace`);
+on an annual one, how far through the year we are. A category's colour is on its
 badge, never its bar; the recurring amount is in the row's caption and the
 shelf, not on the bar. Under a bar, what's left is said, in the same words on
 every page ("$416 left", "$1,350 over"): a spent / budget pair makes

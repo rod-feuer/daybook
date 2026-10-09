@@ -42,3 +42,20 @@ export function budgetOutlook(
 type Budgeted = { budget: number | null; budgetPeriod: "monthly" | "annual"; ytdSpent: number; total: number };
 export const budgetSpent = (c: Budgeted) => (c.budgetPeriod === "annual" ? c.ytdSpent : c.total);
 export const isOverBudget = (c: Budgeted) => c.budget != null && budgetSpent(c) > c.budget;
+
+// Where a monthly budget bar's pace line sits, as a share of the budget. Bills
+// land on their days, not evenly: a home whose mortgage charges on the 1st has
+// spent most of its month by the 9th, and an even line through the month
+// called that "ahead" (DESIGN.md §2). So the line is the bills due by today
+// plus the rest of the budget spread evenly over the month. `dayShare` is the
+// share of the month gone (paceOf); null when the month isn't the one being
+// lived, and then there is no line.
+export function billsPace(
+  dayShare: number | null,
+  budget: number,
+  bills: { byToday: number; inMonth: number } | null | undefined
+): number | null {
+  if (dayShare == null || !bills || budget <= 0) return dayShare;
+  const rest = Math.max(budget - bills.inMonth, 0);
+  return Math.min(1, (bills.byToday + rest * dayShare) / budget);
+}

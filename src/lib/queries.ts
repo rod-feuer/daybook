@@ -1775,6 +1775,38 @@ export function upcomingRecurringExpenses(
     .sort((a, b) => a.nextDate.localeCompare(b.nextDate));
 }
 
+// A category's bills in the month being lived (DESIGN.md §2, the budget
+// bar's pace): what its confirmed plans charged so far, plus what they are
+// still due to charge before the month ends. A bill due by today and not yet
+// charged counts as due by today. Empty for any other month: a finished month
+// has no pace. Keyed by categoryId.
+export type CategoryBills = { byToday: number; inMonth: number };
+export function billsByCategory(month: string): Map<number, CategoryBills> {
+  const out = new Map<number, CategoryBills>();
+  const today = localToday();
+  if (month !== today.slice(0, 7)) return out;
+  const add = (id: number | null, amt: number, due: boolean) => {
+    if (id == null) return;
+    const b = out.get(id) ?? { byToday: 0, inMonth: 0 };
+    b.inMonth += amt;
+    if (due) b.byToday += amt;
+    out.set(id, b);
+  };
+  const charged = getDb()
+    .prepare(
+      `SELECT t.categoryId AS id, SUM(-t.amount) AS amt
+       FROM transactions t LEFT JOIN categories c ON t.categoryId = c.id
+       WHERE substr(COALESCE(t.effectiveDate, t.date),1,7) = ? AND t.amount < 0
+         AND ${counted()} AND ${countedPlanId("t")} IS NOT NULL
+       GROUP BY t.categoryId`
+    )
+    .all(month) as { id: number | null; amt: number }[];
+  for (const r of charged) add(r.id, r.amt, true);
+  for (const r of upcomingRecurringExpenses(`${month}-01`, `${month}-31`))
+    add(r.categoryId ?? null, Math.abs(r.avgAmount), r.nextDate <= today);
+  return out;
+}
+
 export type BudgetPeriod = "monthly" | "annual";
 
 // A category's budget as it stands in `month` ('YYYY-MM'): the month's own
@@ -1945,6 +1977,7 @@ export type CategoryWithTotals = Category & {
   recurringBaseline: number;
   suggestedBudget: number;
   suggestedAnnualBudget: number;
+  bills: CategoryBills | null;
 };
 
 // Calendar year-to-date spend per category: the basis an annual budget is
@@ -1998,6 +2031,7 @@ export function categoriesWithTotals(month?: string): CategoryWithTotals[] {
   const baseline = recurringMonthlyByCategory();
 
   const ytdById = ytdSpentByCategory();
+  const billsById = billsByCategory(month ?? localToday().slice(0, 7));
 
   // Suggested budget = the trailing-12-month average monthly spend (total spend
   // over the window ÷ 12, so an annual or sporadic expense smooths into a
@@ -2053,6 +2087,7 @@ export function categoriesWithTotals(month?: string): CategoryWithTotals[] {
       recurringBaseline: Number(baselineAmt.toFixed(2)),
       suggestedBudget,
       suggestedAnnualBudget,
+      bills: billsById.get(c.id) ?? null,
     };
   });
 }

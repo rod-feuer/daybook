@@ -456,7 +456,7 @@ function Group({
 
                 {budgeted && (
                   <div className="mt-2">
-                    <BudgetBar spent={spentNow} budget={budget} pace={paceOf(month, annual ? "annual" : "monthly")} period={annual ? "annual" : "monthly"} />
+                    <BudgetBar spent={spentNow} budget={budget} pace={paceOf(month, annual ? "annual" : "monthly")} period={annual ? "annual" : "monthly"} bills={c.bills} />
                   </div>
                 )}
 

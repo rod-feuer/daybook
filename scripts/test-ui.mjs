@@ -1534,14 +1534,26 @@ async function budgetBars(browser) {
       const spent = cats.filter((c) => c.kind === "expense" && c.budget == null && !c.excludeFromTotals && c.total > 0).sort((a, b) => b.total - a.total);
       if (spent.length < 2) return { error: `need two unbudgeted expense categories with spend this month, have ${spent.length}` };
       const [over, half] = spent;
+      // A category with a bill already due this month: its line sits past
+      // the day's share by what its bills say (billsPace).
+      const billed = cats.find((c) => c.kind === "expense" && c.budget == null && !c.excludeFromTotals && c.bills?.byToday > 0 && c.id !== over.id && c.id !== half.id);
       const patch = (id, budget) => fetch(`/api/categories/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ budget, period: "monthly" }) });
       await patch(over.id, Math.max(1, Math.floor(over.total / 2)));
-      await patch(half.id, Math.round(half.total * 2 * 100) / 100);
-      return { over: over.name, half: half.name, ids: [over.id, half.id], colours: cats.map((c) => c.color) };
+      const halfBudget = Math.round(half.total * 2 * 100) / 100;
+      await patch(half.id, halfBudget);
+      const billedBudget = billed ? Math.round(Math.max(billed.bills.inMonth, billed.total) * 2) : null;
+      if (billed) await patch(billed.id, billedBudget);
+      return {
+        over: over.name, half: half.name, ids: [over.id, half.id, ...(billed ? [billed.id] : [])], colours: cats.map((c) => c.color),
+        halfBudget, halfBills: half.bills, billed: billed && { name: billed.name, budget: billedBudget, bills: billed.bills },
+      };
     }, month);
     if (set.error) { record("budget bars", "fixture", false, set.error); return; }
     const now = new Date();
     const paceToday = now.getDate() / new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    // The line's place by the rule itself: bills due by today, plus the rest
+    // of the budget spread evenly over the month.
+    const lineAt = (budget, bills) => (bills && bills.inMonth > 0 ? Math.min(1, (bills.byToday + Math.max(budget - bills.inMonth, 0) * paceToday) / budget) : paceToday);
     for (const route of ["/categories", "/"]) {
       await page.goto(BASE + route, { waitUntil: "networkidle2" });
       await page.waitForSelector("[data-budget-bar]");
@@ -1567,7 +1579,7 @@ async function budgetBars(browser) {
         });
       }, set.colours);
       const find = (n) => rows.find((r) => r.text.includes(n));
-      const over = find(set.over), half = find(set.half);
+      const over = find(set.over), half = find(set.half), billed = set.billed && find(set.billed.name);
       const where = route === "/" ? "dashboard" : "categories";
       record("budget bars", `${where} · every bar fills in the soft accent, never a category colour`, rows.length >= 2 && rows.every((r) => r.soft && !r.catColour), `${rows.length} bars; off-style: ${rows.filter((r) => !r.soft || r.catColour).map((r) => r.text.split("\n").find((l) => /[A-Za-z]/.test(l))).join(", ") || "none"}`);
       record("budget bars", `${where} · red only for the overage, on the row whose figure is red`, !!over && over.over && rows.every((r) => r.over === r.badFigure), over ? `${set.over}: over=${over.over}` : `${set.over} not shown`);
@@ -1583,9 +1595,14 @@ async function budgetBars(browser) {
         await page.hover("[data-budget-bar] [data-pace] .cursor-help");
         tip = await page.waitForFunction(() => document.querySelector("[role=tooltip]")?.textContent ?? null, { timeout: 3000 }).then((h) => h.jsonValue()).catch(() => null);
       }
-      const says = /^Today: \d+% through the month/;
+      const says = /^(Today: \d+% through the month|Expected by today: \$[\d,]+\. That's \$[\d,]+ in bills due so far)/;
       record("budget bars", `${where} · the pace line says what it is (label, and tooltip on hover)`, !!said && says.test(said) && (!canHover || tip === said), `label "${said}"; ${canHover ? `tooltip "${tip}"` : "no hover in this browser: label only"}`);
-      record("budget bars", `${where} · the pace line is where today is in the month`, !!half && half.pace != null && Math.abs(half.pace - paceToday) <= 0.03, half ? `line at ${half.pace == null ? "none" : (half.pace * 100).toFixed(1) + "%"}, today ${(paceToday * 100).toFixed(1)}%` : "no bar");
+      const halfAt = lineAt(set.halfBudget, set.halfBills);
+      record("budget bars", `${where} · the pace line is where the month's bills and today put it`, !!half && half.pace != null && Math.abs(half.pace - halfAt) <= 0.03, half ? `line at ${half.pace == null ? "none" : (half.pace * 100).toFixed(1) + "%"}, want ${(halfAt * 100).toFixed(1)}%` : "no bar");
+      // An even line called a home whose mortgage charged on the 1st far
+      // ahead on the 9th; a bill paid on its day is on pace.
+      const billedAt = set.billed && lineAt(set.billed.budget, set.billed.bills);
+      record("budget bars", `${where} · a bill already due moves the line past the day's share, by its amount`, !!billed && billed.pace != null && Math.abs(billed.pace - billedAt) <= 0.03 && billedAt - paceToday > 0.05, set.billed ? (billed ? `${set.billed.name}: line at ${billed.pace == null ? "none" : (billed.pace * 100).toFixed(1) + "%"}, want ${(billedAt * 100).toFixed(1)}%, day ${(paceToday * 100).toFixed(1)}%` : `${set.billed.name} not shown`) : "no unbudgeted category with a bill due yet this month in the fixture");
     }
     await page.evaluate(async (ids) => {
       for (const id of ids) await fetch(`/api/categories/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ budget: null }) });

@@ -4,8 +4,11 @@
 // and then the overage, in red. One marker: how far through the budget's
 // period we are (the month, or the year for an annual budget), so a fill
 // short of it is under pace and one past it is ahead. The category's colour
-// is on its icon, never its bar.
+// is on its icon, never its bar. A monthly bar with bills paces them on
+// their due days (billsPace), not evenly through the month.
 import { Tooltip } from "@/components/Tooltip";
+import { billsPace } from "@/lib/budgetOutlook";
+import { usd } from "@/lib/format";
 
 // Share of the period gone by today, for the period being viewed; null when
 // that period is over or not begun (a finished month has no pace to keep).
@@ -25,17 +28,26 @@ export function paceOf(month: string, period: "monthly" | "annual" = "monthly"):
 export function BudgetBar({
   spent,
   budget,
-  pace,
+  pace: dayShare,
   period = "monthly",
+  bills = null,
 }: {
   spent: number;
   budget: number;
   pace: number | null;
   period?: "monthly" | "annual";
+  bills?: { byToday: number; inMonth: number } | null;
 }) {
   const span = period === "annual" ? "year" : "month";
+  const billed = period === "monthly" && bills != null && bills.inMonth > 0;
+  const pace = billed ? billsPace(dayShare, budget, bills) : dayShare;
   // Said on hover, and to a screen reader, which can't see the line.
-  const paceLabel = pace == null ? "" : `Today: ${Math.round(pace * 100)}% through the ${span}. A bar short of this line is under pace.`;
+  const paceLabel =
+    pace == null
+      ? ""
+      : billed
+        ? `Expected by today: ${usd(pace * budget, { cents: false })}. That's ${usd(bills.byToday, { cents: false })} in bills due so far, plus the rest of the budget spread over the month. A bar short of this line is under pace.`
+        : `Today: ${Math.round(pace * 100)}% through the ${span}. A bar short of this line is under pace.`;
   const over = spent > budget;
   const scale = over ? spent : budget;
   const pct = (v: number) => `${Math.max(0, Math.min(100, (v / scale) * 100))}%`;

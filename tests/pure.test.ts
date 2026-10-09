@@ -8,7 +8,7 @@ import { medianGap, monthlyFactor, CADENCE_DAYS, PER_YEAR, CADENCE_LABEL } from 
 import { spendTrend, localToday, pendingNote, isCurrentMonth, combinedLine } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
-import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
+import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget, billsPace } from "../src/lib/budgetOutlook";
 import { buildVerdict, pointAgainstBudget, rangeAgainstBudget } from "../src/lib/verdict";
 import { billStatus, billDelta, BILL_DELTA_MIN } from "../src/lib/bills";
 import { variableStillToCome, purchases, LARGE_CHARGE, projectionBand, projectionRange } from "../src/lib/forecast";
@@ -483,4 +483,23 @@ test("what a sync combined on its own is said in one line", () => {
   assert.equal(combinedLine([]), null);
   assert.equal(combinedLine([{ shownAs: "BP", names: ["Bp Smiths Grove", "Bp Peru", "Bp Getgo", "Bp Rochester"] }]), "Combined 4 names into BP");
   assert.equal(combinedLine([{ shownAs: "BP", names: ["Bp Peru"] }, { shownAs: "Culver's", names: ["Culvers", "Culver's Carmel"] }]), "Combined 3 names into 2 vendors");
+});
+
+test("billsPace: a bill paid on its day is on pace, not ahead", () => {
+  // WHY: the budget bar's line ran evenly through the month, so on the 9th
+  // (29% of October) a home whose $7,000 mortgage charged on the 1st looked
+  // far ahead of a $10,000 budget. Over 12 real months, Carmel Home had spent
+  // 64% of its month by the 9th. The line is the bills due by today plus the
+  // rest of the budget spread evenly: 7,000 + 3,000 × 29% = 7,870.
+  const day = 9 / 31;
+  const pace = billsPace(day, 10_000, { byToday: 7_000, inMonth: 7_000 })!;
+  assert.equal(Math.round(pace * 10_000), 7_871);
+  // A bill still to come this month adds nothing yet, and leaves less to spread.
+  const later = billsPace(day, 10_000, { byToday: 0, inMonth: 7_000 })!;
+  assert.equal(Math.round(later * 10_000), 871);
+  // No bills, or no month being lived: the even line, or none.
+  assert.equal(billsPace(day, 10_000, null), day);
+  assert.equal(billsPace(null, 10_000, { byToday: 7_000, inMonth: 7_000 }), null);
+  // Bills past the budget put the line at its end, never beyond.
+  assert.equal(billsPace(day, 5_000, { byToday: 7_000, inMonth: 7_000 }), 1);
 });
