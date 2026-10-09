@@ -535,8 +535,11 @@ export function TxDrawerProvider({ children }: { children: ReactNode }) {
             data-shelf
             ref={asideRef}
             // Bottom sheet on mobile (slides up, capped height, round top corners);
-            // right-side panel on desktop (sm:+) exactly as before.
-            className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col rounded-t-2xl border-t border-[var(--border)] bg-card shadow-2xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-auto sm:h-full sm:max-h-none sm:w-full sm:max-w-sm sm:rounded-none sm:border-t-0 sm:border-l"
+            // right-side panel on desktop (sm:+) exactly as before. The cap is
+            // in dvh: iPhone Safari's vh is the screen without its address bar,
+            // so with the bar showing, 88vh ran past the top and hid the
+            // sheet's handle, name and close.
+            className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88dvh] flex-col rounded-t-2xl border-t border-[var(--border)] bg-card shadow-2xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-auto sm:h-full sm:max-h-none sm:w-full sm:max-w-sm sm:rounded-none sm:border-t-0 sm:border-l"
           >
             {/* The handle keeps its promise: on a phone the sheet's top (handle
                 and header) drags down with the finger, and letting go far enough
