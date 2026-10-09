@@ -2898,6 +2898,15 @@ async function tipLine(browser) {
     await shelfIs(page, true); await shelfSettled(page);
     const shelf = await page.evaluate((sel) => document.querySelector(`${sel} [data-amount-note]`)?.textContent.trim() ?? null, shelfSel);
     record("tip line", "the charge's shelf says the same under its amount", shelf === tip, `"${shelf}"`);
+    // Stacked in the amount, the tip ran into the card's "AMOUNT" label.
+    const card = await page.evaluate((sel) => {
+      const note = document.querySelector(`${sel} [data-amount-note]`);
+      const label = [...(note?.closest("[data-property-card]")?.querySelectorAll("span") ?? [])].find((e) => e.textContent.trim().toLowerCase() === "amount");
+      if (!note || !label) return null;
+      const n = note.getBoundingClientRect(), l = label.getBoundingClientRect();
+      return { clear: n.top >= l.bottom - 0.5 || n.bottom <= l.top + 0.5, note: [Math.round(n.top), Math.round(n.bottom)], label: [Math.round(l.top), Math.round(l.bottom)] };
+    }, shelfSel);
+    record("tip line", "in the shelf, the tip and the AMOUNT label don't overlap", !!card && card.clear, JSON.stringify(card));
     if (errs.length) record("tip line", "page errors", false, errs[0]);
   });
 }

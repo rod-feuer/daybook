@@ -503,3 +503,14 @@ test("billsPace: a bill paid on its day is on pace, not ahead", () => {
   // Bills past the budget put the line at its end, never beyond.
   assert.equal(billsPace(day, 5_000, { byToday: 7_000, inMonth: 7_000 }), 1);
 });
+
+test("the bottom sheet's height is capped in dvh, so its top stays on an iPhone screen", async () => {
+  // WHY: iPhone Safari sizes vh as if its address bar were hidden. With the
+  // bar showing, the sheet's 88vh cap was taller than the screen, and its
+  // top (the handle, the charge's name and Close) sat above it.
+  const fs = await import("node:fs");
+  const src = fs.readFileSync("src/components/TransactionDrawer.tsx", "utf8");
+  const aside = src.slice(src.indexOf("data-shelf"), src.indexOf("data-sheet-drag"));
+  assert.match(aside, /max-h-\[\d+dvh\]/);
+  assert.doesNotMatch(aside, /max-h-\[\d+vh\]/);
+});

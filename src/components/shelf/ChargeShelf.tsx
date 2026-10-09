@@ -120,6 +120,7 @@ export function ChargeBody({
   const dateEdited = !!data.effectiveDate && data.effectiveDate !== data.date;
   const isParent = data.splitParts > 0;
   const excluded = data.excluded === 1;
+  const tip = pendingNote(data.amount, data.pendingAmount);
   const canSplit = data.amount < 0 && !data.pending && !isParent;
   return (
     <div className="flex flex-col gap-4">
@@ -134,8 +135,11 @@ export function ChargeBody({
             }}
           />
         </PropertyCard>
-        <PropertyCard label="amount">
-          <AmountCell value={data.amount} note={pendingNote(data.amount, data.pendingAmount)} stacked excluded={excluded || !!data.categoryExcluded} className="text-[15px]" />
+        {/* A tip is what the amount is measured against (what it showed
+            pending), so it is the card's detail, under its label: stacked in
+            the amount, it ran into the label. */}
+        <PropertyCard label="amount" detail={tip && <span data-amount-note>{tip}</span>}>
+          <AmountCell value={data.amount} excluded={excluded || !!data.categoryExcluded} className="text-[15px]" />
         </PropertyCard>
       </div>
       <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]">
