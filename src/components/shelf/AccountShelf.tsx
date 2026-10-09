@@ -8,7 +8,7 @@ import { AmountCell } from "@/components/RowCells";
 import { accountKind } from "@/components/accountLabels";
 import { olderThanAYear } from "@/lib/accountKinds";
 import { ROW_FOCUS } from "@/components/rowButton";
-import { usd, shortDate } from "@/lib/format";
+import { usd, shortDate, localToday } from "@/lib/format";
 import type { AccountDetail, OwnerValue, TermField } from "@/lib/accounts";
 
 // The account shelf (layer 1): one account, its value and where it came
@@ -157,7 +157,7 @@ export function ValueForm({
   title?: string;
   ready?: boolean; // the rest of the form around it is filled in (Add account's name)
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const [amount, setAmount] = useState("");
   const [asOf, setAsOf] = useState(today);
   const [estimate, setEstimate] = useState(est);
@@ -319,7 +319,7 @@ function LoanTermsPanel({
 // Back to this one), a rule, and equity: the arithmetic behind the row's figure.
 function EquityLedger({ data, onOpenAccount }: { data: AccountDetail; onOpenAccount: (id: number) => void }) {
   const worth = data.history[0];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const old = worth?.source === "estimate" && olderThanAYear(worth.asOf, today);
   const equity = data.equity ?? worth?.amount ?? 0;
   return (

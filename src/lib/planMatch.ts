@@ -6,6 +6,7 @@ import { merchantKey } from "./merchant";
 import { canonicalMerchant, getMerchantLinks } from "./queries";
 import { setChargeVendor } from "./vendorMoves";
 import { monthDayGap } from "./cadence";
+import { localToday } from "./format";
 
 // Cross-vendor plan matching. A bill's charges can arrive under another of
 // the household's vendors: the bank renamed the descriptor and Plaid cleaned
@@ -87,7 +88,7 @@ function plans(db: Database.Database): Plan[] {
 
 // Score the recent unplanned charges. Each gets its single best plan, if any
 // clears a cut-off; two plans tied at the top is no match, only a suggestion.
-export function scorePlanMatches(today = new Date().toISOString().slice(0, 10)): PlanMatch[] {
+export function scorePlanMatches(today = localToday()): PlanMatch[] {
   const db = getDb();
   ensurePlanMatches(db);
   const since = new Date(Date.parse(today + "T00:00:00Z") - WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);

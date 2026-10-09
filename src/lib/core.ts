@@ -25,6 +25,7 @@ import type { Recurring } from "./types";
 import { migrateCrossVendorPlans } from "./vendorMoves";
 import { CADENCE_DAYS, medianGap, addCadence } from "./cadence";
 import { MIN_ELAPSED_DAYS } from "./budgetOutlook";
+import { localToday } from "./format";
 
 // ---- Dedupe key -----------------------------------------------------------
 // A transaction is uniquely identified by date + merchant + amount + account.
@@ -1268,7 +1269,7 @@ export function dashboard(month?: string): DashboardData {
         .prepare("SELECT substr(COALESCE(effectiveDate,date),1,7) AS m FROM transactions ORDER BY COALESCE(effectiveDate,date) DESC LIMIT 1")
         .get() as { m: string } | undefined
     )?.m ??
-    new Date().toISOString().slice(0, 7);
+    localToday().slice(0, 7);
 
   const rows = db
     .prepare(
@@ -1353,7 +1354,7 @@ export function dashboard(month?: string): DashboardData {
   // prior-month baseline must be bounded to the same day-of-month — otherwise a
   // 9-day partial gets compared against a full 30-day month. Past/complete
   // months compare full-vs-full (compareThroughDay = null).
-  const isCurrentMonth = m === new Date().toISOString().slice(0, 7);
+  const isCurrentMonth = m === localToday().slice(0, 7);
   // Days still to come — only the month we are in has any. Measured from the
   // last transaction alone, a FINISHED month whose last charge fell on the 28th
   // had "3 days remaining", so it was run-rated, projected, and captioned "so
@@ -1597,7 +1598,7 @@ export function dashboard(month?: string): DashboardData {
   // (or future) month would show bills that have nothing to do with what's on
   // screen. Off-month: empty, and the card hides itself.
   const UPCOMING_WINDOW_DAYS = 14;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const toDate = new Date(today + "T00:00:00Z");
   toDate.setUTCDate(toDate.getUTCDate() + UPCOMING_WINDOW_DAYS);
   const due = isCurrentMonth

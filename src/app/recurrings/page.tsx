@@ -23,7 +23,7 @@ import { SummaryCard } from "@/components/SummaryCard";
 import { useMonthBoot } from "@/components/useMonthBoot";
 import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { billStatus, billDelta, chargedOften } from "@/lib/bills";
-import { usd, shortDate, isCurrentMonth as isCurrentMonthOf } from "@/lib/format";
+import { usd, shortDate, isCurrentMonth as isCurrentMonthOf, localToday } from "@/lib/format";
 import type { RecurringSettings, RecurringForMonth, RecurringSuggestion } from "@/lib/queries";
 import type { Category } from "@/lib/types";
 
@@ -213,7 +213,7 @@ export default function RecurringsPage() {
   );
   const totalBills = paidSoFar + leftToPay;
   // The status line under the summary bar: overdue in red when there are any.
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localToday();
   const overdueCount = bills.filter((r) => billStatus(r, todayIso) === "od").length;
   const upcomingCount = bills.filter((r) => billStatus(r, todayIso) === "up").length;
   const paidCount = bills.filter((r) => r.paid).length;
@@ -546,7 +546,7 @@ function BillList({
   // the summary card the counts, so grouping said nothing the row didn't. A
   // "Today" divider splits what has happened from what is ahead; an unpaid
   // bill above it is overdue and wears amber. A past month has no today.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const status = (r: Rec) => billStatus(r, today);
   const dividerAt = dim || pastMonth ? -1 : recs.findIndex((r) => r.dueDate >= today);
   const showDivider = dividerAt > 0; // something behind it and something ahead
