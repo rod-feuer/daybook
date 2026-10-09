@@ -2,6 +2,7 @@ import { detectAndConfirm, confirmAll, cleanDbBeforeEach, addCat, tx, daysAgo, d
 import { test, before } from "node:test";
 import { budgetOutlook } from "../src/lib/budgetOutlook";
 import assert from "node:assert/strict";
+import { localToday } from "../src/lib/format";
 import {
   getDb,
   renormalizeMerchants,
@@ -565,9 +566,11 @@ test("a category's bills this month: what its plans charged, plus what is due, b
   // charge in no plan is everyday spend and spreads evenly instead.
   const month = lastMonthlyDates(1, 1)[0].slice(0, 7);
   for (const d of lastMonthlyDates(4, 1)) tx("Home Loan", { amount: -500, date: d, categoryId: CAT });
-  for (const d of lastMonthlyDates(5, 1).slice(0, 4)) tx("Water Co", { amount: -80, date: d, categoryId: CAT });
+  // Last charged a month and a few days ago, and due today: late, still live.
+  for (const d of [123, 93, 63, 33]) tx("Water Co", { amount: -80, date: daysAgo(d), categoryId: CAT });
   tx("Corner Store", { amount: -45, date: lastMonthlyDates(1, 1)[0], categoryId: CAT });
   detectAndConfirm();
+  setRecurringSetting("Water Co", { nextDate: localToday() });
   const b = billsByCategory(month).get(CAT);
   assert.deepEqual(b && { byToday: Math.round(b.byToday), inMonth: Math.round(b.inMonth) }, { byToday: 580, inMonth: 580 });
   // A month not being lived has no pace, so no bills to pace.
