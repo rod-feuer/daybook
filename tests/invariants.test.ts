@@ -53,6 +53,7 @@ import {
   getRecurringSettings,
   merchantVariants,
   upcomingRecurringExpenses,
+  billsByCategory,
   transactionById,
   setTransactionEffectiveDate,
   categorySummary,
@@ -555,6 +556,22 @@ test("a series that has gone quiet is not an upcoming bill, even with a next-due
   const names = upcomingRecurringExpenses(daysFromNow(1), daysFromNow(30)).map((u) => u.merchant);
   assert.ok(names.includes("Power Co"), "a live series with a due date in the window is upcoming");
   assert.ok(!names.includes("Old Box"), "a quiet series is not, whatever its override says");
+});
+
+test("a category's bills this month: what its plans charged, plus what is due, by today and by month-end", () => {
+  // WHY: the budget bar paces bills on their days (billsPace), so these sums
+  // decide where its line sits. A bill that charged counts by today; one due
+  // and not yet charged (late) counts by today too, since it was expected; a
+  // charge in no plan is everyday spend and spreads evenly instead.
+  const month = lastMonthlyDates(1, 1)[0].slice(0, 7);
+  for (const d of lastMonthlyDates(4, 1)) tx("Home Loan", { amount: -500, date: d, categoryId: CAT });
+  for (const d of lastMonthlyDates(5, 1).slice(0, 4)) tx("Water Co", { amount: -80, date: d, categoryId: CAT });
+  tx("Corner Store", { amount: -45, date: lastMonthlyDates(1, 1)[0], categoryId: CAT });
+  detectAndConfirm();
+  const b = billsByCategory(month).get(CAT);
+  assert.deepEqual(b && { byToday: Math.round(b.byToday), inMonth: Math.round(b.inMonth) }, { byToday: 580, inMonth: 580 });
+  // A month not being lived has no pace, so no bills to pace.
+  assert.equal(billsByCategory(lastMonthlyDates(2, 1)[0].slice(0, 7)).size, 0);
 });
 
 test("a quarterly bill counts one third per month toward the category baseline", () => {

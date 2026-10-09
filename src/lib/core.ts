@@ -6,6 +6,8 @@ import crypto from "node:crypto";
 import { getDb } from "./db";
 import {
   upcomingRecurringExpenses,
+  billsByCategory,
+  type CategoryBills,
   getBudgets,
   recurringMonthlyByCategory,
   getRecurringOverrides,
@@ -1205,6 +1207,8 @@ export type DashboardData = {
     // committed "floor" of the category, marked on its bar so the discretionary
     // headroom (budget − recurring) is visible. 0 when nothing recurs here.
     recurringBaseline: number;
+    // This month's bills, for the budget bar's pace (billsByCategory).
+    bills: CategoryBills | null;
   }[];
   // `projected` is null when it's too early in an in-progress month to run-rate
   // a meaningful forecast (the UI shows a soft message instead of a false figure).
@@ -1439,6 +1443,7 @@ export function dashboard(month?: string): DashboardData {
   // summary card's total stays monthly-equivalent: it is one month's figure.
   const budgetsAsSet = getBudgetsFull(m);
   const ytd = ytdSpentByCategory();
+  const bills = billsByCategory(m);
   const byCategory = [...catMap.entries()]
     .map(([name, v]) => ({
       name,
@@ -1450,6 +1455,7 @@ export function dashboard(month?: string): DashboardData {
       budgetPeriod: (v.id != null ? budgetsAsSet[v.id]?.period : undefined) ?? "monthly",
       ytdSpent: v.id != null ? Number((ytd.get(v.id) ?? 0).toFixed(2)) : 0,
       recurringBaseline: v.id != null ? Number((recurringByCat[v.id] ?? 0).toFixed(2)) : 0,
+      bills: v.id != null ? bills.get(v.id) ?? null : null,
     }))
     .sort((a, b) => b.total - a.total);
 

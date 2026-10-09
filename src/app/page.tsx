@@ -435,7 +435,7 @@ export default function DashboardPage() {
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="flex items-center gap-1 text-[15px] font-semibold">
                   Spending by category
-                  <InfoHint text="Each bar is the category's budget. The line marks how far through the month we are: a bar short of it is under pace, one past it is ahead." />
+                  <InfoHint text="Each bar is the category's budget. The line marks what you would expect to have spent by today: bills on their due dates, and the rest of the budget spread evenly over the month. A bar short of it is under pace; one past it is ahead." />
                 </h3>
                 <SeeAll href="/categories" />
               </div>
@@ -952,6 +952,7 @@ function CategoryBars({
     budgetPeriod: "monthly" | "annual";
     ytdSpent: number;
     recurringBaseline: number;
+    bills: { byToday: number; inMonth: number } | null;
   }[];
   month: string;
 }) {
@@ -995,7 +996,7 @@ function CategoryBars({
               </span>
             </div>
             {/* Its own budget is the bar; a category without one has none. */}
-            {r.budget != null && <BudgetBar spent={spentNow} budget={r.budget} pace={paceOf(month, r.budgetPeriod)} period={r.budgetPeriod} />}
+            {r.budget != null && <BudgetBar spent={spentNow} budget={r.budget} pace={paceOf(month, r.budgetPeriod)} period={r.budgetPeriod} bills={r.bills} />}
             {/* What's left, said: the pair above made you subtract. The
                 Categories row's words, so the two pages agree. */}
             {r.budget != null && (
