@@ -5,7 +5,6 @@ import Shell, { Toolbar } from "@/components/Shell";
 import { useNewCategory } from "@/components/NewCategoryOption";
 import { AmountCell, CategoryProperty } from "@/components/RowCells";
 import { withoutAmountQualifier, isSeriesKey, seriesVendor } from "@/lib/series";
-import { InlineEdit } from "@/components/InlineEdit";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { rowButtonProps, ROW_FOCUS } from "@/components/rowButton";
 import { MonthPicker } from "@/components/Actions";
@@ -23,13 +22,11 @@ import { useMonthBoot } from "@/components/useMonthBoot";
 import { usePeriodLabel } from "@/components/usePeriodLabel";
 import { billStatus, billDelta, chargedOften } from "@/lib/bills";
 import { usd, shortDate, isCurrentMonth as isCurrentMonthOf, localToday } from "@/lib/format";
-import type { RecurringSettings, RecurringForMonth, RecurringSuggestion } from "@/lib/queries";
+import type { RecurringForMonth, RecurringSuggestion } from "@/lib/queries";
 import type { Category } from "@/lib/types";
 
 // Shapes come from the library that produces them; the aliases keep the file's
-// existing names. `Settings` used to omit endedDate — the page wrote it anyway.
-type Settings = RecurringSettings;
-type SettingsPatch = Partial<Settings>;
+// existing names.
 type Rec = RecurringForMonth;
 type Cat = Category;
 type Suggestion = RecurringSuggestion;
@@ -148,22 +145,6 @@ export default function RecurringsPage() {
     await mutate(
       () => postJson("/api/recurrings/recategorize", { merchant, categoryId, recurringId }),
       { error: "Couldn't recategorize — please try again" }
-    );
-  }
-
-  async function saveSettings(merchant: string, patch: SettingsPatch | "clear") {
-    await mutate(
-      () =>
-        postJson(
-          "/api/recurrings/settings",
-          patch === "clear" ? { merchant, clear: true } : { merchant, ...patch }
-        ),
-      {
-        // A field you edited shows its new value; only a reset of every
-        // override, whose effect spans fields, gets a line.
-        success: patch === "clear" ? "Settings reset" : undefined,
-        error: "Couldn't save — please try again",
-      }
     );
   }
 
@@ -328,7 +309,6 @@ export default function RecurringsPage() {
             cats={cats}
             onRecategorize={recategorize}
             onNewCategory={addCategoryFromRow}
-            onSaveSettings={saveSettings}
             onOpen={(m, series) => openTx(m, { onChange: () => load(month), series })}
             pastMonth={!isCurrentMonth}
           />
@@ -338,7 +318,6 @@ export default function RecurringsPage() {
             cats={cats}
             onRecategorize={recategorize}
             onNewCategory={addCategoryFromRow}
-            onSaveSettings={saveSettings}
             onOpen={(m, series) => openTx(m, { onChange: () => load(month), series })}
           />
 
@@ -499,7 +478,6 @@ function BillList({
   cats,
   onRecategorize,
   onNewCategory,
-  onSaveSettings,
   onOpen,
   pastMonth = false,
 }: {
@@ -509,7 +487,6 @@ function BillList({
   cats?: Cat[];
   onRecategorize?: (r: Rec, categoryId: number | null) => void;
   onNewCategory?: (cat: Cat, r: Rec) => void; // created from the row's dropdown → apply to the row
-  onSaveSettings?: (merchant: string, patch: SettingsPatch | "clear") => void;
   onOpen?: (merchant: string, series?: string) => void; // series: the plan's key when the vendor carries several
   pastMonth?: boolean; // a closed month: unmatched bills are "Unpaid", not "Overdue"
 }) {
@@ -585,16 +562,8 @@ function BillList({
                   gives the name ~130px; "Chase Mortgage (L…" told you less
                   than "Quarterly" did). */}
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2">
-                {onSaveSettings ? (
-                  <InlineEdit
-                    value={rowName}
-                    textClassName="text-[13px] font-medium"
-                    cueOnHover
-                    onCommit={(raw) => onSaveSettings(r.merchant, { alias: raw.trim() || null })}
-                  />
-                ) : (
-                  <span className="truncate font-medium">{rowName}</span>
-                )}
+                {/* Renamed on the shelf the row opens: one place to name a vendor. */}
+                <span className="truncate font-medium">{rowName}</span>
                 {/* Cadence only when it isn't monthly, as a quiet tag after the
                     name: the exception is the information, and a column for it
                     sat empty on nearly every row. The shelf states it in full. */}

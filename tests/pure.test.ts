@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { normalizeMerchant, merchantKey } from "../src/lib/merchant";
 import { classifyCadence, addCadence, txHash } from "../src/lib/core";
 import { medianGap, monthlyFactor, CADENCE_DAYS, PER_YEAR, CADENCE_LABEL } from "../src/lib/cadence";
-import { spendTrend, localToday, pendingNote, isCurrentMonth } from "../src/lib/format";
+import { spendTrend, localToday, pendingNote, isCurrentMonth, combinedLine } from "../src/lib/format";
 import { seriesKey, seriesVendor, isSeriesKey } from "../src/lib/series";
 import { parseCsv } from "../src/lib/import";
 import { budgetOutlook, BUDGET_TOLERANCE, budgetSpent, isOverBudget } from "../src/lib/budgetOutlook";
@@ -475,4 +475,12 @@ test("no code takes today's date from the UTC clock", () => {
   };
   walk("src");
   assert.deepEqual(hits, []);
+});
+
+test("what a sync combined on its own is said in one line", () => {
+  // WHY: a combine the owner didn't press happens off-screen, so the toast
+  // says it, short enough to read in passing (Separate undoes it).
+  assert.equal(combinedLine([]), null);
+  assert.equal(combinedLine([{ shownAs: "BP", names: ["Bp Smiths Grove", "Bp Peru", "Bp Getgo", "Bp Rochester"] }]), "Combined 4 names into BP");
+  assert.equal(combinedLine([{ shownAs: "BP", names: ["Bp Peru"] }, { shownAs: "Culver's", names: ["Culvers", "Culver's Carmel"] }]), "Combined 3 names into 2 vendors");
 });

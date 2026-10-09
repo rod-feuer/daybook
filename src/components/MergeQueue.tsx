@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation } from "@/components/useMutation";
 import { useSyncedRefresh } from "@/components/SyncOnLaunch";
 import { getJson, postJson } from "@/lib/http";
@@ -63,19 +63,8 @@ export function MergeQueue({ onChange, version = 0 }: { onChange?: () => void; v
     load();
   }, [load, version]); // `version`: re-read when the page behind this queue changes
   useSyncedRefresh(load);
-  // The model is asked without a press, once per visit, about the close-named
-  // vendors nobody has asked about; what it is sure of joins the queue. A
-  // failure is quiet: the rules' cards stand, and the next visit asks again.
-  const judged = useRef(false);
-  useEffect(() => {
-    if (judged.current) return;
-    judged.current = true;
-    postJson("/api/merges", { action: "judge" })
-      .then((r) => {
-        if ((r as { answered?: number }).answered) load();
-      })
-      .catch(() => {});
-  }, [load]);
+  // The model is asked during the bank sync (plaid.ts), so the queue opens
+  // already answered; what it is surest of is combined there.
 
   async function resolve(g: MergeSuggestion, action: "approve" | "dismiss") {
     setBusy(g.key);

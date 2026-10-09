@@ -105,3 +105,13 @@ export function pendingNote(amount: number, pendingAmount: number | null | undef
     return `+${usd(rise)} tip`;
   return `was ${usd(Math.abs(pendingAmount))} pending`;
 }
+
+// What a sync combined on its own, in one line: "Combined 4 names into BP",
+// or across vendors "Combined 7 names into 3 vendors". Separate on the
+// vendor's shelf undoes it.
+export function combinedLine(combined: { shownAs: string; names: string[] }[] | undefined): string | null {
+  if (!combined?.length) return null;
+  const n = combined.reduce((a, c) => a + c.names.length, 0);
+  const names = `${n} name${n === 1 ? "" : "s"}`;
+  return combined.length === 1 ? `Combined ${names} into ${combined[0].shownAs}` : `Combined ${names} into ${combined.length} vendors`;
+}

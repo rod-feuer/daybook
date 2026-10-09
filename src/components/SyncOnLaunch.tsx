@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useToast } from "@/components/Toast";
+import { combinedLine } from "@/lib/format";
 
 // Fire a background Plaid sync when the app launches — at most once per window so
 // reloads and new tabs don't spam it (client navigations don't remount the
@@ -42,9 +43,12 @@ export function SyncOnLaunch() {
         const data = await res.json();
         const changed = (data.inserted ?? 0) + (data.updated ?? 0);
         if (changed > 0) toast(`Synced ${data.inserted} new · ${data.updated} updated`, "success");
+        // Combined on its own: off-screen, so it is said (Separate undoes it).
+        const combined = combinedLine(data.combined);
+        if (combined) toast(combined, "success");
         // New balances alone are new data too: on a day without new charges,
         // Accounts kept showing yesterday's balances until a reload.
-        if (changed > 0 || (data.balances ?? 0) > 0) window.dispatchEvent(new Event("copilot:synced"));
+        if (changed > 0 || combined || (data.balances ?? 0) > 0) window.dispatchEvent(new Event("copilot:synced"));
       } catch {
         // network or other — silent on launch
       }

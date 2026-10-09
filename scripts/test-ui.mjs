@@ -989,13 +989,14 @@ async function modelSuggestionTiers(browser) {
   });
 }
 
-// The merge queue asks the model about close-named vendors on its own, and a
-// match it is sure of arrives as a card marked AI with the model's reason, so
-// the owner can tell it from a rule's card and weigh it. Asked once per visit.
-// Every request is answered here; no model is called.
+// The model is asked during the bank sync, not when the page opens: the
+// queue opens already answered, and a match it is sure of (short of
+// combining on its own) is a card marked AI with the model's reason, so the
+// owner can tell it from a rule's card and weigh it. Every request is
+// answered here; no model is called.
 async function modelMergeCard(browser) {
   await withPage(browser, async (page) => {
-    const state = { mode: "waiting", asks: 0 };
+    const state = { mode: "answered", asks: 0 };
     const card = { canonical: "The Roku Channel", key: "ai:Roku|The Roku Channel", dismissKeys: ["ai:Roku|The Roku Channel"], variants: [{ merchant: "Roku", count: 1 }, { merchant: "The Roku Channel", count: 5 }], total: 6, note: "Same subscription after a price rise", source: "model" };
     await page.setRequestInterception(true);
     page.on("request", (req) => {
@@ -1007,9 +1008,9 @@ async function modelMergeCard(browser) {
     await page.goto(BASE + "/transactions", { waitUntil: "networkidle2" });
     const shown = await page.waitForSelector("[data-merge-source='model']", { timeout: 8000 }).then(() => true).catch(() => false);
     const r = shown ? await page.$eval("[data-merge-source='model']", (tag) => { const li = tag.closest("li"); const into = li.querySelector("[data-merge-into]"); return { tag: tag.textContent.trim(), text: li.textContent.replace(/\s+/g, " "), into: into ? into.value : null }; }) : null;
-    record("model merge card", "the queue asks the model with no press, and its match arrives marked AI with its reason", shown && state.asks === 1 && r.tag === "AI" && r.text.includes("Same subscription after a price rise") && /Combine Roku \(1\) into/.test(r.text) && r.into === "The Roku Channel", r ? `${r.tag} · into ${r.into} · ${r.text.slice(0, 100)}` : `asks=${state.asks}, no card`);
+    record("model merge card", "a card the model already answered arrives marked AI with its reason", shown && r.tag === "AI" && r.text.includes("Same subscription after a price rise") && /Combine Roku \(1\) into/.test(r.text) && r.into === "The Roku Channel", r ? `${r.tag} · into ${r.into} · ${r.text.slice(0, 100)}` : `asks=${state.asks}, no card`);
     await sleep(600);
-    record("model merge card", "having asked, it does not ask again on that visit", state.asks === 1, `asks=${state.asks}`);
+    record("model merge card", "opening the page asks the model nothing (the sync does)", state.asks === 0, `asks=${state.asks}`);
   });
 }
 
@@ -2233,10 +2234,10 @@ async function inlineEdit(browser) {
     record("inline edit", "categories · Escape reverts a rename", t.includes("Dining Out") && !t.includes("Garbage"));
     await page.goto(BASE + "/recurrings", { waitUntil: "networkidle2" });
     await page.waitForSelector("[data-drawer-row]");
-    const rec = await clickName(page);
-    await typeIntoFocused(page, "Netflix HD"); await page.keyboard.press("Enter");
-    await page.waitForFunction(() => document.body.innerText.includes("Netflix HD"), { timeout: 8000 });
-    record("inline edit", "recurrings · Enter commits a rename", true, `${rec} → Netflix HD`);
+    // One place to name a vendor: the row has no rename of its own; its
+    // shelf's header does it.
+    const rowRename = await page.evaluate(() => [...document.querySelectorAll("[data-drawer-row] button")].some((b) => b.querySelector("span.truncate")));
+    record("inline edit", "recurrings · the row has no rename of its own (the shelf names the vendor)", !rowRename);
     // The shelf closes on a mousedown outside it, which unmounts the name input
     // before its blur lands. The edit must still be saved (flush on unmount),
     // or a rename typed in the shelf is silently lost.
@@ -2383,6 +2384,9 @@ async function recurringsRow(browser) {
     {
       const canHover = await page.evaluate(() => matchMedia("(hover: hover)").matches);
       if (canHover) {
+        // Categories' rows: Recurrings' rows no longer rename (the shelf does).
+        await page.goto(BASE + "/categories", { waitUntil: "networkidle2" });
+        await page.waitForSelector("[data-drawer-row] button[aria-label^='Rename']");
         const nameText = await page.$("[data-drawer-row] button[aria-label^='Rename'] > span:first-child");
         await nameText.hover(); await new Promise((r) => setTimeout(r, 200));
         const cue = await page.$("[data-drawer-row] button[aria-label^='Rename'] > span:last-child");

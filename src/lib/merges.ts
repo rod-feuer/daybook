@@ -535,7 +535,7 @@ export function nameMess(name: string, others: string[]): number {
 // each. The vendor the owner named or set up stays canonical (its settings
 // are kept under its name), else the cleanest name (nameMess), else the one
 // with the most charges. Dismiss keys = each pair's "ai:<a>|<b>" (sorted).
-export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
+export function modelMergeSuggestions(exclude: Set<string>, min?: number): MergeSuggestion[] {
   const db = getDb();
   const dismissed = dismissedKeys(db);
   const links = getMerchantLinks();
@@ -564,7 +564,7 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
     return n;
   };
   const pairs: { a: string; b: string; why: string; key: string }[] = [];
-  for (const { a, b, why, pair } of sureJudgments()) {
+  for (const { a, b, why, pair } of sureJudgments(min)) {
     const key = `ai:${pair}`;
     if (dismissed.has(key) || ruledOut(a, b) || exclude.has(a) || exclude.has(b)) continue;
     // Both still vendors, and neither one the owner made (an answer kept from
@@ -615,7 +615,9 @@ export function modelMergeSuggestions(exclude: Set<string>): MergeSuggestion[] {
 // then punctuation/spacing twins, then location-suffix groups, then the
 // model's matches (asked separately: judgeVendorPairs). A merchant
 // surfaced by an earlier detector is not double-suggested by a later one.
-export function allMergeSuggestions(): MergeSuggestion[] {
+// The names a rule's card asks about, and those cards: the model's cards
+// leave these names to them.
+function ruleMergeSuggestions(): { cards: MergeSuggestion[]; covered: Set<string> } {
   const loc = mergeSuggestions();
   const covered = new Set(loc.flatMap((g) => g.variants.map((v) => v.merchant)));
   const rec = recurringMatchSuggestions(covered);
@@ -624,10 +626,37 @@ export function allMergeSuggestions(): MergeSuggestion[] {
   for (const g of handoff) for (const v of g.variants) covered.add(v.merchant);
   const eq = nameEqualityMergeSuggestions(covered);
   for (const g of eq) for (const v of g.variants) covered.add(v.merchant);
+  return { cards: [...rec, ...handoff, ...eq, ...loc], covered };
+}
+
+export function allMergeSuggestions(): MergeSuggestion[] {
+  const { cards, covered } = ruleMergeSuggestions();
   // The model's last: a rule's match, where there is one, says why in its terms.
-  const all = [...rec, ...handoff, ...eq, ...loc, ...modelMergeSuggestions(covered)];
+  const all = [...cards, ...modelMergeSuggestions(covered)];
   // Confident suggestions keep their natural order; borderline ones sink to the end.
   return [...all.filter((s) => !s.lowConfidence), ...all.filter((s) => s.lowConfidence)];
+}
+
+// The model's surest answers act on their own. Of the pairs it judged one
+// vendor at 0.9 or higher, the owner combined 104 of 110 by hand (Oct 9,
+// 2026); below that, 105 of 180. So a sure pair is combined at sync and
+// said in one line, and Separate on the vendor's shelf undoes it; the rest
+// stay cards. Never a name a rule's card asks about, nor a pair the owner
+// left out or dismissed (modelMergeSuggestions already skips those).
+export const AUTO_COMBINE = 0.9;
+export type Combined = { into: string; shownAs: string; names: string[] };
+export function sureCombines(): Combined[] {
+  const { covered } = ruleMergeSuggestions();
+  return modelMergeSuggestions(covered, AUTO_COMBINE).map((g) => ({
+    into: g.canonical,
+    shownAs: g.shownAs ?? g.canonical,
+    names: g.variants.map((v) => v.merchant).filter((m) => m !== g.canonical),
+  }));
+}
+export function autoCombineSure(): Combined[] {
+  const plan = sureCombines();
+  for (const c of plan) approveMerge(c.into, [c.into, ...c.names]);
+  return plan;
 }
 
 // Approve: fold every variant into the canonical name; for a recurring-match,

@@ -4,6 +4,8 @@ import { getDb, ensureRecurringTxExclusions, ensureRecurringTxInclusions, ensure
 import { categorizeByRules, categorizeByHistory, detectRecurrings } from "./core";
 import { applySplitRules } from "./splits";
 import { applyPlanMatches } from "./planMatch";
+import { autoCombineSure, type Combined } from "./merges";
+import { judgeVendorPairs } from "./vendorJudge";
 import { recordBalances, recordBankTerms, projectAllLoanPayments, type BankTerms } from "./accounts";
 import { normalizeMerchant } from "./merchant";
 import { localToday } from "./format";
@@ -388,7 +390,7 @@ export function importPlaidTransactions(items: PlaidItem[]): {
 // A whole sync, callable from anywhere (the route, the digest job): pull from
 // the bank since the last imported day, import, apply the split rules, and
 // rebuild the plans when anything changed.
-export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; balances: number; terms: number | null; total: number }> {
+export async function syncFromBank(): Promise<{ inserted: number; updated: number; reconciled: number; relinked: number; aliased: number; split: number; balances: number; terms: number | null; total: number; combined: Combined[] }> {
   // The local day: the balances below are dated by it.
   const end = localToday();
   // Start after existing history so Plaid doesn't duplicate the back-import.
@@ -404,6 +406,13 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
     // New charges a sibling vendor's plan claims by score; rebuild once to join them.
     if (applyPlanMatches() > 0) detectRecurrings();
   }
+  // The model's sure answers act here, not when a page opens: it judges the
+  // pairs nobody has asked about (nothing without an API key, and a failure
+  // just asks again next sync), and the ones it is surest of are combined
+  // (merges.ts, AUTO_COMBINE). The rest wait as cards.
+  await judgeVendorPairs().catch(() => null);
+  const combined = autoCombineSure();
+  if (combined.length) detectRecurrings();
   // The same pull carries each account's balance: one a day, dated by the sync.
   const balances = recordBalances(items, end);
   // Payments just imported lower the loans kept by hand.
@@ -418,5 +427,5 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   }
 
   const total = items.reduce((a, i) => a + i.transactions.length, 0);
-  return { ...result, split, balances, terms, total };
+  return { ...result, split, balances, terms, total, combined };
 }
