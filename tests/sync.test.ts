@@ -1,4 +1,4 @@
-import { cleanDbBeforeEach, daysAgo } from "./helpers";
+import { cleanDbBeforeEach, daysAgo, addCat } from "./helpers";
 import { setBankPayload } from "./fakePlaid";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -73,4 +73,36 @@ test("a pending charge still finds its posted twin after the posted one is moved
   setBankPayload(both);
   await syncFromBank();
   assert.equal(count(), 1, "the moved posted charge is still the pending one's twin");
+});
+
+// WHY: the category queue asked the model when Transactions or the Dashboard
+// opened, so a new vendor's guess arrived seconds later, under "Asking the
+// model about 1 vendor…". The sync asks instead, so the guess is waiting when
+// a page opens, and a vendor already asked is not asked again.
+test("syncFromBank asks the category model about a new vendor once, and keeps its guess for the queue", async () => {
+  addCat("Coffee");
+  addCat("Groceries");
+  const saved = { fetch: globalThis.fetch, ts: process.env.TYPESAFE_API_KEY, an: process.env.ANTHROPIC_API_KEY };
+  process.env.TYPESAFE_API_KEY = "ts-test-key";
+  delete process.env.ANTHROPIC_API_KEY;
+  const asked: string[] = [];
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    if (!body.questions?.category) return new Response("{}", { status: 500 }); // the vendor-name judge: no answer
+    asked.push(body.state.merchant);
+    return new Response(JSON.stringify({ answers: { category: { choice: "Coffee", confidence: 0.9, probabilities: { Coffee: 0.9 } } } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    setBankPayload([{ id: "bb-1", date: daysAgo(2), name: "Blue Bottle Coffee", amount: 6.5 }]);
+    await syncFromBank();
+    const answer = getDb().prepare("SELECT c.name FROM category_model_answers a JOIN categories c ON c.id = a.categoryId WHERE a.merchant = 'Blue Bottle Coffee'").get() as { name: string } | undefined;
+    assert.equal(answer?.name, "Coffee", "the sync asked, and the guess is kept for the queue");
+    await syncFromBank();
+    assert.deepEqual(asked, ["Blue Bottle Coffee"], "a second sync doesn't ask again");
+    assert.equal((getDb().prepare("SELECT categoryId FROM transactions WHERE merchant = 'Blue Bottle Coffee'").get() as { categoryId: number | null }).categoryId, null, "a guess, not a category: the owner accepts it");
+  } finally {
+    globalThis.fetch = saved.fetch;
+    if (saved.ts === undefined) delete process.env.TYPESAFE_API_KEY; else process.env.TYPESAFE_API_KEY = saved.ts;
+    if (saved.an === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = saved.an;
+  }
 });
