@@ -6,6 +6,7 @@ import { applySplitRules } from "./splits";
 import { applyPlanMatches } from "./planMatch";
 import { autoCombineSure, type Combined } from "./merges";
 import { judgeVendorPairs } from "./vendorJudge";
+import { categorizeSuggestionsAI } from "./categorizeSuggest";
 import { recordBalances, recordBankTerms, projectAllLoanPayments, type BankTerms } from "./accounts";
 import { normalizeMerchant } from "./merchant";
 import { localToday } from "./format";
@@ -413,6 +414,13 @@ export async function syncFromBank(): Promise<{ inserted: number; updated: numbe
   await judgeVendorPairs().catch(() => null);
   const combined = autoCombineSure();
   if (combined.length) detectRecurrings();
+  // Then the category model, about the new vendors no rule or history files,
+  // so Transactions and the Dashboard open with its guesses already in their
+  // queue instead of "Asking the model…". Guesses only: the owner still
+  // accepts each (it was right on 17 of 32 of theirs). After combining, so a
+  // name that just joined a vendor isn't asked about on its own. Answers are
+  // kept, so each vendor is asked once; a failure asks again next sync.
+  await categorizeSuggestionsAI().catch(() => null);
   // The same pull carries each account's balance: one a day, dated by the sync.
   const balances = recordBalances(items, end);
   // Payments just imported lower the loans kept by hand.
